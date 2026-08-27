@@ -200,7 +200,7 @@ export type QuestionChoiceSlotProps = BaseProps<HTMLLabelElement> & {
 export type QuestionRankOption = {
   /** 1-based position: 1 is the voter's top pick. */
   position: number
-  /** Ready-to-render label for the position ("1st", "2nd", …, localized). */
+  /** Ready-to-render label for the position, localized via `vote.rank_position` (default: "#1", "#2", …). */
   label: string
   /** True when another choice already holds this position. */
   taken: boolean
