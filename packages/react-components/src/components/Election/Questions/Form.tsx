@@ -49,9 +49,19 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
     }
 
     // Build per-question raw selections from the form values.
+    //
+    // NaN entries are dropped rather than forwarded: a ranked question's array is the
+    // voter's ordering padded with '' for the places nobody filled, and `parseInt('')`
+    // is NaN. Validation blocks that submit, but `vote` is also exported on the form
+    // context for callers driving it themselves — and forwarded, NaN reaches
+    // `rankedOrderToScores` as "NaN is not a choice value of this question" instead of
+    // the accurate "every option must be ranked (2 of 3 ranked, missing 1)". Every other
+    // type's entries are choice-value strings, so the filter is a no-op there.
     const selections = election.questions.map((_q, index) => {
       const raw = values[index.toString()]
-      if (Array.isArray(raw)) return raw.map((value) => parseInt(value, 10))
+      if (Array.isArray(raw)) {
+        return raw.map((value) => parseInt(value, 10)).filter((value) => Number.isFinite(value))
+      }
       if (raw === undefined || raw === '') return []
       return [parseInt(raw, 10)]
     })
