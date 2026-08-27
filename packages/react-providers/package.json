@@ -64,7 +64,7 @@
     "@vocdoni/api-client": "workspace:*",
     "@vocdoni/api-types": "workspace:*",
     "@vocdoni/api-voting": "workspace:*",
-    "@vocdoni/proto": "1.15.13",
+    "@vocdoni/proto": "1.15.14",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tsconfig": "workspace:*",

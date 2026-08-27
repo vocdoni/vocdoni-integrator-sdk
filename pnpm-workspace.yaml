@@ -16,4 +16,4 @@ allowBuilds:
   protobufjs: false
 
 minimumReleaseAgeExclude:
-  - '@vocdoni/proto@1.15.13'
+  - '@vocdoni/proto@1.15.14'

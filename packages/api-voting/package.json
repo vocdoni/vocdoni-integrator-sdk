@@ -32,7 +32,7 @@
     "@noble/curves": "^1.4.0",
     "@noble/hashes": "^1.4.0",
     "@vocdoni/api-types": "workspace:*",
-    "@vocdoni/proto": "1.15.13",
+    "@vocdoni/proto": "1.15.14",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
