@@ -6,6 +6,7 @@ import type {
   VotingProcessResultsResponse,
 } from '@vocdoni/api-types'
 import { buildVoteTransaction, EphemeralSigner, MAX_MEMO_BYTES } from '@vocdoni/api-voting'
+import { ProofCA_Type } from '@vocdoni/proto/vochain'
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import {
   createContext,
@@ -329,17 +330,22 @@ export function ElectionProvider({
         // not just the ones this session's vote() produced. Only worth a
         // request once something is actually voted, and a failure here must
         // never invalidate the membership check — swallow it.
+        //
+        // An anonymous census reports no nullifier by design — the CSP blind
+        // signs and never learns the address — so there is nothing to recover
+        // there and vote ids live only for the session that cast them.
         if (!res.questions.some((q) => q.hasVoted)) return
         const info = await client.processes
           .signInfo(election.id, { authToken: session.authToken! })
           .catch(() => null)
         if (cancelled || !info) return
+        const consumed = info.consumed.filter((c) => !!c.nullifier)
         const recovered = byQuestion(
-          info.consumed.map((c) => ({ questionId: c.questionId, voteId: c.nullifier })),
+          consumed.map((c) => ({ questionId: c.questionId, voteId: c.nullifier! })),
         )
         // Ids cast in this session win: they came straight from the relay job.
         setVoteIds((prev) => ({ ...recovered, ...prev }))
-        const first = info.consumed[0]?.nullifier
+        const first = consumed[0]?.nullifier
         if (first) setVoteId((prev) => prev ?? first)
       })
       .catch(() => {
@@ -434,10 +440,26 @@ export function ElectionProvider({
       // Consume every one-shot CSP signature and build every transaction
       // BEFORE relaying anything. A failure in these phases aborts with zero
       // votes on chain.
+      const signers = pending.map(() => new EphemeralSigner())
+      const signatures = await session.signBatch(
+        pending.map(({ question }, k) => ({
+          electionId: question.upstreamId!,
+          address: signers[k].address,
+        })),
+      )
+      // An anonymous census gets a blind CSP signature, which the chain
+      // verifies against the blind-salted census key rather than as a plain
+      // ECDSA signature over the bundle.
+      const proofType = election.census?.anonymous ? ProofCA_Type.ECDSA_BLIND_PIDSALTED : undefined
+
       const signed: Array<{ question: (typeof election.questions)[number]; i: number; txPayload: string }> = []
-      for (const { question, i } of pending) {
-        const signer = new EphemeralSigner()
-        const { signature, weight } = await session.sign(question.upstreamId!, signer.address)
+      pending.forEach(({ question, i }, k) => {
+        const result = signatures[k]
+        if (!result?.signature) {
+          throw new Error(
+            `The CSP did not sign question ${i} ("${question.id}"): ${result?.error ?? result?.code ?? 'no result'}`,
+          )
+        }
         signed.push({
           question,
           i,
@@ -445,15 +467,16 @@ export function ElectionProvider({
             processId: question.upstreamId!,
             choices: encodedBallots[i],
             chainId,
-            signer,
-            cspSignature: signature,
-            cspWeight: weight,
+            signer: signers[k],
+            cspSignature: result.signature,
+            cspWeight: result.weight,
+            proofType,
             encryptionKeys: question.secretUntilTheEnd ? question.encryptionKeys : undefined,
             memo: memos?.[i],
           }),
         })
         setVoteStatus((st) => ({ ...st, [question.id]: 'submitting' }))
-      }
+      })
 
       // One job covers the batch; its per-envelope entries settle one by one
       // while the job is pending — mirror every poll into voteStatus so UIs
@@ -486,7 +509,11 @@ export function ElectionProvider({
         const info = await client.processes
           .signInfo(election.id, { authToken: session.authToken! })
           .catch(() => null)
-        return Object.fromEntries((info?.consumed ?? []).map((c) => [c.questionId, c.nullifier]))
+        // No nullifier for an anonymous census: those votes land without a
+        // recoverable id (see the sign-info read above).
+        return Object.fromEntries(
+          (info?.consumed ?? []).filter((c) => !!c.nullifier).map((c) => [c.questionId, c.nullifier!]),
+        )
       }
 
       // The relay outcome is UNKNOWN (response lost): the backend may have
@@ -731,6 +758,7 @@ export function ElectionProvider({
       resend: session.resend,
       check: session.check,
       sign: session.sign,
+      signBatch: session.signBatch,
       isInCensus,
       voterQuestions,
       hasVoted,
