@@ -196,13 +196,20 @@ Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx bu
 Use `@vocdoni/ballot` to encode ballots before calling `vote()`:
 
 ```tsx
-import { encodeQuestionBallot } from '@vocdoni/ballot'
+import { encodeQuestionSelections } from '@vocdoni/ballot'
 
 const encodedBallots = election.questions.map((q, i) =>
-  encodeQuestionBallot(q, answers[i])
+  encodeQuestionSelections(q, answers[i])
 )
 const nullifier = await vote(encodedBallots)
 ```
+
+`encodeQuestionSelections` — not `encodeQuestionBallot` — is the entry point for a form,
+because a ranked question's collected answer is the voter's *ordering* while the wire
+wants one rank per option (see [voting.md](voting.md)). Passing an ordering to
+`encodeQuestionBallot` produces a perfectly valid ballot that the Borda decode reads
+upside-down, so nothing fails and the loser wins. For every other type the two are
+identical.
 
 `status` is computed by `computeProcessStatus(election.questions)` from `@vocdoni/api-client`:
 - Any question `ONGOING` → `ONGOING`
@@ -325,9 +332,9 @@ drag-and-drop or numbered buttons.
 
 The form value is the voter's **ordering** — a `string[]` of choice values, best
 first, padded with `''` for unfilled places — and `QuestionsFormProvider` transposes
-it into wire ranks on submit (`encodeQuestionSelections`, which owns the
-ortherwise-per-call-site transposition). Submitting is blocked until
-every option is placed (`questionSelectionRange` reports `{min: n, max: n}`): a
+it into wire ranks on submit (`encodeQuestionSelections`, which owns a
+transposition that would otherwise be written out at every call site). Submitting is
+blocked until every option is placed (`questionSelectionRange` reports `{min: n, max: n}`): a
 ranked protocol leaves exactly one rank per option, so a partial ranking repeats a
 value and the chain discards the whole ballot while still counting the envelope.
 

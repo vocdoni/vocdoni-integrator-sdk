@@ -375,9 +375,9 @@ duplicate rank or one above `maxValue`. `validateSelections` gives the same verd
 the wire ranks, so a UI can gate its submit button without discovering the refusal at
 cast time.
 
-Three question-level defects are refused for **every** voter, up front, because no
-individual ballot shows them — and `client.elections.create` refuses them too, which is
-the only moment they can still be fixed:
+Three defects are refused for **every** voter, up front, because no individual ballot
+shows them. The first two belong to the question, and `client.elections.create` refuses
+them too — the only moment they can still be fixed:
 
 - `maxValue: 0` on a ranked question. It means "unbounded" for every other type; here it
   switches the chain to discrete aggregation and every option scores 0 however anyone
