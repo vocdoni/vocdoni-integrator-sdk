@@ -67,11 +67,8 @@ function toMultiLang(value: LocalizedInput | undefined): MultiLangString | undef
  * - **Raw `ballotProtocol`**: rejected when unsatisfiable, matching the backend's
  *   `ValidateBallotProtocol` exactly — unsatisfiability only, never plausibility, so
  *   every shape a voter could actually satisfy stays expressible. The one addition to
- *   that mirror is a question *declared ranked* with `maxValue: 0`
- *   (see {@link unsatisfiableQuestionReason}): the backend has no concept of a ranked
- *   question, and 0 there means "unbounded" for every type but this one, where it
- *   tallies every option to zero. Judged from the same declaration
- *   `encodeQuestionBallot` reads, so creation and the codec cannot disagree. Also rejected when
+ *   that mirror: a question *declared ranked* with `maxValue: 0`, which tallies every
+ *   option to zero (see {@link unsatisfiableQuestionReason}). Also rejected when
  *   it publishes a choice no voter can cast (see {@link uncastableChoicesReason}) —
  *   a narrower failure the backend does not check at all: `VoteTypeFromQuestion`
  *   passes a raw protocol straight through without ever comparing it to the
@@ -81,12 +78,8 @@ function toMultiLang(value: LocalizedInput | undefined): MultiLangString | undef
  */
 function validateQuestionBallotConfig(question: VotingProcessQuestionRequest, index: number): void {
   if (question.ballotProtocol) {
-    // The *question*-level rule, not the protocol-level one: it applies the same
-    // pigeonhole check and additionally reads the declared type, which is the only
-    // way `maxValue: 0` on a ranked question can be caught. The protocol rule waves
-    // that shape through on purpose (0 means "unbounded" for budget/quadratic), so
-    // asking it here would skip the one check that is fatal at the one moment it is
-    // still fixable.
+    // The *question*-level rule: same pigeonhole check, plus the declared-ranked
+    // maxValue: 0 case the protocol-level rule deliberately waves through.
     const unsatisfiable = unsatisfiableQuestionReason({
       ballotProtocol: question.ballotProtocol,
       type: question.type,

@@ -23,9 +23,8 @@ export const QuestionTip = ({ question, index = '0' }: { question?: VotingProces
   const ranked = ballotType === BallotType.Ranked
   const entries = Array.isArray(value) ? value : []
   const text = t(ranked ? 'question_types.ranked_desc' : 'question_types.multichoice_desc', {
-    // Ranked is all-or-nothing, so the tip counts *placed* options rather than picks —
-    // an empty slot in the middle of the slate is the one thing blocking the vote, and
-    // the form value carries '' for it.
+    // Ranked is all-or-nothing: count *placed* options ('' marks an empty slot still
+    // blocking the vote) rather than picks.
     selected: ranked ? entries.filter((entry) => entry !== '' && entry != null).length : entries.length,
     // The pick bound, not ballotProtocol.maxCount — on the dense layout maxCount is the
     // number of choices, and the bound lives in maxTotalCost.

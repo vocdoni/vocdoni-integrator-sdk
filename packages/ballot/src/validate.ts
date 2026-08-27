@@ -61,11 +61,8 @@ export function validateSelections(
       throw new Error(`Question 0: ${collision}`)
     }
   }
-  // Ranked's two question-level defects, in the same order `encodeBallot` refuses them
-  // so the two agree on the verdict *and* on the diagnosis. Both block every voter:
-  // maxValue 0 tallies every option to zero, and duplicated choice values leave every
-  // ballot well-formed while the decoded rows share an id — neither shows on any
-  // individual selection, so the per-selection validator below cannot reach them.
+  // Ranked's question-level defects, refused in the same order as encodeBallot so the
+  // two agree on verdict and diagnosis; neither shows on any individual selection.
   if (ballotType === BallotType.Ranked) {
     const choices = questions[0]?.choices ?? []
     const unrankable = unrankableProtocolReason(choices.length, voteType.maxValue)
@@ -190,22 +187,12 @@ function validateMultiChoice(voteType: VoteType, question: Question, selections:
 
 /**
  * Validate ranked selections: one rank per option, in choice order, all distinct and
- * within `maxValue`.
- *
- * These are **ranks, not choice values** — the selection for a ranked question is the
- * same array that goes on the wire (see `encodeRanked`), so this validates the wire
- * shape directly. A voter-facing ordering is converted first with
- * `rankedOrderToScores`, which does its own checking against the published choices.
- *
- * Every rule here is a way the chain would accept the vote and drop it at tally: a
- * short slate leaves a field unranked, a repeat violates `uniqueValues`, a rank above
- * `maxValue` is out of range. `assertEncodedBallot` catches the last two on the
- * encoded product; this exists so a UI gating its submit button gets the same verdict
- * before the voter presses it.
- *
- * Per-selection only: the two defects that belong to the *question* (`maxValue: 0`,
- * duplicated choice values) are refused by {@link validateSelections} before this
- * runs, where `encodeBallot` refuses them too.
+ * within `maxValue`. These are **ranks, not choice values** — the wire shape itself
+ * (see `encodeRanked`); a voter-facing ordering goes through `rankedOrderToScores`
+ * first. Every rule is a way the chain would accept the vote and silently drop it at
+ * tally, and must agree with the encoder so a UI gating its submit button on this
+ * validator never enables a vote the encoder then refuses. Question-level defects are
+ * refused by {@link validateSelections} before this runs.
  */
 function validateRanked(voteType: VoteType, question: Question, selections: number[]): void {
   if (selections.length !== question.choices.length) {
@@ -219,8 +206,7 @@ function validateRanked(voteType: VoteType, question: Question, selections: numb
     if (!Number.isInteger(rank) || rank < 0) {
       throw new Error(`Question 0: invalid rank ${rank} for ranked ballot; ranks must be non-negative integers`)
     }
-    // maxValue 0 is the budget/quadratic "unbounded" marker module-wide, never a
-    // ceiling of zero — a ranked protocol always carries a real one.
+    // maxValue 0 means "unbounded" module-wide, never a ceiling of zero.
     if (voteType.maxValue > 0 && rank > voteType.maxValue) {
       throw new Error(
         `Question 0: rank ${rank} is above maxValue ${voteType.maxValue}; the chain accepts such a ` +

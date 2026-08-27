@@ -72,37 +72,16 @@ export function unsatisfiableProtocolReason(bp: ProtocolBounds): string | null {
 }
 
 /**
- * Explain why a *ranked* question's protocol can never produce a ranking, or `null`
- * when it is fine.
+ * Explain why a *ranked* question's protocol can never produce a ranking, or `null`.
  *
- * Separate from {@link unsatisfiableProtocolReason} because that function deliberately
- * mirrors the backend's `ValidateBallotProtocol` and must not diverge from it — and
- * because the backend has no concept of a ranked question at all, so there is nothing
- * there to mirror. This is a rule about a label the SDK alone applies.
- *
- * One case, and it is the one the rest of the module reads the opposite way.
- * `maxValue === 0` means "no upper bound" everywhere else (see
- * {@link assertEncodedBallot}'s `maxValue > 0 &&` guard, `decode.ts`,
- * {@link unsatisfiableProtocolReason}'s carve-out) — laxness that fails slow at worst.
- * For ranked it is fatal: on chain `maxValue === 0` switches the scrutinizer to
- * **discrete aggregation**, accumulating `results[field][0] += value * weight` and
- * leaving the row one cell wide (vochain `results/results.go`). The Borda decode is an
- * index-weighted sum over a histogram, so it reads column 0 — weight 0 — and every
- * option scores zero however anyone votes. An all-zero tally is indistinguishable from
- * "nobody voted", which is why this has to be caught before anyone votes rather than
- * diagnosed afterwards.
- *
- * Only reachable by hand: a protocol with `uniqueValues` and `maxValue: 0` over more
- * than one field is rejected at creation by the API, so a question that gets here
- * either dropped `uniqueValues` (and is not a ranking) or was never created through it.
- * Cheap to check, silent and total when it hits.
- *
- * Deliberately NOT checked here: `maxValue < numChoices - 1`, which leaves too few
- * distinct ranks for a full slate. That one already fails loudly per ballot in
- * {@link assertEncodedBallot} (the top rank exceeds the ceiling), so an up-front
- * refusal would only duplicate it.
- *
- * Returns `null` for shapes it cannot judge, like its neighbours here.
+ * Separate from {@link unsatisfiableProtocolReason} because that one mirrors the
+ * backend's `ValidateBallotProtocol` exactly, and the backend has no ranked concept.
+ * The single case is `maxValue === 0`: "unbounded" for every other type, but on chain
+ * it switches the scrutinizer to discrete aggregation (one-cell rows), so the Borda
+ * decode scores every option 0 and the tally is indistinguishable from "nobody
+ * voted" — it must be caught before anyone votes. `maxValue < numChoices - 1` is
+ * deliberately not checked here: it already fails loudly per ballot in
+ * {@link assertEncodedBallot}. Returns `null` for shapes it cannot judge.
  */
 export function unrankableProtocolReason(numChoices: number, maxValue: number): string | null {
   if (!Number.isInteger(numChoices) || numChoices < 2) return null
@@ -195,10 +174,9 @@ export function unsatisfiableQuestionReason(question: {
 }): string | null {
   const bp = question.ballotProtocol
 
-  // Ranked before the general rule: `maxValue: 0` is the one shape
-  // unsatisfiableProtocolReason waves through — correctly, since it means "unbounded"
-  // for every other type — that a ranking can never survive. Only when a protocol was
-  // actually read: public reads may omit it, and absent is not zero.
+  // Ranked first: `maxValue: 0` is the one shape the general rule correctly waves
+  // through that a ranking can never survive. Only with a protocol actually read —
+  // public reads may omit it, and absent is not zero.
   if (bp && declaresRanked(question)) {
     const unrankable = unrankableProtocolReason(question.choices?.length ?? 0, bp.maxValue)
     if (unrankable) return unrankable
@@ -276,12 +254,9 @@ type QuestionLike = {
  * - **approval / dense multichoice / budget / quadratic** — position-addressed. One
  *   field per choice in choice order, so `choice.value` is a display label the wire
  *   never sees and any values at all are fine.
- * - **ranked** — position-addressed too (it shares the pick-slot *protocol* but not
- *   its addressing: its fields are options, not slots, so there are no abstain
- *   sentinels for a value to collide with), with one exception. The values still
- *   label the decoded rows, and a ranking is expressed in them, so two choices
- *   sharing one are unorderable and come back as a single row id — see
- *   {@link duplicateRankedValuesReason}.
+ * - **ranked** — position-addressed too (fields are options, not slots, so no abstain
+ *   sentinels to collide with), but the values still label the decoded rows: two
+ *   choices sharing one are unorderable — see {@link duplicateRankedValuesReason}.
  *
  * Returns `null` rather than a verdict for shapes it cannot judge (no derivable
  * ballot type, no choices, non-integer or negative values), matching
@@ -302,12 +277,9 @@ export function uncastableChoicesReason(question: QuestionLike): string | null {
   // very values (questionProtocolBounds, mirroring VoteTypeFromQuestion), so every
   // value fits by construction and there is nothing to report.
   //
-  // Ranked is the exception, because its defect is not measured against a ceiling at
-  // all: two choices sharing a value are unorderable and decode to one row whatever the
-  // protocol says. `encodeQuestionBallot` refuses such a question with or without a
-  // protocol, so staying silent here would leave `hasUncastableChoices` disagreeing with
-  // the encoder — and callers use it to decide whether the encoder's message is the
-  // voter's to act on (see react-components' QuestionsFormProvider).
+  // Ranked is the exception: its defect (duplicate values) has no ceiling to measure
+  // against, and the encoder refuses it with or without a protocol — silence here
+  // would leave hasUncastableChoices disagreeing with the encoder.
   if (!bp) {
     return ballotType === BallotType.Ranked ? duplicateRankedValuesReason(question.choices) : null
   }
@@ -363,20 +335,11 @@ export function pickSlotCollisionReason(choices: Choice[]): string | null {
 
 /**
  * Explain why a *ranked* question's choice values make its result unreadable, or
- * `null` when every choice carries its own value.
- *
- * The mirror image of {@link pickSlotCollisionReason}, and split out for the same
- * reason: no ballot inspection can reach it. Ranked is position-addressed, so a
- * duplicated `choice.value` never touches the wire — `[2, 1, 0]` is a perfectly
- * well-formed ranking whatever the choices are called — and
- * {@link assertEncodedBallot} has nothing to object to. The damage is on the way back
- * out: `decodeQuestionResults` keys each row by `choice.value`, so two options return
- * under one id, and a consumer looking a row up by choice id finds one title carrying
- * two different scores (React additionally sees duplicate keys). A ranking cannot
- * express a preference between them either, which is why
+ * `null`. Like {@link pickSlotCollisionReason}, no ballot inspection can reach it:
+ * ranked is position-addressed, so a duplicated `choice.value` never touches the
+ * wire — the damage is on decode, where rows are keyed by value and two options come
+ * back under one id. A ranking cannot order them apart either, which is why
  * {@link rankedOrderToScores} refuses the same shape.
- *
- * Returns `null` for shapes it cannot judge, like its neighbours here.
  */
 export function duplicateRankedValuesReason(choices: Choice[]): string | null {
   const values = choices?.map((choice) => choice.value) ?? []

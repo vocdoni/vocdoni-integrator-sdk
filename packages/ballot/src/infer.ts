@@ -37,28 +37,14 @@ const SAAS_TYPE_NAMES: Record<string, BallotType> = {
 }
 
 /**
- * Names this SDK defines itself, recognized in **both** name channels because they
- * belong to neither upstream vocabulary — unlike the two tables above, there is no
- * field whose spelling they are the canonical form of, so no layout is ambiguous
- * between them.
- *
- * `ranked` is the whole table (issue #22). A ranked ballot is the one layout that
- * cannot be reconstructed from `ballotProtocol` at all: it is byte-identical to a
- * pick-slot multichoice whose voters fill every slot, with transposed meanings —
- * ranked reads the field index as the option and its value as the rank, pick-slot
- * reads the field index as a slot and its value as the chosen option. Same matrix,
- * opposite tallies. Shape carries no signal whatsoever here, so a ranked question
- * must *declare* itself or it decodes as a multichoice, which is what the SDK did
- * before this entry existed.
- *
- * ⚠️ In practice the writable channel is `metadata.type.name`. The backend's
- * `VOTING_PROCESS_QUESTION_TYPES` is `['singlechoice', 'multichoice']` and it rejects
- * anything else, so a question cannot be *created* with `type: 'ranked'` — a ranked
- * question is created from a raw `ballotProtocol` plus `metadata: {type: {name:
- * 'ranked'}}`, which the backend stores and echoes back verbatim (the same route
- * commit a5f94b1 established for the legacy `multiple-choice` name). `type` is still
- * resolved against this table so a caller holding its own `kind: 'ranked'` record —
- * as `saas-integrator-demo` does — can pass it straight in without a metadata bag.
+ * Names this SDK defines itself (`ranked`, issue #22), recognized in **both** name
+ * channels since they belong to neither upstream vocabulary. Ranked is reachable only
+ * by name: its protocol is byte-identical to a full-slate pick-slot multichoice with
+ * transposed field/value meanings, so shape carries no signal. The backend rejects
+ * `type: 'ranked'` at creation — a ranked question is created as a raw
+ * `ballotProtocol` plus `metadata: {type: {name: 'ranked'}}`, stored and echoed back
+ * verbatim — but `type` is still resolved here for callers keeping their own record.
+ * See packages/ballot/README.md for the full model.
  */
 const SDK_TYPE_NAMES: Record<string, BallotType> = {
   ranked: BallotType.Ranked,
@@ -81,21 +67,10 @@ export function declaresLegacyPickSlot(question: { metadata?: Record<string, unk
 /**
  * True when a question declares itself `ranked`, in either name channel.
  *
- * Literally {@link inferQuestionBallotType}, minus its throw — so a caller that only
- * wants to know "is this a ranking?" can ask it of a question with neither a protocol
- * nor a type without handling an exception. No shape rule can return
- * {@link BallotType.Ranked} ({@link SDK_TYPE_NAMES}), so delegating adds no shape
- * inference to the answer; what it does add is the guarantee that the two agree,
- * *including in the negative*.
- *
- * That direction is the one worth spelling out. Resolving `type` against
- * {@link SDK_TYPE_NAMES} alone — which this used to do — meant a recognized SaaS name
- * did not shadow a `ranked` name in the metadata bag the way it does over there, so a
- * `{type: 'multichoice', metadata: {type: {name: 'ranked'}}}` question read as
- * multichoice to `inferQuestionBallotType` and as a ranking here. The two answers feed
- * different halves of the same form — the widget comes from one, the selection range
- * and the ordering transposition from the other — so disagreement is a form that
- * cannot be submitted.
+ * Delegates to {@link inferQuestionBallotType} (minus its throw) so the two can never
+ * disagree — including in the negative: a recognized SaaS `type` shadows a `ranked`
+ * metadata name here exactly as it does there. The two answers feed different halves
+ * of the same form, so disagreement is a form that cannot be submitted.
  */
 export function declaresRanked(question: { type?: string; metadata?: Record<string, unknown> }): boolean {
   try {
@@ -149,10 +124,8 @@ function legacyTypeFromMeta(meta: Record<string, unknown> | undefined): BallotTy
  * (`calculateChoiceResults`, `checkVote`) and never on shape.
  *
  * An absent, empty or unrecognized name falls through to the shape rules unchanged, so
- * callers with nothing to declare lose nothing. The converse of that leniency is that
- * {@link BallotType.Ranked} is reachable **only** by name (`ranked`, see
- * {@link SDK_TYPE_NAMES}) — no shape rule below can ever produce it, because no shape
- * distinguishes a ranking from a pick-slot multichoice.
+ * callers with nothing to declare lose nothing. {@link BallotType.Ranked} is reachable
+ * **only** by name — no shape rule below can produce it.
  *
  * Assumptions (shape path only):
  * - Approval/multichoice/budget/quadratic are single-question (questions.length === 1)
@@ -163,9 +136,7 @@ function legacyTypeFromMeta(meta: Record<string, unknown> | undefined): BallotTy
  *   declared `type` and/or the legacy metadata bag (`meta.type.name`)
  * @returns The inferred ballot type
  * @throws When the declared type is `ranked` and the election has more than one
- *   question — the only input this function refuses rather than classifies, because
- *   the two layouts are mutually exclusive and every reading of the pair is silently
- *   wrong. See the guard for the details.
+ *   question — see the guard below.
  */
 export function inferBallotType(
   input: Pick<Election, 'questions' | 'voteType'> & {
@@ -181,14 +152,9 @@ export function inferBallotType(
   const declared =
     (input.type ? (LEGACY_TYPE_NAMES[input.type] ?? SDK_TYPE_NAMES[input.type]) : undefined) ??
     legacyTypeFromMeta(input.meta)
-  // …with one pairing that describes no layout at all. A ranking is one field per
-  // *option* of one question; a multi-question election is one field per *question*
-  // (rule 1 below). Both readings of a multi-question ranked election are silently
-  // wrong — `encodeBallot` puts only questions[0] on the wire, and the ranked decode
-  // branch is position-addressed with no question index, so every question would report
-  // questions[0]'s Borda scores as its own. There is nothing to fall back to either:
-  // reading it as single-choice would encode a ranking array as one pick per question.
-  // Refuse, the way this module refuses every other config whose votes would not count.
+  // A multi-question ranked election describes no layout: a ranking is one field per
+  // *option* of one question, multi-question is one field per *question*, and either
+  // reading tallies garbage silently. Refuse like every other uncountable config.
   if (declared === BallotType.Ranked && questions.length > 1) {
     throw new Error(
       `a ranked election must have exactly one question (got ${questions.length}): a ranking ` +
@@ -250,10 +216,8 @@ export function inferBallotType(
  *    question because in the SaaS model each question *is* its own vochain process, so a
  *    question mapped from a legacy election carries that election's `metadata.type`.
  *
- * Both also consult {@link SDK_TYPE_NAMES}, whose sole entry `ranked` belongs to neither
- * upstream vocabulary and is the ONLY way to reach {@link BallotType.Ranked}: the shape
- * rules below cannot produce it, since a ranked protocol is byte-identical to a pick-slot
- * multichoice.
+ * Both also consult {@link SDK_TYPE_NAMES} (`ranked`) — the only route to
+ * {@link BallotType.Ranked}, since no shape rule can produce it.
  *
  * An unrecognized or empty name (the stored form for raw-`ballotProtocol` questions) falls
  * through to the shape rules.

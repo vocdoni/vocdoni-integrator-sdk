@@ -153,10 +153,9 @@ export type PaginationSummarySlotProps = BaseProps<HTMLParagraphElement> & {
 
 export type ElectionQuestionsSlotProps = BaseProps<HTMLDivElement> & { form?: ReactNode }
 /**
- * How a question asks for its answer. `single` is one-of-N (radios), `multiple` is
- * any-of-N (checkboxes), and `ranked` is an ordering of every option — a different
- * control entirely, rendered through the {@link QuestionRankChoiceSlotProps} slot
- * rather than {@link QuestionChoiceSlotProps}.
+ * How a question asks for its answer: `single` = one-of-N (radios), `multiple` =
+ * any-of-N (checkboxes), `ranked` = an ordering of every option, rendered through
+ * {@link QuestionRankChoiceSlotProps}.
  */
 export type QuestionSelectionMode = 'single' | 'multiple' | 'ranked'
 export type QuestionChoicePresentation = 'basic' | 'extended'
@@ -208,16 +207,10 @@ export type QuestionRankOption = {
 
 /**
  * One option of a **ranked** question: the voter assigns it a position rather than
- * ticking it.
- *
- * A separate slot from {@link QuestionChoiceSlotProps} because the control is not a
- * checkbox or a radio — the answer is an ordering, so each option needs to express
- * *which* place it holds. The default implementation renders a `<select>`; override
- * this slot for drag-and-drop or numbered buttons.
- *
- * The wire orientation (highest rank value = best) is NOT this slot's concern:
- * `position` is 1-based and human, and `@vocdoni/ballot`'s `rankedOrderToScores`
- * converts the resulting ordering into ballot ranks.
+ * ticking it, hence a separate slot from {@link QuestionChoiceSlotProps}. The default
+ * renders a `<select>`; override for drag-and-drop or numbered buttons. `position` is
+ * 1-based and human — the wire orientation (highest = best) is applied later by
+ * `@vocdoni/ballot`'s `rankedOrderToScores`, never by this slot.
  */
 export type QuestionRankChoiceSlotProps = BaseProps<HTMLLabelElement> & {
   choice: Choice

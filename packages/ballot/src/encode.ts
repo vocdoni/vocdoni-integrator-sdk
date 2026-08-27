@@ -28,9 +28,8 @@ import {
  * - approval: dense 0/1 vector over options: choices.map(c => selected.has(c) ? 1 : 0)
  * - multichoice: exactly `maxCount` picked option values, unfilled slots padded with abstain
  *   sentinels (values ≥ choices.length; see encodeMultiChoice)
- * - ranked: per-option rank array in choice order, highest = best — pass-through, but one
- *   rank per option is required; build it with {@link rankedOrderToScores}, or hand the
- *   voter's ordering to {@link encodeQuestionSelections} and let it do both (see encodeRanked)
+ * - ranked: one rank per option in choice order, highest = best — build with
+ *   {@link rankedOrderToScores}, or via {@link encodeQuestionSelections} (see encodeRanked)
  * - budget / quadratic: per-option amount array [a0, a1, …]
  *
  * @param input - Election config with questions and voteType
@@ -80,16 +79,14 @@ export function encodeBallot(
       throw new Error(`cannot encode a ballot for question 0: ${collision}`)
     }
   }
-  // Same shape of defect for ranked, and refused the same way — for every voter, up
-  // front. `assertEncodedBallot` cannot stand in for it: at maxValue 0 it treats the
-  // bound as absent, so every ballot passes while the tally is structurally zero.
+  // Ranked's question-level defects have no per-ballot backstop (at maxValue 0
+  // assertEncodedBallot treats the bound as absent, and duplicated choice values leave
+  // every ballot well-formed), so refuse them up front, for every voter.
   if (ballotType === BallotType.Ranked) {
     const unrankable = unrankableProtocolReason(questions[0]?.choices.length ?? 0, voteType.maxValue)
     if (unrankable) {
       throw new Error(`cannot encode a ballot for question 0: ${unrankable}`)
     }
-    // Same reason again: a duplicated choice value leaves every ballot well-formed
-    // and the results unreadable, so no per-ballot check downstream can notice.
     const ambiguous = duplicateRankedValuesReason(questions[0]?.choices ?? [])
     if (ambiguous) {
       throw new Error(`cannot encode a ballot for question 0: ${ambiguous}`)
@@ -229,32 +226,16 @@ function encodeMultiChoice(voteType: VoteType, question: Question, selections: n
 }
 
 /**
- * Encode a ranked ballot: **pass-through** of one rank per option, in choice order.
+ * Encode a ranked ballot: pass-through of one rank per option, in choice order,
+ * **highest = best** (top choice gets `numChoices - 1`, last gets `0`). The
+ * orientation is a convention the protocol has no opinion about; decode's Borda sum
+ * assumes it, and a ballot built the other way round is valid wire that elects the
+ * loser. Build the array with {@link rankedOrderToScores} rather than by hand.
  *
- * The wire layout *is* the caller's array — the field index is the option's position
- * in `choices` and its value is that option's rank — so there is nothing to
- * rearrange, exactly like budget/quadratic. What this function contributes is the
- * name: the ballot is the voter's ranking, not a list of picks, and the two are
- * indistinguishable on the wire.
- *
- * **Canonical orientation: highest value = best.** Top choice gets `numChoices - 1`,
- * last gets `0`. This is a choice, not a fact — the protocol has no opinion — and it
- * is the one `saas-integrator-demo` ships and `decodeQuestionResults` assumes. Its
- * Borda decode is an index-weighted sum, so a ballot built the other way round
- * elects the loser and nothing on either side can detect it. Build the array with
- * {@link rankedOrderToScores} rather than by hand and the orientation is applied for
- * you.
- *
- * Length is checked here and nowhere else. `assertEncodedBallot` (run by both
- * encoders on what they produce) refuses a duplicated rank under `uniqueValues` and a
- * rank above `maxValue`, but it has no opinion on how many fields a ballot has — so a
- * short slate would sail through as a valid ballot that simply leaves the last options
- * unranked and skews the Borda tally, while {@link validateSelections} refuses the
- * identical input. The two have to agree, or a UI gating its submit button on the
- * validator enables a vote the encoder then rejects (and a caller building the ranks
- * by hand gets no verdict at all). Padding is not an option: a ranked protocol is
- * pigeonhole-tight, so any filler value repeats a rank and the chain drops the whole
- * ballot at tally.
+ * Length is checked here and nowhere else: `assertEncodedBallot` has no opinion on
+ * field count, and a short slate must fail exactly where {@link validateSelections}
+ * fails it. Padding is impossible — the protocol is pigeonhole-tight, so any filler
+ * repeats a rank and the chain drops the whole ballot at tally.
  */
 function encodeRanked(selections: number[], numChoices: number): number[] {
   if (selections.length !== numChoices) {
@@ -267,43 +248,31 @@ function encodeRanked(selections: number[], numChoices: number): number[] {
 
 /**
  * Turn a voter's ranking — the choice **values** they ordered, best first — into the
- * wire ballot {@link encodeQuestionBallot} expects for a ranked question: one rank
- * per option, in **choice order**, highest = best.
- *
- * The two are transposes of each other, and the conversion is where the orientation
- * decision physically lives. Written by hand it is `n - 1 - position`, the line
- * `saas-integrator-demo` open-codes in its vote page; getting it backwards produces
- * a perfectly valid ballot that the Borda decode reads upside-down.
+ * wire ballot for a ranked question: one rank per option, in **choice order**,
+ * highest = best. The two are transposes, and this conversion is where the
+ * orientation decision lives — hand-rolled (`n - 1 - position`) and inverted, the
+ * result is a valid ballot the Borda decode reads upside-down.
  *
  * ```ts
  * // choices C0..C3, voter ranks C2 > C0 > C3 > C1
- * rankedOrderToScores(question, [2, 0, 3, 1])  // → [2, 0, 3, 1]
+ * rankedOrderToScores(question, [2, 0, 3, 1])  // → [2, 0, 3, 1] (its own transpose, not a pass-through)
  * // choices C0..C2, voter ranks C2 > C0 > C1
  * rankedOrderToScores(question, [2, 0, 1])     // → [1, 0, 2]
  * ```
  *
- * (The first example round-trips to itself only because that particular ordering is
- * its own transpose — do not read it as a pass-through.)
- *
  * @param question - the ranked question, read for its `choices`
  * @param order - the choice values, best first; must be a complete permutation
- * @throws When the ranking names an unpublished choice, repeats one, or leaves any
- *   option unranked. A ranked protocol is pigeonhole-tight (`maxValue = numChoices -
- *   1` with `uniqueValues`), so a partial ranking cannot be padded into anything the
- *   chain will count — it would repeat a rank and be discarded at tally with the
- *   vote still counted in `voteCount`.
+ * @throws On an unpublished choice, a repeat, or an incomplete ordering — a partial
+ *   ranking cannot be padded (the protocol is pigeonhole-tight): it would repeat a
+ *   rank and be discarded at tally while still counting in `voteCount`.
  */
 export function rankedOrderToScores(question: { choices: Choice[] }, order: number[]): number[] {
   const choices = question.choices ?? []
   const values = choices.map((choice) => choice.value)
   const published = new Set(values)
 
-  // Ranks are keyed by choice value, so two choices sharing one value have no ranking
-  // between them. This cannot corrupt a ballot — a complete ranking needs one distinct
-  // published value per choice and duplicates leave fewer, so every possible `order`
-  // already fails one of the checks below — but it fails describing the *ranking* when
-  // the defect is in the *question*. Say so directly, in the words the encoders and the
-  // creation-time guard use for the same defect.
+  // Duplicated choice values would trip the checks below anyway, but the defect is in
+  // the *question*, not the ranking — name it directly, in the encoders' words.
   const ambiguous = duplicateRankedValuesReason(choices)
   if (ambiguous) {
     throw new Error(`ranked: ${ambiguous}`)
@@ -338,29 +307,18 @@ export function rankedOrderToScores(question: { choices: Choice[] }, order: numb
 }
 
 /**
- * Encode one question's ballot from the selections a **voter-facing form** collects,
- * whatever its ballot type — the entry point a UI should reach for.
+ * Encode one question's ballot from what a **voter-facing form** collects — the entry
+ * point a UI should reach for. Identical to {@link encodeQuestionBallot} except for
+ * ranked, whose form value is the voter's **ordering** (choice values, best first)
+ * while the wire wants one rank per option in choice order:
+ * {@link rankedOrderToScores} applies that transposition and its highest-is-best
+ * orientation here, once, instead of at every call site — where a hand-rolled,
+ * inverted version would be a valid ballot that silently elects the loser.
  *
- * The difference from {@link encodeQuestionBallot} is one question wide, and it is the
- * whole reason this exists. Every other type's selections *are* its wire input (choice
- * values for single/multi/approval, per-option amounts for budget/quadratic), but a
- * ranked question's are the voter's **ordering** — the choice values they placed, best
- * first — while the wire wants one rank per option in choice order. The two are
- * transposes, and {@link rankedOrderToScores} is where the highest-is-best orientation
- * is applied.
- *
- * Without this function that branch has to be written out at every call site, and
- * getting it wrong is undetectable: an ordering passed straight to
- * `encodeQuestionBallot` is a perfectly valid ballot that the Borda decode reads
- * upside-down, so the chain accepts it, the tally looks healthy, and the loser wins.
- * Here the branch lives once, in the package that owns the orientation.
- *
- * @param question - The question, read for its declaration, protocol and choices
- * @param selections - What the form collected: the ordering (best first) for a ranked
- *   question, the raw selections for every other type
- * @throws Everything {@link encodeQuestionBallot} throws, plus — for ranked — whatever
- *   {@link rankedOrderToScores} refuses: an unpublished choice, a repeat, or an
- *   incomplete ordering.
+ * @param selections - The ordering (best first) for a ranked question, the raw
+ *   selections for every other type
+ * @throws Everything {@link encodeQuestionBallot} throws, plus — for ranked —
+ *   whatever {@link rankedOrderToScores} refuses.
  */
 export function encodeQuestionSelections(
   question: { ballotProtocol?: BallotProtocol; type?: string; metadata?: Record<string, unknown>; typeSetup?: QuestionTypeSetup; choices: Choice[] },
@@ -408,13 +366,11 @@ function questionProtocolBounds(question: {
   choices: Choice[]
 }): ProtocolBounds | null {
   if (question.ballotProtocol) return question.ballotProtocol
-  // A declared ranking has a canonical protocol even when the read omitted it (public
-  // reads may): one field per option, ranks 0..n-1, no two the same. Deriving it is not
-  // a convenience — the `?? { maxValue: 0, uniqueValues: false }` fallback at the call
-  // site means "unbounded, repeats fine", so without this `[1, 1, 1]` encodes cleanly as
-  // a ranking and the chain records the envelope then drops the ballot at tally, with
-  // nothing on either side having objected. Not in the switch below because `ranked` is
-  // not a backend type name — it is reachable through the metadata bag too.
+  // A declared ranking has a canonical protocol (ranks 0..n-1, unique) even when the
+  // read omitted it. Without this, the call site's `?? {maxValue: 0, uniqueValues:
+  // false}` fallback means "unbounded, repeats fine" and `[1, 1, 1]` encodes cleanly
+  // as a ranking the chain drops at tally. Not in the switch: `ranked` is not a
+  // backend type name and is reachable through the metadata bag too.
   if (declaresRanked(question)) {
     const n = question.choices.length
     return { maxCount: n, maxValue: Math.max(0, n - 1), uniqueValues: true }

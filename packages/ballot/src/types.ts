@@ -9,14 +9,9 @@ export const BallotType = {
   MultiChoice: 'multichoice',
   Approval: 'approval',
   /**
-   * A ranking: one score per option, in choice order, no two the same, **highest
-   * value = best**.
-   *
-   * Never inferred from shape — a ranked protocol and a pick-slot multichoice whose
-   * voters fill every slot are byte-identical, with transposed meanings (ranked: the
-   * field index is the option and the value is its rank; pick-slot: the field index is
-   * the slot and the value is the chosen option). The only signal is a declared
-   * `ranked` type name; see {@link inferQuestionBallotType}.
+   * A ranking: one rank per option, in choice order, no two the same, **highest =
+   * best**. Never inferred from shape (byte-identical to a full-slate pick-slot
+   * multichoice) — it must be declared by name; see {@link inferQuestionBallotType}.
    */
   Ranked: 'ranked',
   Budget: 'budget',
@@ -57,13 +52,9 @@ export interface DecodedChoiceResult {
   /** The choice's `value` (its `choice.value`, not its position in the choices array) */
   choice: number
   /**
-   * The tally for this choice.
-   *
-   * A *voter count* for single-choice / approval / multichoice, but a **weighted
-   * total** for the types whose ballots carry magnitudes: budget and quadratic
-   * report the summed amounts, and ranked reports the **Borda score**
-   * (`Σ count × rank`). Sort descending for the ranking; the number itself is
-   * points, not people.
+   * The tally: a voter count for single-choice / approval / multichoice, a summed
+   * amount for budget / quadratic, and the **Borda score** (`Σ count × rank`) for
+   * ranked — points, not people; sort descending for the ranking.
    */
   votes: number
   /** The percentage of total votes (0-100), or null if not computable */

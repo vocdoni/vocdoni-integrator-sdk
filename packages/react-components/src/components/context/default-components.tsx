@@ -68,8 +68,7 @@ export const defaultComponents: ComponentsDefinition = {
     description,
     image,
     compact,
-    // Destructured but unused: it is a slot prop for overrides to lay out with, and
-    // anything left in `...props` is spread onto a DOM element.
+    // Slot prop for overrides; destructured so it does not reach the DOM via {...props}.
     hasImage: _hasImage,
     canOpenImageModal,
     dataAttrs,
@@ -116,11 +115,9 @@ export const defaultComponents: ComponentsDefinition = {
       </label>
     )
   },
-  // A `<select>` per option: the plainest control that expresses an ordering without
-  // dragging in a drag-and-drop dependency, and it keeps the whole widget keyboard- and
-  // screen-reader-navigable by default. Positions already held by another choice stay
-  // selectable (and are marked) so a voter can swap two options in one move instead of
-  // having to clear one first.
+  // A `<select>` per option: the plainest ordering control, keyboard- and
+  // screen-reader-navigable with no drag-and-drop dependency. Taken positions stay
+  // selectable so a swap is one move.
   QuestionRankChoice: ({
     choice,
     value,

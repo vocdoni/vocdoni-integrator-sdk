@@ -50,12 +50,8 @@ export const hasExtendedChoiceMeta = (choice: Choice): boolean => {
 }
 
 /**
- * Everything the two choice wrappers below share: read `choice.meta` once and derive
- * the display props the slots receive. Kept here rather than at the call sites so a
- * change to choice-meta handling (a third image field, a different normalization)
- * reaches the ranked and the tick-box paths together — the ranked path silently
- * keeping the old behaviour is exactly the drift {@link isPickSlotLayout}'s docstring
- * cites commit 0a6ee28 for.
+ * Shared by both choice wrappers below: resolve `choice.meta` once, so a change to
+ * choice-meta handling reaches the ranked and tick-box paths together.
  */
 const choicePresentationProps = (choice: Choice) => {
   const metadata = getQuestionChoiceMeta(choice)
@@ -113,10 +109,9 @@ export const QuestionChoice = ({
 }
 
 /**
- * The ranked counterpart of {@link QuestionChoice}: same choice-meta resolution, a
- * different control. The voter assigns this option a position instead of ticking it,
- * so it renders the `QuestionRankChoice` slot and forwards `position` / `options` /
- * `onRank` in place of `selected` / `controlType` / `onSelect`.
+ * The ranked counterpart of {@link QuestionChoice}: same choice-meta resolution, but
+ * the voter assigns a position instead of ticking, so it renders the
+ * `QuestionRankChoice` slot with `position` / `options` / `onRank`.
  */
 export const QuestionRankChoice = ({
   choice,

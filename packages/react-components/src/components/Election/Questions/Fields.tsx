@@ -89,16 +89,11 @@ const FieldSwitcher = (props: QuestionProps & { layout: QuestionLayout; presenta
 }
 
 /**
- * Ranked question: the voter assigns each option a position, and the form value is the
- * resulting **ordering** — a `string[]` of choice values where index 0 is the top pick.
- * Unfilled positions are `''`, so the array is always `choices.length` long and the
- * widget can render a stable slate. `QuestionsFormProvider` converts the ordering into
- * wire ranks with `rankedOrderToScores`, which is where the highest-is-best orientation
- * is applied — this component never touches it.
- *
- * Assigning an option a position another option holds **swaps** them rather than
- * refusing: a ranked protocol only counts a complete ranking, so a widget that made the
- * voter clear a slot before reusing it would turn every reorder into two steps.
+ * Ranked question: the form value is the voter's **ordering** — a `string[]` of choice
+ * values, index 0 = top pick, `''` for unfilled slots (always `choices.length` long).
+ * `QuestionsFormProvider` converts it to wire ranks with `rankedOrderToScores`; the
+ * highest-is-best orientation never enters this component. Assigning a taken position
+ * swaps the two options rather than refusing, so a reorder is one step, not two.
  */
 const RankedChoice = ({
   index,
@@ -120,11 +115,8 @@ const RankedChoice = ({
       disabled={disabled}
       name={index}
       rules={{
-        // All or nothing, and not as a matter of taste: a ranked protocol leaves exactly
-        // one rank per option (`maxValue = n - 1` with `uniqueValues`), so a partial
-        // ranking repeats a value and the chain discards the whole ballot at tally while
-        // still counting the envelope. `questionSelectionRange` reports {min: n, max: n}
-        // for the same reason.
+        // All or nothing: a partial ranking repeats a rank and the chain discards the
+        // whole ballot at tally. questionSelectionRange reports {min: n, max: n}.
         validate: (value: string[]) => {
           const ranked = (Array.isArray(value) ? value : []).filter((entry) => entry !== '' && entry != null)
           if (ranked.length === total) return true
@@ -145,17 +137,14 @@ const RankedChoice = ({
             const to = position - 1
             const displaced = next[to]
             next[to] = value
-            // The option that held this position takes the slot the moved one vacated
-            // (a swap). When the moved one was unranked there is no slot to hand back,
-            // so the displaced option falls into the first free position instead —
-            // dropping it would silently undo a placement the voter made, leaving the
-            // slate one short with nothing on screen to say which option went missing.
+            // Swap: the displaced option takes the slot the moved one vacated. If the
+            // moved one was unranked there is no vacated slot, so the displaced option
+            // falls into the first free position rather than being silently dropped.
             if (from >= 0) {
               next[from] = displaced
             } else if (displaced !== '') {
               const free = next.indexOf('')
-              // A full slate has no unranked option to move, so `free` is only ever -1
-              // when nothing was displaced; unranking is the honest fallback regardless.
+              // `free` is only ever -1 when nothing was displaced.
               if (free >= 0) next[free] = displaced
             }
           }
@@ -164,9 +153,7 @@ const RankedChoice = ({
           trigger(index)
         }
 
-        // The position labels are the same for every option, so they are built once per
-        // render rather than once per option: inside the map this is n translation
-        // lookups per choice, i.e. n² per keystroke on a slate a voter reorders often.
+        // Same labels for every option — build once per render, not n² per keystroke.
         const positionLabels = Array.from({ length: total }, (_, i) =>
           t('vote.rank_position', { position: i + 1, defaultValue: `#${i + 1}` })
         )
@@ -197,8 +184,7 @@ const RankedChoice = ({
                   options={positionLabels.map((label, i) => ({
                     position: i + 1,
                     label,
-                    // Marked, not removed — the slot is still selectable, and picking it
-                    // swaps the two options.
+                    // Marked, not removed — picking a taken slot swaps the two options.
                     taken: order[i] !== '' && order[i] !== value,
                   }))}
                   disabled={disabled}

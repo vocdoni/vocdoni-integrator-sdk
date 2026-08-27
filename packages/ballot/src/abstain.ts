@@ -57,11 +57,8 @@ export function questionSelectionRange(question: {
   typeSetup?: QuestionTypeSetup
   choices: Choice[]
 }): { min: number; max: number } {
-  // Ranked is a full slate, not a selection: every option is a field and the protocol
-  // is pigeonhole-tight (`maxValue = numChoices - 1` with `uniqueValues`), so the only
-  // castable ballot ranks all of them — anything shorter repeats a rank and the chain
-  // drops the whole vote at tally. `minChoices`/`maxChoices` do not apply; a UI that
-  // offered a partial ranking would be offering a vote that never counts.
+  // Ranked is a full slate: a partial ranking repeats a rank and the chain drops the
+  // whole ballot at tally, so minChoices/maxChoices do not apply.
   if (declaresRanked(question)) {
     const n = question.choices.length
     return { min: n, max: n }
