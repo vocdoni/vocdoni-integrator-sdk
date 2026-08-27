@@ -128,6 +128,9 @@ const {
   resend,        // ({ email?, phone? }) => Promise<void>
   check,         // () => Promise<ProcessCheckResponse> — per-question canVote/hasVoted
   sign,          // (electionId, address) => Promise<ElectionSignResult> — electionId = question.upstreamId
+  signBatch,     // (ballots: {electionId, address}[]) => Promise<ElectionSignBatchResult[]>
+                 //   all questions in one call; picks the plain or blind CSP flow itself
+                 //   from census.anonymous. Results are in request order, one per ballot.
   // voting
   isInCensus,    // boolean — true if voter belongs to this process's census
   voterQuestions,// ProcessQuestionStatus[] — per-question canVote/hasVoted (empty until connected)
@@ -155,6 +158,12 @@ question id; the legacy `voteId` exposes just the first and is deprecated.
   something voted), so a voter returning after a reload still sees every id.
   A failure there is swallowed: membership stays resolved, `voteIds` stays empty.
 
+**Exception — anonymous census.** A process whose `census.anonymous` is `true`
+returns no nullifiers from `sign-info`, because the CSP blind-signs and never
+learns the address. There is nothing to recover after a reload there: `voteIds`
+holds only what the current session's `vote()` produced. `hasVoted` and
+`voterQuestions` still work — those come from `check()`.
+
 ```tsx
 const { election, voteIds } = useElection()
 election.questions
@@ -180,7 +189,7 @@ await auth1('123456')
 // connected === true
 ```
 
-`useElectionAuth()` returns just the session slice (`authToken`, `connected`, `weight`, `auth0`, `auth1`, `resend`, `check`, `sign`, `clear`) from its own context — auth-only widgets (identify forms, OTP inputs, logout buttons) using it don't re-render when election data or results update. Its `clear()` is equivalent to `clearVoter()`: clearing the session also resets the vote state.
+`useElectionAuth()` returns just the session slice (`authToken`, `connected`, `weight`, `auth0`, `auth1`, `resend`, `check`, `sign`, `signBatch`, `clear`) from its own context — auth-only widgets (identify forms, OTP inputs, logout buttons) using it don't re-render when election data or results update. Its `clear()` is equivalent to `clearVoter()`: clearing the session also resets the vote state.
 
 `vote(encodedBallots, memos?)` takes one pre-encoded `number[]` per question (plus optional per-question memo strings — free-text notes like an open "Other" answer, max 256 UTF-8 bytes each, validated pre-flight; ⚠️ memos ride the envelope in cleartext even for secret questions), casts a separate Vochain vote for each, and returns the first nullifier cast by the call. In `react-components`, registering reserved `memo.{index}` fields (`memo.0`, `memo.1`, …) in the questions form collects memos automatically.
 
@@ -188,7 +197,7 @@ Casting is **phased** so a failure can never half-vote silently:
 
 1. **Pre-flight** — every question is validated up front (`upstreamId` present; `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
 2. **Resume check** — a fresh `processes.check()` marks questions already voted; they are skipped, so calling `vote()` again after a failure completes the remaining questions instead of dying on a double-vote.
-3. **Sign + build** — every remaining question gets an ephemeral signer, its one-shot CSP signature (`processes.sign`), and a locally built tx. A failure here aborts with **zero** votes relayed.
+3. **Sign + build** — every remaining question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch`) and each tx is built locally. A failure here aborts with **zero** votes relayed. On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure.
 4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. If, on chain, some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`, and refreshes `voterQuestions`/`hasVoted` to the on-chain truth. Catch it and offer a retry — the next `vote()` call resumes.
 
 Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx built, batch not yet sent) → `confirming` (enqueued, awaiting the chain) → `confirmed` | `failed`.
