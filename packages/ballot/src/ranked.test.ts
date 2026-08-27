@@ -424,11 +424,84 @@ describe('ranked: two choices sharing a value', () => {
     ).toThrow(/used by more than one choice/)
   })
 
+  it('is refused by validateSelections too, or the submit button lies', () => {
+    // The half `encodeBallot` refuses for the *question* has to be refused here as
+    // well: a UI gating its submit button on the validator would otherwise enable the
+    // vote and throw at cast time — the late discovery the encode-side check exists to
+    // prevent. Nothing in a selection shows this defect, so only a question-level rule
+    // can reach it.
+    expect(() =>
+      validateSelections(
+        {
+          type: 'ranked',
+          voteType: {
+            maxCount: 3,
+            maxValue: 2,
+            maxVoteOverwrites: 0,
+            costExponent: 1,
+            uniqueChoices: true,
+            costFromWeight: false,
+          },
+          questions: [{ title: { default: 'Q0' }, choices: dupes.choices }],
+        },
+        [[2, 1, 0]]
+      )
+    ).toThrow(/used by more than one choice/)
+  })
+
+  it('is reported on a protocol-less read, where the ceiling rule has nothing to say', () => {
+    // `uncastableChoicesReason` returns null without a protocol for every other type,
+    // because their bounds are *derived from* the values. A ranking's defect is not
+    // measured against a ceiling at all, and `encodeQuestionBallot` refuses it either
+    // way — so staying silent would leave `hasUncastableChoices` (which the vote form
+    // consults to decide whose mistake to report) disagreeing with the encoder.
+    const noProtocol = { type: 'ranked', choices: dupes.choices }
+    expect(uncastableChoicesReason(noProtocol)).toMatch(/used by more than one choice/)
+    expect(() => encodeQuestionBallot(noProtocol, [2, 1, 0])).toThrow(/used by more than one choice/)
+  })
+
   it('leaves non-contiguous but distinct values alone', () => {
     // Position-addressed means the values are display labels; only *collisions* matter.
     const sparse = { ...dupes, choices: [7, 8, 9].map((v) => ({ title: { default: `C${v}` }, value: v })) }
     expect(uncastableChoicesReason(sparse)).toBeNull()
     expect(encodeQuestionBallot(sparse, [2, 1, 0])).toEqual([2, 1, 0])
+    // …and a protocol-less read of the same choices stays quiet, as every other type does.
+    expect(uncastableChoicesReason({ type: 'ranked', choices: sparse.choices })).toBeNull()
+  })
+})
+
+describe('ranked: a question read without its ballotProtocol', () => {
+  // Public reads may omit `ballotProtocol`. Every other type either derives its bounds
+  // from the named type or has none — a ranking has a canonical protocol (one field per
+  // option, ranks 0..n-1, no repeats), and deriving it is what keeps the encoder honest:
+  // the no-bounds fallback means "unbounded, repeats fine", which is exactly the ballot
+  // the chain records and drops at tally.
+  const noProtocol = { metadata: { type: { name: 'ranked' } }, choices: choices(3) }
+
+  it('still refuses a duplicated rank', () => {
+    expect(() => encodeQuestionBallot(noProtocol, [1, 1, 1])).toThrow(/repeats value 1/)
+  })
+
+  it('still refuses a rank above the derived ceiling', () => {
+    expect(() => encodeQuestionBallot(noProtocol, [9, 1, 0])).toThrow(/above maxValue 2/)
+  })
+
+  it('encodes a well-formed ranking unchanged', () => {
+    expect(encodeQuestionBallot(noProtocol, [2, 1, 0])).toEqual([2, 1, 0])
+    expect(encodeQuestionSelections(noProtocol, [2, 0, 1])).toEqual([1, 0, 2])
+  })
+
+  it('leaves protocol-less questions of every other type alone', () => {
+    // The derivation keys off the ranked declaration, not off the missing protocol:
+    // singlechoice still derives maxValue from its own values, multichoice still goes
+    // dense, and neither gains a uniqueness rule.
+    expect(encodeQuestionBallot({ type: 'singlechoice', choices: choices(3) }, [2])).toEqual([2])
+    const multi = {
+      type: 'multichoice',
+      typeSetup: { minChoices: 0, maxChoices: 2, uniqueChoices: false },
+      choices: choices(3),
+    }
+    expect(encodeQuestionBallot(multi, [0, 2])).toEqual([1, 0, 1])
   })
 })
 

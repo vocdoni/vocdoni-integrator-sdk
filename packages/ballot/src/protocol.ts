@@ -301,7 +301,16 @@ export function uncastableChoicesReason(question: QuestionLike): string | null {
   // Without a raw protocol the named singlechoice type derives maxValue from these
   // very values (questionProtocolBounds, mirroring VoteTypeFromQuestion), so every
   // value fits by construction and there is nothing to report.
-  if (!bp) return null
+  //
+  // Ranked is the exception, because its defect is not measured against a ceiling at
+  // all: two choices sharing a value are unorderable and decode to one row whatever the
+  // protocol says. `encodeQuestionBallot` refuses such a question with or without a
+  // protocol, so staying silent here would leave `hasUncastableChoices` disagreeing with
+  // the encoder — and callers use it to decide whether the encoder's message is the
+  // voter's to act on (see react-components' QuestionsFormProvider).
+  if (!bp) {
+    return ballotType === BallotType.Ranked ? duplicateRankedValuesReason(question.choices) : null
+  }
 
   return uncastableChoicesReasonFor(
     ballotType,

@@ -3,6 +3,7 @@ import { BallotType, type BallotSelections } from './types'
 import { inferBallotType } from './infer'
 import { normalizeSelections } from './selections'
 import {
+  duplicateRankedValuesReason,
   pickSlotCollisionReason,
   unrankableProtocolReason,
   unsatisfiableProtocolReason,
@@ -58,6 +59,22 @@ export function validateSelections(
     const collision = pickSlotCollisionReason(questions[0]?.choices ?? [])
     if (collision) {
       throw new Error(`Question 0: ${collision}`)
+    }
+  }
+  // Ranked's two question-level defects, in the same order `encodeBallot` refuses them
+  // so the two agree on the verdict *and* on the diagnosis. Both block every voter:
+  // maxValue 0 tallies every option to zero, and duplicated choice values leave every
+  // ballot well-formed while the decoded rows share an id — neither shows on any
+  // individual selection, so the per-selection validator below cannot reach them.
+  if (ballotType === BallotType.Ranked) {
+    const choices = questions[0]?.choices ?? []
+    const unrankable = unrankableProtocolReason(choices.length, voteType.maxValue)
+    if (unrankable) {
+      throw new Error(`Question 0: ${unrankable}`)
+    }
+    const ambiguous = duplicateRankedValuesReason(choices)
+    if (ambiguous) {
+      throw new Error(`Question 0: ${ambiguous}`)
     }
   }
 
@@ -185,18 +202,12 @@ function validateMultiChoice(voteType: VoteType, question: Question, selections:
  * `maxValue` is out of range. `assertEncodedBallot` catches the last two on the
  * encoded product; this exists so a UI gating its submit button gets the same verdict
  * before the voter presses it.
+ *
+ * Per-selection only: the two defects that belong to the *question* (`maxValue: 0`,
+ * duplicated choice values) are refused by {@link validateSelections} before this
+ * runs, where `encodeBallot` refuses them too.
  */
 function validateRanked(voteType: VoteType, question: Question, selections: number[]): void {
-  // The config before the selections: at maxValue 0 no ranking counts at all, and the
-  // per-rank ceiling below reads 0 as "unbounded" (as every other type must), so it
-  // would wave the whole election through. encodeBallot refuses the same shape — the
-  // two have to agree, or a UI gating its submit button here enables a vote that then
-  // throws at cast time.
-  const unrankable = unrankableProtocolReason(question.choices.length, voteType.maxValue)
-  if (unrankable) {
-    throw new Error(`Question 0: ${unrankable}`)
-  }
-
   if (selections.length !== question.choices.length) {
     throw new Error(
       `Question 0: ranked requires one rank per option (${question.choices.length}), got ${selections.length}`
@@ -206,7 +217,7 @@ function validateRanked(voteType: VoteType, question: Question, selections: numb
   const seen = new Set<number>()
   for (const rank of selections) {
     if (!Number.isInteger(rank) || rank < 0) {
-      throw new Error(`Invalid rank ${rank} for ranked ballot; ranks must be non-negative integers`)
+      throw new Error(`Question 0: invalid rank ${rank} for ranked ballot; ranks must be non-negative integers`)
     }
     // maxValue 0 is the budget/quadratic "unbounded" marker module-wide, never a
     // ceiling of zero — a ranked protocol always carries a real one.

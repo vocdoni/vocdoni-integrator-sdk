@@ -408,6 +408,17 @@ function questionProtocolBounds(question: {
   choices: Choice[]
 }): ProtocolBounds | null {
   if (question.ballotProtocol) return question.ballotProtocol
+  // A declared ranking has a canonical protocol even when the read omitted it (public
+  // reads may): one field per option, ranks 0..n-1, no two the same. Deriving it is not
+  // a convenience — the `?? { maxValue: 0, uniqueValues: false }` fallback at the call
+  // site means "unbounded, repeats fine", so without this `[1, 1, 1]` encodes cleanly as
+  // a ranking and the chain records the envelope then drops the ballot at tally, with
+  // nothing on either side having objected. Not in the switch below because `ranked` is
+  // not a backend type name — it is reachable through the metadata bag too.
+  if (declaresRanked(question)) {
+    const n = question.choices.length
+    return { maxCount: n, maxValue: Math.max(0, n - 1), uniqueValues: true }
+  }
   switch (question.type) {
     case 'singlechoice':
       return {
