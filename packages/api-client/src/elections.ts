@@ -26,7 +26,7 @@ import type {
   VotingProcessResultsResponse,
   VotingProcessValidateResponse,
 } from '@vocdoni/api-types'
-import { uncastableChoicesReason, unsatisfiableProtocolReason } from '@vocdoni/ballot'
+import { uncastableChoicesReason, unsatisfiableQuestionReason } from '@vocdoni/ballot'
 import type { UpFetch } from 'up-fetch'
 import { normalizeQuestionChoiceMeta } from './choice-meta'
 import { normalizeQuestionStatus, normalizeVotingProcess } from './election-status'
@@ -66,7 +66,9 @@ function toMultiLang(value: LocalizedInput | undefined): MultiLangString | undef
  *   a raw `ballotProtocol` instead.
  * - **Raw `ballotProtocol`**: rejected when unsatisfiable, matching the backend's
  *   `ValidateBallotProtocol` exactly — unsatisfiability only, never plausibility, so
- *   every shape a voter could actually satisfy stays expressible. Also rejected when
+ *   every shape a voter could actually satisfy stays expressible. The one addition to
+ *   that mirror: a question *declared ranked* with `maxValue: 0`, which tallies every
+ *   option to zero (see {@link unsatisfiableQuestionReason}). Also rejected when
  *   it publishes a choice no voter can cast (see {@link uncastableChoicesReason}) —
  *   a narrower failure the backend does not check at all: `VoteTypeFromQuestion`
  *   passes a raw protocol straight through without ever comparing it to the
@@ -76,7 +78,15 @@ function toMultiLang(value: LocalizedInput | undefined): MultiLangString | undef
  */
 function validateQuestionBallotConfig(question: VotingProcessQuestionRequest, index: number): void {
   if (question.ballotProtocol) {
-    const unsatisfiable = unsatisfiableProtocolReason(question.ballotProtocol)
+    // The *question*-level rule: same pigeonhole check, plus the declared-ranked
+    // maxValue: 0 case the protocol-level rule deliberately waves through.
+    const unsatisfiable = unsatisfiableQuestionReason({
+      ballotProtocol: question.ballotProtocol,
+      type: question.type,
+      metadata: question.metadata,
+      typeSetup: question.typeSetup,
+      choices: question.choices ?? [],
+    })
     if (unsatisfiable) {
       throw new Error(`Question ${index}: unsatisfiable ballotProtocol — ${unsatisfiable}`)
     }

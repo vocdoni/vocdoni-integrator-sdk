@@ -13,6 +13,7 @@ export type { ProtocolBounds } from './protocol'
 // Re-export functions
 export {
   declaresLegacyPickSlot,
+  declaresRanked,
   inferBallotType,
   inferQuestionBallotType,
   isDenseBallotProtocol,
@@ -24,11 +25,12 @@ export {
   isUnsatisfiableProtocol,
   isUnsatisfiableQuestion,
   uncastableChoicesReason,
+  unrankableProtocolReason,
   unsatisfiableProtocolReason,
   unsatisfiableQuestionReason,
   voteTypeBounds,
 } from './protocol'
-export { encodeBallot, encodeQuestionBallot } from './encode'
+export { encodeBallot, encodeQuestionBallot, encodeQuestionSelections, rankedOrderToScores } from './encode'
 export { decodeResults, decodeQuestionResults } from './decode'
 export { validateSelections } from './validate'
 export { multichoiceReservesAbstain, questionReservesAbstain, questionSelectionRange } from './abstain'

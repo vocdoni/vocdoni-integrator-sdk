@@ -407,6 +407,80 @@ describe('admin / integrator client methods', () => {
         })
         expect(body().questions[0].ballotProtocol.uniqueValues).toBe(false)
       })
+
+      const rankedDraft = () => ({
+        orgAddress: ORG,
+        title: 'Dead ranking',
+        questions: [
+          {
+            title: 'Rank them',
+            choices: [0, 1, 2].map((v) => ({ title: `C${v}`, value: v })),
+            metadata: { type: { name: 'ranked' } },
+            ballotProtocol: {
+              maxCount: 3,
+              maxValue: 0,
+              maxVoteOverwrites: 0,
+              costExponent: 1,
+              maxTotalCost: 0,
+              uniqueValues: false,
+              costFromWeight: false,
+            },
+          },
+        ],
+      })
+
+      it('rejects a ranked question whose protocol can never produce a ranking', async () => {
+        // maxValue 0 means "unbounded" for every other type, so the protocol-level rule
+        // waves it through by design. For a declared ranking it is fatal: the chain
+        // switches to discrete aggregation and every option tallies zero, which is
+        // indistinguishable from nobody voting. Creation is the only moment it can be
+        // fixed, so the *question*-level rule — the one that reads the declaration — has
+        // to be the one that runs here.
+        await expect(client.elections.create(rankedDraft())).rejects.toThrow(/Question 0: .*maxValue 0/)
+      })
+
+      it('rejects the dead ranking on update too, not just create', async () => {
+        await expect(client.elections.update('draft-ranked', rankedDraft())).rejects.toThrow(
+          /Question 0: .*maxValue 0/,
+        )
+      })
+
+      it('rejects a ranked question whose choices share a value', async () => {
+        // Every ballot for this question is well-formed, so no per-vote check can ever
+        // catch it — but the decoded results key their rows by choice value, so two
+        // options come back under one id. Creation is the only place it is fixable.
+        await expect(
+          client.elections.create({
+            orgAddress: ORG,
+            title: 'Ambiguous ranking',
+            questions: [
+              {
+                title: 'Rank them',
+                choices: [0, 1, 1].map((v, i) => ({ title: `C${i}`, value: v })),
+                metadata: { type: { name: 'ranked' } },
+                ballotProtocol: {
+                  maxCount: 3,
+                  maxValue: 2,
+                  maxVoteOverwrites: 0,
+                  costExponent: 1,
+                  maxTotalCost: 0,
+                  uniqueValues: true,
+                  costFromWeight: false,
+                },
+              },
+            ],
+          }),
+        ).rejects.toThrow(/Question 0: .*used by more than one choice/)
+      })
+
+      it('leaves the same protocol alone when nothing declares it ranked', async () => {
+        // Undeclared this is a budget ballot, where maxValue 0 is exactly right — the
+        // guard must key off the declaration, not the shape.
+        const body = postDraft()
+        const { metadata, ...question } = rankedDraft().questions[0]
+        await client.elections.create({ orgAddress: ORG, title: 'Budget', questions: [question] })
+        expect(body().questions[0].ballotProtocol.maxValue).toBe(0)
+      })
     })
   })
 

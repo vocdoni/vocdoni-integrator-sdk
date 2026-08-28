@@ -33,11 +33,17 @@
  *   question.ballotProtocol.maxCount = numOptions
  *   question.ballotProtocol.maxValue >= numOptions - 1
  *   question.ballotProtocol.uniqueValues = true
+ *   question.metadata = { type: { name: 'ranked' } }   ⚠️ REQUIRED
  *   selections = rank value per option in choice order, e.g. [2, 0, 3, 1]
  *   (must be a permutation of 0..numOptions-1 — no repeated ranks)
- *   HIGHER WINS: top pick gets numOptions-1, last pick gets 0. The only shipped
- *   aggregation is index-weighted, so ranking with 0 as "best" inverts the winner.
- *   ⚠️ decodeQuestionResults cannot read a ranking back — integrator-sdk#22.
+ *   HIGHER WINS: top pick gets numOptions-1, last pick gets 0. Build the array
+ *   with rankedOrderToScores(question, order) rather than by hand — decoding is
+ *   an index-weighted Borda sum, so ranking with 0 as "best" elects the loser
+ *   and nothing on either side can detect it.
+ *   The metadata declaration is what makes this ranked: the protocol above is
+ *   byte-identical to Format D with every slot filled, and without the name the
+ *   SDK reads it as a pick-slot multichoice and column-sums the tally, which
+ *   reports the same number for every option (integrator-sdk#22).
  *
  * ─── Format D: Legacy pick-slot multichoice (raw ballotProtocol only) ──────
  *   question.ballotProtocol.maxCount = maximum number of picks allowed
@@ -102,7 +108,9 @@ const SELECTIONS_BY_QUESTION: Record<string, number[]> = {
   // '<questionId>': [0, 2, 4],
 
   // Format C — ranked, 4 options, voter's order C2 > C0 > C3 > C1.
-  // Scores in choice order, highest wins: C0=2, C1=0, C2=3, C3=1
+  // Ranks in choice order, highest wins: C0=2, C1=0, C2=3, C3=1.
+  // Prefer encodeQuestionSelections(question, [2, 0, 3, 1]) — same result, and it
+  // applies the orientation and rejects an incomplete or repeated ranking.
   // '<questionId>': [2, 0, 3, 1],
 
   // Format D — legacy pick-slot multichoice: pick options 1 and 3

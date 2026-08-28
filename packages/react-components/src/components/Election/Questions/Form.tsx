@@ -1,4 +1,4 @@
-import { encodeQuestionBallot, hasUncastableChoices } from '@vocdoni/ballot'
+import { encodeQuestionSelections, hasUncastableChoices } from '@vocdoni/ballot'
 import { createContext, PropsWithChildren, useContext, useEffect } from 'react'
 import { FieldValues, FormProvider, useForm, UseFormReturn } from 'react-hook-form'
 import { EnsureConfirmProvider } from '../../../confirm/ConfirmProvider'
@@ -48,10 +48,15 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       return false
     }
 
-    // Build per-question raw selections from the form values.
+    // Build per-question raw selections from the form values. NaN entries are dropped:
+    // a ranked question's array is the ordering padded with '' (parseInt('') is NaN),
+    // and forwarded NaN would reach rankedOrderToScores as "NaN is not a choice value"
+    // instead of the accurate "every option must be ranked". No-op for other types.
     const selections = election.questions.map((_q, index) => {
       const raw = values[index.toString()]
-      if (Array.isArray(raw)) return raw.map((value) => parseInt(value, 10))
+      if (Array.isArray(raw)) {
+        return raw.map((value) => parseInt(value, 10)).filter((value) => Number.isFinite(value))
+      }
       if (raw === undefined || raw === '') return []
       return [parseInt(raw, 10)]
     })
@@ -64,7 +69,10 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
     const encodedBallots: number[][] = []
     for (const [index, question] of election.questions.entries()) {
       try {
-        encodedBallots.push(encodeQuestionBallot(question, selections[index] ?? []))
+        // encodeQuestionSelections, not encodeQuestionBallot: a ranked question's form
+        // value is the voter's ordering; the wire transposition and its highest-is-best
+        // orientation live in the ballot package, not in a per-type branch here.
+        encodedBallots.push(encodeQuestionSelections(question, selections[index] ?? []))
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error)
         // Two very different failures land here and only one of them is the voter's to

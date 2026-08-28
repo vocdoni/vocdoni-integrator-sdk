@@ -277,21 +277,25 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
               choices: [0, 2],
               tally: [VOTERS.length, 0, VOTERS.length, 0, VOTERS.length],
             },
-            // ranked: one score per option, no repeats, highest wins — voter's
-            // order is C2 > C0 > C3 > C1.
+            // ranked (integrator-sdk#22): one rank per option in choice order, no
+            // repeats, highest = best. `choices` here is already the wire ballot —
+            // encodeQuestionBallot passes a ranking through — and it spells the
+            // voter's order C2 > C0 > C3 > C1 (C0→2, C1→0, C2→3, C3→1).
             //
-            // ⚠️ PLACEHOLDER EXPECTATION — see integrator-sdk#22. The decoder has
-            // no ranked branch: it labels this multichoice and reports "how many
-            // voters ranked each option", so every option shows the full voter
-            // count plus a zero abstain bucket. The tally below therefore proves
-            // the ballot round-trips, NOT that the ranking is readable — the
-            // winner (C2) is not recoverable from it. Replace this with a real
-            // ranking assertion when #22 lands; locked in meanwhile so the
-            // behaviour cannot change silently.
+            // The tally is the Borda score, Σ count × rank, NOT a voter count: with
+            // 4 voters casting that same ranking, C2 scores 4×3 and C1 scores 4×0.
+            // No abstain bucket — a ranked protocol has no unfilled slots to
+            // sentinel, so the entry count matches the choice count exactly.
+            //
+            // This is the assertion #19 could not make. Before the ranked branch
+            // existed the same votes decoded to [4, 4, 4, 4, 0] — every option "got
+            // 4", the winner unrecoverable. The two readings cannot both be right,
+            // which is what makes this a real check rather than the decoder agreeing
+            // with itself. The recovered ordering is asserted separately below.
             {
               title: 'Ranked',
               choices: [2, 0, 3, 1],
-              tally: [VOTERS.length, VOTERS.length, VOTERS.length, VOTERS.length, 0],
+              tally: [2 * VOTERS.length, 0, 3 * VOTERS.length, 1 * VOTERS.length],
             },
             // legacy 2-option multichoice declared via metadata.type.name
             // (integrator-sdk#27). Its protocol {maxCount: 2, maxValue: 1,
@@ -330,7 +334,16 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
                 ['Approval', { maxCount: 4, maxValue: 1 }],
                 ['Approval (max 2)', { maxCount: 4, maxValue: 1, maxTotalCost: 2 }],
                 ['Multichoice pick-slot', { maxCount: 3, maxValue: 6, uniqueValues: true }],
-                ['Ranked', { maxCount: 4, maxValue: 3, uniqueValues: true }],
+                // Ranked, declared in the creator metadata bag. The protocol below is
+                // byte-identical to a pick-slot multichoice whose voters fill every
+                // slot, and the backend's `type` vocabulary has no `ranked` entry, so
+                // this bag is the ONLY thing telling the two apart — exactly the
+                // channel the legacy-name case beneath it uses.
+                [
+                  'Ranked',
+                  { maxCount: 4, maxValue: 3, uniqueValues: true },
+                  { numChoices: 4, metadata: { type: { name: 'ranked' } } },
+                ],
                 // 2 choices, and the legacy type name in the creator metadata bag —
                 // the only thing distinguishing this from a 2-option approval ballot.
                 [
@@ -652,6 +665,41 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
                 question!.choices.map((_c, i) => parseInt((q.results ?? [])[i]?.[1] ?? '0', 10)),
                 'legacy 2-option multichoice: dense read must disagree, or the case is not ambiguous',
               ).toEqual([VOTES_PER_QUESTION, 0])
+            }
+
+            // integrator-sdk#22: the ranked question is the one this suite could not
+            // assert anything meaningful about before — #19 had to enshrine a tally
+            // that carried no ranking. Two checks, each covering a different way
+            // this can be wrong:
+            if (question!.title?.default === 'Ranked') {
+              // 1. The wire model. Every voter cast [2, 0, 3, 1], so the chain must
+              // have histogrammed it per OPTION (field i = choice i, value = its
+              // rank), one populated column per row. A unit fixture can assume this
+              // layout; only a live chain can establish it.
+              //
+              // Pinning the matrix cell-for-cell also settles that the two readings
+              // genuinely disagree here — column-summing these rows as pick-slots
+              // gives [4, 4, 4, 4], the useless tally #22 reported — so the Borda
+              // assertion below cannot be passing on a matrix where both readings
+              // happen to coincide. That is arithmetic, not a second observation, so
+              // it is stated rather than asserted.
+              expect(q.results, 'ranked: chain did not histogram the ballot per option').toEqual([
+                ['0', '0', String(VOTES_PER_QUESTION), '0'], // C0 ranked 2
+                [String(VOTES_PER_QUESTION), '0', '0', '0'], // C1 ranked 0
+                ['0', '0', '0', String(VOTES_PER_QUESTION)], // C2 ranked 3
+                ['0', String(VOTES_PER_QUESTION), '0', '0'], // C3 ranked 1
+              ])
+
+              // 2. The ranking itself is recoverable — the whole point of the issue.
+              // The voters ranked C2 > C0 > C3 > C1, and sorting the decoded Borda
+              // scores must give exactly that back.
+              expect(
+                [...decoded].sort((a, b) => b.votes - a.votes).map((row) => row.choice),
+                'ranked: the decoded tally does not recover the voters\' ranking',
+              ).toEqual([2, 0, 3, 1])
+              expect(decoded, 'ranked: decode emitted an abstain bucket').toHaveLength(
+                question!.choices.length,
+              )
             }
           }
         }

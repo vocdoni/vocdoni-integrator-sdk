@@ -39,6 +39,9 @@
     "multichoice_title": "Multichoice Voting {{ weighted }}",
     "multichoice_desc": "You selected {{selected}} options (max {{maxcount}})",
     "multichoice_desc_abstain": " (or abstain)",
+    "ranked_title": "Ranked Voting {{ weighted }}",
+    "ranked_tooltip": "Ranked voting asks you to order all {{maxcount}} options, from your favourite to your least favourite. Each position is worth points, and the option with the most points wins.",
+    "ranked_desc": "You ranked {{selected}} of {{maxcount}} options",
     "budget_title": "Budget Voting {{ weighted }}",
     "budget_tooltip": "Budget voting lets you distribute points across the options. The options with the most points win.",
     "quadratic_title": "Quadratic Voting {{ weighted }}",
@@ -88,12 +91,14 @@
     "min_length": "This field must be at least {{ min }} characters long",
     "choices_count": "Select {{ count }} choices",
     "choices_range": "Select between {{ min }} and {{ max }} options",
-    "at_least_one": "You must select at least one option"
+    "at_least_one": "You must select at least one option",
+    "rank_all": "Rank all {{ count }} options"
   },
   "vote": {
     "abstain": "Abstain",
     "button": "Vote",
     "confirm": "Please confirm your choices:",
+    "rank_position": "#{{ position }}",
     "sign": "Sign first",
     "voted_description": "Your vote id is {{ id }}. You can use it to verify your vote.",
     "voted_question_description": "Your vote id for \"{{ title }}\" is {{ id }}.",

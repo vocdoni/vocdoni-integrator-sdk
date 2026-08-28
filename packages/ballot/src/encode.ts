@@ -1,13 +1,15 @@
 import type { BallotProtocol, Choice, Election, Question, QuestionTypeSetup, VoteType } from '@vocdoni/api-types'
 import { BallotType, type BallotSelections } from './types'
-import { inferBallotType, inferQuestionBallotType, isPickSlotLayout } from './infer'
+import { declaresRanked, inferBallotType, inferQuestionBallotType, isPickSlotLayout } from './infer'
 import { normalizeSelections } from './selections'
 import { requiredAbstainMaxValue } from './abstain'
 import {
   assertEncodedBallot,
+  duplicateRankedValuesReason,
   pickSlotCollisionReason,
   uncastableChoicesReason,
   uncastableChoicesReasonFor,
+  unrankableProtocolReason,
   unsatisfiableProtocolReason,
   unsatisfiableQuestionReason,
   voteTypeBounds,
@@ -26,6 +28,8 @@ import {
  * - approval: dense 0/1 vector over options: choices.map(c => selected.has(c) ? 1 : 0)
  * - multichoice: exactly `maxCount` picked option values, unfilled slots padded with abstain
  *   sentinels (values ≥ choices.length; see encodeMultiChoice)
+ * - ranked: one rank per option in choice order, highest = best — build with
+ *   {@link rankedOrderToScores}, or via {@link encodeQuestionSelections} (see encodeRanked)
  * - budget / quadratic: per-option amount array [a0, a1, …]
  *
  * @param input - Election config with questions and voteType
@@ -75,6 +79,19 @@ export function encodeBallot(
       throw new Error(`cannot encode a ballot for question 0: ${collision}`)
     }
   }
+  // Ranked's question-level defects have no per-ballot backstop (at maxValue 0
+  // assertEncodedBallot treats the bound as absent, and duplicated choice values leave
+  // every ballot well-formed), so refuse them up front, for every voter.
+  if (ballotType === BallotType.Ranked) {
+    const unrankable = unrankableProtocolReason(questions[0]?.choices.length ?? 0, voteType.maxValue)
+    if (unrankable) {
+      throw new Error(`cannot encode a ballot for question 0: ${unrankable}`)
+    }
+    const ambiguous = duplicateRankedValuesReason(questions[0]?.choices ?? [])
+    if (ambiguous) {
+      throw new Error(`cannot encode a ballot for question 0: ${ambiguous}`)
+    }
+  }
   const perQuestion = normalizeSelections(input, selections)
 
   const ballot = ((): number[] => {
@@ -89,6 +106,9 @@ export function encodeBallot(
 
       case BallotType.MultiChoice:
         return encodeMultiChoice(voteType, questions[0], perQuestion[0] ?? [])
+
+      case BallotType.Ranked:
+        return encodeRanked(perQuestion[0] ?? [], questions[0]?.choices.length ?? 0)
 
       case BallotType.Budget:
       case BallotType.Quadratic:
@@ -206,6 +226,111 @@ function encodeMultiChoice(voteType: VoteType, question: Question, selections: n
 }
 
 /**
+ * Encode a ranked ballot: pass-through of one rank per option, in choice order,
+ * **highest = best** (top choice gets `numChoices - 1`, last gets `0`). The
+ * orientation is a convention the protocol has no opinion about; decode's Borda sum
+ * assumes it, and a ballot built the other way round is valid wire that elects the
+ * loser. Build the array with {@link rankedOrderToScores} rather than by hand.
+ *
+ * Length is checked here and nowhere else: `assertEncodedBallot` has no opinion on
+ * field count, and a short slate must fail exactly where {@link validateSelections}
+ * fails it. Padding is impossible — the protocol is pigeonhole-tight, so any filler
+ * repeats a rank and the chain drops the whole ballot at tally.
+ */
+function encodeRanked(selections: number[], numChoices: number): number[] {
+  if (selections.length !== numChoices) {
+    throw new Error(
+      `ranked requires one rank per option (${numChoices}), got ${selections.length}`
+    )
+  }
+  return [...selections]
+}
+
+/**
+ * Turn a voter's ranking — the choice **values** they ordered, best first — into the
+ * wire ballot for a ranked question: one rank per option, in **choice order**,
+ * highest = best. The two are transposes, and this conversion is where the
+ * orientation decision lives — hand-rolled (`n - 1 - position`) and inverted, the
+ * result is a valid ballot the Borda decode reads upside-down.
+ *
+ * ```ts
+ * // choices C0..C3, voter ranks C2 > C0 > C3 > C1
+ * rankedOrderToScores(question, [2, 0, 3, 1])  // → [2, 0, 3, 1] (its own transpose, not a pass-through)
+ * // choices C0..C2, voter ranks C2 > C0 > C1
+ * rankedOrderToScores(question, [2, 0, 1])     // → [1, 0, 2]
+ * ```
+ *
+ * @param question - the ranked question, read for its `choices`
+ * @param order - the choice values, best first; must be a complete permutation
+ * @throws On an unpublished choice, a repeat, or an incomplete ordering — a partial
+ *   ranking cannot be padded (the protocol is pigeonhole-tight): it would repeat a
+ *   rank and be discarded at tally while still counting in `voteCount`.
+ */
+export function rankedOrderToScores(question: { choices: Choice[] }, order: number[]): number[] {
+  const choices = question.choices ?? []
+  const values = choices.map((choice) => choice.value)
+  const published = new Set(values)
+
+  // Duplicated choice values would trip the checks below anyway, but the defect is in
+  // the *question*, not the ranking — name it directly, in the encoders' words.
+  const ambiguous = duplicateRankedValuesReason(choices)
+  if (ambiguous) {
+    throw new Error(`ranked: ${ambiguous}`)
+  }
+
+  const rankByValue = new Map<number, number>()
+
+  order.forEach((value, position) => {
+    if (!published.has(value)) {
+      throw new Error(
+        `ranked: ${value} is not a choice value of this question (published: ${values.join(', ')})`
+      )
+    }
+    if (rankByValue.has(value)) {
+      throw new Error(`ranked: choice ${value} appears more than once in the ranking`)
+    }
+    // Highest = best: the first-placed option takes the top rank.
+    rankByValue.set(value, choices.length - 1 - position)
+  })
+
+  if (order.length !== choices.length) {
+    const missing = values.filter((value) => !rankByValue.has(value))
+    throw new Error(
+      `ranked: every option must be ranked (${order.length} of ${choices.length} ranked` +
+        `${missing.length > 0 ? `, missing ${missing.join(', ')}` : ''}). A ranked protocol ` +
+        'leaves exactly one rank per option, so a partial ranking repeats a value and the ' +
+        'chain discards the whole ballot at tally'
+    )
+  }
+
+  return choices.map((choice) => rankByValue.get(choice.value)!)
+}
+
+/**
+ * Encode one question's ballot from what a **voter-facing form** collects — the entry
+ * point a UI should reach for. Identical to {@link encodeQuestionBallot} except for
+ * ranked, whose form value is the voter's **ordering** (choice values, best first)
+ * while the wire wants one rank per option in choice order:
+ * {@link rankedOrderToScores} applies that transposition and its highest-is-best
+ * orientation here, once, instead of at every call site — where a hand-rolled,
+ * inverted version would be a valid ballot that silently elects the loser.
+ *
+ * @param selections - The ordering (best first) for a ranked question, the raw
+ *   selections for every other type
+ * @throws Everything {@link encodeQuestionBallot} throws, plus — for ranked —
+ *   whatever {@link rankedOrderToScores} refuses.
+ */
+export function encodeQuestionSelections(
+  question: { ballotProtocol?: BallotProtocol; type?: string; metadata?: Record<string, unknown>; typeSetup?: QuestionTypeSetup; choices: Choice[] },
+  selections: number[]
+): number[] {
+  return encodeQuestionBallot(
+    question,
+    declaresRanked(question) ? rankedOrderToScores(question, selections) : selections
+  )
+}
+
+/**
  * Encode budget or quadratic ballot: per-option amount array, in choice order.
  */
 function encodeBudgetOrQuadratic(selections: number[]): number[] {
@@ -241,6 +366,15 @@ function questionProtocolBounds(question: {
   choices: Choice[]
 }): ProtocolBounds | null {
   if (question.ballotProtocol) return question.ballotProtocol
+  // A declared ranking has a canonical protocol (ranks 0..n-1, unique) even when the
+  // read omitted it. Without this, the call site's `?? {maxValue: 0, uniqueValues:
+  // false}` fallback means "unbounded, repeats fine" and `[1, 1, 1]` encodes cleanly
+  // as a ranking the chain drops at tally. Not in the switch: `ranked` is not a
+  // backend type name and is reachable through the metadata bag too.
+  if (declaresRanked(question)) {
+    const n = question.choices.length
+    return { maxCount: n, maxValue: Math.max(0, n - 1), uniqueValues: true }
+  }
   switch (question.type) {
     case 'singlechoice':
       return {
@@ -293,6 +427,14 @@ export function encodeQuestionBallot(
       throw new Error(`cannot encode a ballot for this question: ${collision}`)
     }
   }
+  // Ranked's version of the same defect: duplicated choice values leave every ballot
+  // well-formed and the decoded rows sharing an id, so nothing downstream can notice.
+  if (ballotType === BallotType.Ranked) {
+    const ambiguous = duplicateRankedValuesReason(question.choices)
+    if (ambiguous) {
+      throw new Error(`cannot encode a ballot for this question: ${ambiguous}`)
+    }
+  }
   const fakeQuestion: Question = { title: { default: '' }, choices: question.choices }
 
   const ballot = ((): number[] => {
@@ -340,6 +482,9 @@ export function encodeQuestionBallot(
         }
         return encodeMultiChoice(ballotProtocolToVoteType(bp), fakeQuestion, selections)
       }
+
+      case BallotType.Ranked:
+        return encodeRanked(selections, question.choices.length)
 
       case BallotType.Budget:
       case BallotType.Quadratic:

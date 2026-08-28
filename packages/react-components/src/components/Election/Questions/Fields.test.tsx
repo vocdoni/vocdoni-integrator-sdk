@@ -14,6 +14,7 @@ vi.mock('@vocdoni/react-providers', () => ({
 }))
 
 import { ElectionQuestion } from './Fields'
+import { QuestionsFormProvider } from './Form'
 
 const FormHost = ({ children }: { children: ReactNode }) => {
   const methods = useForm()
@@ -229,5 +230,57 @@ describe('questionSelectionRange', () => {
       voteType: { maxCount: 3, maxValue: 3, uniqueChoices: false },
     }).questions[0]
     expect(questionSelectionRange(question)).toEqual({ min: 1, max: 3 })
+  })
+})
+
+describe('the default choice slots keep component props off the DOM', () => {
+  // `hasImage` is a slot prop, not an HTML attribute. A default slot that forgets to
+  // destructure it spreads it onto the <label>, which React renders as a stray
+  // `hasimage="true"` and warns about once per option per render.
+  const imaged = (metadata?: Record<string, unknown>) => ({
+    title: 'Q',
+    choices: [0, 1, 2].map((v) => ({
+      title: `C${v}`,
+      value: v,
+      meta: { image: { default: 'https://cdn.example/a.jpeg' } },
+    })),
+    ballotProtocol: { maxCount: 3, maxValue: 2, uniqueValues: true },
+    ...(metadata ? { metadata } : {}),
+  })
+
+  // The real form provider, not the bare FormHost above: nothing is overridden here, so
+  // the default `ElectionQuestion` slot renders its tip, which reads the questions form.
+  const renderDefault = (question: ReturnType<typeof imaged>) => {
+    state.election = makeProcess({ questions: [question] })
+    return renderWithComponents(
+      <QuestionsFormProvider>
+        <ElectionQuestion question={state.election.questions[0]} index='0' />
+      </QuestionsFormProvider>,
+    )
+  }
+
+  /**
+   * React 19 does not render an unknown `true`-valued prop as an attribute — it drops
+   * it and logs instead, so the DOM looks clean and only the console says otherwise.
+   * The global setup silences console.error with a spy, which is what makes the noise
+   * invisible in the first place; read that spy back rather than trusting the markup.
+   */
+  const reactComplaintsAbout = (prop: string) =>
+    vi
+      .mocked(console.error)
+      .mock.calls.map((args) => args.join(' '))
+      .filter((message) => message.toLowerCase().includes(prop.toLowerCase()))
+
+  // Both slots in one test, on purpose: React remembers which attribute names it has
+  // already objected to, so whichever renders first is the only one that can warn.
+  // Split in two, the second test would pass vacuously on the back of the first.
+  it('does not forward hasImage to the DOM, from either choice slot', () => {
+    const checkboxes = renderDefault(imaged())
+    expect(checkboxes.container.querySelectorAll('input[type="checkbox"]')).not.toHaveLength(0)
+    expect(reactComplaintsAbout('hasimage')).toEqual([])
+
+    const ranked = renderDefault(imaged({ type: { name: 'ranked' } }))
+    expect(ranked.container.querySelectorAll('select')).not.toHaveLength(0)
+    expect(reactComplaintsAbout('hasimage')).toEqual([])
   })
 })

@@ -1,6 +1,6 @@
 import type { BallotProtocol, Choice, QuestionTypeSetup, VoteType } from '@vocdoni/api-types'
 import { BallotType } from './types'
-import { inferQuestionBallotType, isPickSlotLayout } from './infer'
+import { declaresRanked, inferQuestionBallotType, isPickSlotLayout } from './infer'
 
 /** The part of a ballot protocol the satisfiability rule reads. */
 export type ProtocolBounds = Pick<BallotProtocol, 'maxCount' | 'maxValue' | 'uniqueValues'>
@@ -38,10 +38,10 @@ export type ProtocolBounds = Pick<BallotProtocol, 'maxCount' | 'maxValue' | 'uni
  * over more than two choices only 0 and 1 are available, so every ballot repeats a
  * value — even a single pick, `[1, 0, 0, 0]`, repeats `0`. Note that at *exactly* two
  * fields `[0, 1]` and `[1, 0]` do satisfy it — a satisfiable 2-option index-list
- * multichoice (wire-identical to a 2-option ranked ballot; real ranked decoding is
- * tracked separately in issue #22); that is allowed here, matching the backend. The
- * named `multichoice` type cannot reach it either way, because the API rejects
- * `typeSetup.uniqueChoices` outright.
+ * multichoice, wire-identical to a 2-option ranked ballot, which is why only a
+ * declared name tells the two apart ({@link BallotType.Ranked}); that is allowed
+ * here, matching the backend. The named `multichoice` type cannot reach it either
+ * way, because the API rejects `typeSetup.uniqueChoices` outright.
  *
  * `maxValue === 0` means "no upper bound" (budget / quadratic), so uniqueness is
  * always satisfiable there and is never reported.
@@ -68,6 +68,34 @@ export function unsatisfiableProtocolReason(bp: ProtocolBounds): string | null {
     `value(s) for ${bp.maxCount} ballot fields, so no ballot can fill them without repeating ` +
     `one — every vote would be discarded at tally, leaving an all-zero result.${dense} ` +
     `Raise maxValue to at least ${bp.maxCount - 1}, or set uniqueValues/typeSetup.uniqueChoices false`
+  )
+}
+
+/**
+ * Explain why a *ranked* question's protocol can never produce a ranking, or `null`.
+ *
+ * Separate from {@link unsatisfiableProtocolReason} because that one mirrors the
+ * backend's `ValidateBallotProtocol` exactly, and the backend has no ranked concept.
+ * The single case is `maxValue === 0`: "unbounded" for every other type, but on chain
+ * it switches the scrutinizer to discrete aggregation (one-cell rows), so the Borda
+ * decode scores every option 0 and the tally is indistinguishable from "nobody
+ * voted" — it must be caught before anyone votes. `maxValue < numChoices - 1` is
+ * deliberately not checked here: it already fails loudly per ballot in
+ * {@link assertEncodedBallot}. Returns `null` for shapes it cannot judge.
+ */
+export function unrankableProtocolReason(numChoices: number, maxValue: number): string | null {
+  if (!Number.isInteger(numChoices) || numChoices < 2) return null
+  if (!Number.isInteger(maxValue) || maxValue < 0) return null
+  if (maxValue !== 0) return null
+
+  return (
+    'this question is declared ranked, but its protocol has maxValue 0. That means "no upper ' +
+    'bound" everywhere else, and on chain it switches the scrutinizer to discrete aggregation: ' +
+    'the ranks are accumulated into a single column instead of bucketed into a histogram. The ' +
+    'Borda decode is an index-weighted sum over that histogram, so every option would score 0 ' +
+    'no matter how anyone votes, and the result is indistinguishable from an election nobody ' +
+    `voted in. Set maxValue to ${numChoices - 1} (one distinct rank per option), or drop the ` +
+    'ranked declaration if this is really a budget/quadratic ballot'
   )
 }
 
@@ -140,10 +168,20 @@ export function assertEncodedBallot(ballot: number[], bounds: ProtocolBounds): v
 export function unsatisfiableQuestionReason(question: {
   ballotProtocol?: BallotProtocol
   type?: string
+  metadata?: Record<string, unknown>
   typeSetup?: QuestionTypeSetup
   choices: Choice[]
 }): string | null {
   const bp = question.ballotProtocol
+
+  // Ranked first: `maxValue: 0` is the one shape the general rule correctly waves
+  // through that a ranking can never survive. Only with a protocol actually read —
+  // public reads may omit it, and absent is not zero.
+  if (bp && declaresRanked(question)) {
+    const unrankable = unrankableProtocolReason(question.choices?.length ?? 0, bp.maxValue)
+    if (unrankable) return unrankable
+  }
+
   if (bp) return unsatisfiableProtocolReason(bp)
 
   if (question.type === 'multichoice' && question.typeSetup?.uniqueChoices && question.choices.length > 1) {
@@ -161,6 +199,7 @@ export function unsatisfiableQuestionReason(question: {
 export function isUnsatisfiableQuestion(question: {
   ballotProtocol?: BallotProtocol
   type?: string
+  metadata?: Record<string, unknown>
   typeSetup?: QuestionTypeSetup
   choices: Choice[]
 }): boolean {
@@ -215,6 +254,9 @@ type QuestionLike = {
  * - **approval / dense multichoice / budget / quadratic** — position-addressed. One
  *   field per choice in choice order, so `choice.value` is a display label the wire
  *   never sees and any values at all are fine.
+ * - **ranked** — position-addressed too (fields are options, not slots, so no abstain
+ *   sentinels to collide with), but the values still label the decoded rows: two
+ *   choices sharing one are unorderable — see {@link duplicateRankedValuesReason}.
  *
  * Returns `null` rather than a verdict for shapes it cannot judge (no derivable
  * ballot type, no choices, non-integer or negative values), matching
@@ -234,7 +276,13 @@ export function uncastableChoicesReason(question: QuestionLike): string | null {
   // Without a raw protocol the named singlechoice type derives maxValue from these
   // very values (questionProtocolBounds, mirroring VoteTypeFromQuestion), so every
   // value fits by construction and there is nothing to report.
-  if (!bp) return null
+  //
+  // Ranked is the exception: its defect (duplicate values) has no ceiling to measure
+  // against, and the encoder refuses it with or without a protocol — silence here
+  // would leave hasUncastableChoices disagreeing with the encoder.
+  if (!bp) {
+    return ballotType === BallotType.Ranked ? duplicateRankedValuesReason(question.choices) : null
+  }
 
   return uncastableChoicesReasonFor(
     ballotType,
@@ -282,6 +330,30 @@ export function pickSlotCollisionReason(choices: Choice[]): string | null {
     `${numChoices} as an abstention — so a value in that range is indistinguishable from an ` +
     'abstain, and a gap below it pushes a real choice up into sentinel space. Renumber the ' +
     `choices 0..${numChoices - 1}`
+  )
+}
+
+/**
+ * Explain why a *ranked* question's choice values make its result unreadable, or
+ * `null`. Like {@link pickSlotCollisionReason}, no ballot inspection can reach it:
+ * ranked is position-addressed, so a duplicated `choice.value` never touches the
+ * wire — the damage is on decode, where rows are keyed by value and two options come
+ * back under one id. A ranking cannot order them apart either, which is why
+ * {@link rankedOrderToScores} refuses the same shape.
+ */
+export function duplicateRankedValuesReason(choices: Choice[]): string | null {
+  const values = choices?.map((choice) => choice.value) ?? []
+  if (values.length === 0) return null
+  if (values.some((value) => !Number.isInteger(value) || value < 0)) return null
+
+  const duplicated = [...new Set(values.filter((value, i) => values.indexOf(value) !== i))]
+  if (duplicated.length === 0) return null
+
+  return (
+    `choice value(s) ${duplicated.join(', ')} are used by more than one choice. A ranking is ` +
+    'keyed by choice value, so it cannot tell those options apart, and the decoded results ' +
+    'would report both under one choice id — one option rendered twice, with two different ' +
+    'scores. Give every choice a distinct value'
   )
 }
 
@@ -372,7 +444,13 @@ export function uncastableChoicesReasonFor(
     )
   }
 
-  // Position-addressed layouts: choice.value never reaches the wire.
+  if (ballotType === BallotType.Ranked) {
+    // Position-addressed, so the values never reach the wire — but they do label the
+    // decoded rows, and a ranking has no way to order two options that share one.
+    return duplicateRankedValuesReason(choices)
+  }
+
+  // The remaining position-addressed layouts: choice.value never reaches the wire.
   return null
 }
 

@@ -14,6 +14,9 @@ export const BallotType: {
   SingleChoice: 'single-choice'
   MultiChoice: 'multichoice'
   Approval: 'approval'
+  // Only ever selected by a declared `ranked` name — never inferred from shape, because
+  // a ranked protocol is byte-identical to a full-slate pick-slot multichoice.
+  Ranked: 'ranked'
   Budget: 'budget'
   Quadratic: 'quadratic'
 }
@@ -57,11 +60,18 @@ export function unsatisfiableProtocolReason(bp: ProtocolBounds): string | null
 export function unsatisfiableQuestionReason(question: {
   ballotProtocol?: BallotProtocol
   type?: string
+  metadata?: Record<string, unknown>
   typeSetup?: QuestionTypeSetup
   choices: Choice[]
 }): string | null
 export function isUnsatisfiableProtocol(bp: ProtocolBounds): boolean
 export function isUnsatisfiableQuestion(question: { /* as above */ }): boolean
+
+// Why a RANKED question's protocol can never produce a ranking, or null. The one case
+// is `maxValue: 0` — "unbounded" for every other type, but it puts the chain in discrete
+// aggregation, and the Borda decode then scores every option zero. Folded into
+// `unsatisfiableQuestionReason` and refused by both encoders; exported for read-side checks.
+export function unrankableProtocolReason(numChoices: number, maxValue: number): string | null
 
 // The part of a ballot protocol the satisfiability rule reads.
 export type ProtocolBounds = Pick<BallotProtocol, 'maxCount' | 'maxValue' | 'uniqueValues'>
@@ -88,6 +98,27 @@ export function isDenseBallotProtocol(
 export function declaresLegacyPickSlot(question: {
   metadata?: Record<string, unknown>
 }): boolean
+
+// True when a question declares itself `ranked`, in either name channel. The same
+// question `inferQuestionBallotType` asks, minus the shape fallback and minus its throw,
+// so it is safe on a partial read that carries neither a protocol nor a type.
+export function declaresRanked(question: {
+  type?: string
+  metadata?: Record<string, unknown>
+}): boolean
+
+// Turn a voter's ranking — the choice VALUES they ordered, best first — into the wire
+// ballot: one rank per option in choice order, highest = best. This is where the
+// orientation lives; building the array by hand risks inverting it, and the Borda decode
+// cannot tell. Throws on a ranking that repeats a choice, names an unpublished one,
+// leaves any option unranked, or belongs to a question with duplicate choice values.
+export function rankedOrderToScores(question: { choices: Choice[] }, order: number[]): number[]
+
+// Encode one question's ballot from what a voter-facing form collects, whatever the
+// ballot type: the ORDERING for a ranked question (transposed for you), the raw
+// selections for everything else. The entry point a UI should use — it keeps the
+// per-type branch in one place, where it cannot be written the wrong way round.
+export function encodeQuestionSelections(question: QuestionLike, selections: number[]): number[]
 
 // Assert an encoded wire ballot would survive the scrutinizer's per-field checks
 // (range + uniqueness). The encoders run it on everything they produce; call it
@@ -140,6 +171,7 @@ each vocabulary names the opposite wire layout:
 | --- | --- | --- |
 | `type` (SaaS field) | `singlechoice`, `multichoice` | `multichoice` = **dense** 0/1 |
 | `meta.type.name` / `metadata.type.name` (legacy bag) | `single-choice-multiquestion`, `multiple-choice`, `approval`, `budget-based`, `quadratic` | `multiple-choice` = **pick-slot** index list |
+| *both* — names this SDK defines | `ranked` | one rank per option, highest = best |
 
 Reading a SaaS spelling as a legacy one would column-sum a dense matrix; the reverse
 inverts a two-option tally. So a name is only ever resolved against its own table.
@@ -148,9 +180,22 @@ The legacy bag is read per question as well as per election, because in the SaaS
 question *is* its own vochain process — a question mapped from a legacy election carries
 that election's `metadata.type`.
 
-An absent, empty or unrecognized name falls through to the shape rules unchanged. There is
-no `ranked` entry in either table, so a ranked election still infers as multichoice (see
-[#22](https://github.com/vocdoni/integrator-sdk/issues/22)).
+An absent, empty or unrecognized name falls through to the shape rules unchanged.
+
+`ranked` is the exception to the follows-the-field rule, because it belongs to neither
+upstream vocabulary — it is this SDK's own name, so no layout is ambiguous between the two
+tables and both consult it. It is also the **only** way to reach `BallotType.Ranked`: no
+shape rule produces it, since a ranked protocol is byte-identical to a pick-slot multichoice
+whose voters fill every slot. In practice the writable channel is the metadata bag — the
+backend's `type` vocabulary is `['singlechoice', 'multichoice']` and it rejects anything
+else, while storing and echoing `metadata` verbatim:
+
+```typescript
+const decoded = decodeQuestionResults(
+  { ballotProtocol, metadata: { type: { name: 'ranked' } }, choices },
+  results,
+)
+```
 
 ## Encoding semantics
 
@@ -164,7 +209,22 @@ Only single-choice is ever multi-question, so a flat array is unambiguous:
 | single-choice | one chosen value per question `[v0, v1, …]` | one value per question `[v0, v1, …]` |
 | approval | the approved choice values | dense `0/1` vector over every option |
 | multichoice | the picked choice values | one value per pick-slot; unfilled slots padded with abstain sentinels when the protocol reserves them, otherwise a short ballot |
+| ranked | one rank per option, in choice order, highest = best | the rank array unchanged |
 | budget / quadratic | the per-option amounts, in choice order | the amount array unchanged |
+
+**Ranked** takes ranks, not an ordering. Hand the voter's ordering (choice values, best
+first) to `encodeQuestionSelections(question, order)` — or convert it yourself with
+`rankedOrderToScores(question, order)` — rather than building the rank array by hand. The
+orientation is a convention the protocol has no opinion about, and the decode is an
+index-weighted sum, so a ballot ranked with `0` as "best" is perfectly valid and elects the
+loser with nothing on either side able to notice. A ranking must be **complete**: the
+protocol leaves exactly one rank per option, so a partial one repeats a value and the chain
+discards the whole ballot — every encoder refuses a short slate, matching
+`validateSelections`. Two more ranked-only refusals apply to the *question* rather than the
+ballot, and are enforced for every voter as well as at creation: `maxValue: 0` (see the
+decoding section) and two choices sharing a `value`, which would return two decoded rows
+under one choice id. An election-level `ranked` declaration with more than one question is
+refused outright — a ranking fills the whole ballot, so rank per question instead.
 
 **Abstaining:**
 
@@ -195,6 +255,7 @@ depends on the protocol:
 | single-choice | one row per question, one column per choice value | `results[q][choiceValue]` |
 | approval / dense multichoice | one row per option, `[notSelected, selected]` | `results[optionPos][1]` |
 | pick-slot multichoice | one row per pick-slot, columns are choice values | column sum across rows; sentinel columns (`>= choices.length`) unify into one `abstain` bucket |
+| ranked | one row per option, columns are ranks | **Borda**: `Σ count × rank` over the row |
 | budget / quadratic | one row per option, **one column** | `results[optionPos][0]` |
 
 The decoder tells dense and pick-slot multichoice apart from the protocol, not a flag: dense
@@ -208,19 +269,26 @@ scrutinizer to *discrete aggregation*: it accumulates `Σ amount × weight` into
 "The results are aggregated, so we use only the first column of the results matrix").
 Reading such a row as a histogram yields zero for every option.
 
-> **Ranked ballots are encodable but not decodable as a ranking** —
-> [integrator-sdk#22](https://github.com/vocdoni/integrator-sdk/issues/22). A ranked
-> protocol (`uniqueValues: true`, `maxValue >= maxCount - 1`) encodes correctly — pass
-> one score per option in choice order, **higher wins** — but there is no ranked branch
-> in the decoder: it is labelled `multichoice`, so `decodeResults` reports *how many
-> voters ranked each option* (a ranked protocol reserves no sentinel headroom, so the
-> `abstain` bucket is always `0`), not the resulting order.
->
-> The protocol cannot be told apart from a pick-slot multichoice that fills every slot —
-> the two are byte-identical, with field index meaning *option* in one and *slot* in the
-> other — so this needs an explicit signal, not better inference. Until then, aggregate
-> the raw matrix yourself:
-> `results.map((f) => f.reduce((s, c, rank) => s + Number(c) * rank, 0))`.
+**Ranked** aggregates with Borda, and that is not one method among several: the matrix is a
+per-field histogram with the individual ballots already discarded, and positional/Condorcet
+methods need the ballots. Two consequences for the decoded shape:
+
+- `votes` is **points, not voters** (as it already is for budget/quadratic amounts), and
+  `percentage` is each option's share of the total points. Sort descending for the ranking.
+- There is **no `abstain` bucket**. The sentinel columns the multichoice branch unifies are a
+  pick-slot device for unfilled slots; a ranking has none, since every option is a field.
+
+Ranked is also the only type for which `maxValue: 0` is fatal rather than lax — it puts the
+chain in the discrete aggregation described above, so the index-weighted sum reads column 0
+and scores every option zero. `unrankableProtocolReason` reports it, and both encoders and
+`validateSelections` refuse such a question outright.
+
+```typescript
+// 3 voters all rank C2 > C0 > C1 → raw [['0','3','0'], ['3','0','0'], ['0','0','3']]
+const decoded = decodeQuestionResults(question, results)
+const points = decoded.map((r) => r.votes)                            // [3, 0, 6]
+const ranking = [...decoded].sort((a, b) => b.votes - a.votes).map((r) => r.choice) // [2, 0, 1] — C2 wins
+```
 
 ## Unsatisfiable ballot configs
 

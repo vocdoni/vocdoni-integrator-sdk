@@ -172,11 +172,11 @@ describe('inferBallotType', () => {
     })
 
     it('ignores an unrecognized, empty or absent name', () => {
-      // `ranked` is a real legacy concept with no ElectionResultsTypeNames entry and no
-      // BallotType member (see #22) — it must not hijack the tree. An empty string is the
-      // stored form for raw-protocol questions, so it must read as "no name".
+      // An unknown spelling must not hijack the tree, and an empty string is the stored
+      // form for raw-protocol questions, so it must read as "no name". (`ranked` used to
+      // be the example here; it is a recognized SDK name since #22 — see ranked.test.ts.)
       const shaped = createElection({ maxCount: 3, maxValue: 4 })
-      expect(inferBallotType({ ...shaped, type: 'ranked' })).toBe(BallotType.MultiChoice)
+      expect(inferBallotType({ ...shaped, type: 'condorcet' })).toBe(BallotType.MultiChoice)
       expect(inferBallotType({ ...shaped, type: '' })).toBe(BallotType.MultiChoice)
       expect(inferBallotType({ ...shaped, type: undefined })).toBe(BallotType.MultiChoice)
     })
