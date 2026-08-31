@@ -43,8 +43,8 @@ import { apiKey, makeAdminClient, makeClient } from './helpers'
 //
 // Opt-in: needs INTEGRATION_API_KEY (a `vsk_…` key whose org is an integrator
 // with scopes managed:write + members:write + voting:write, and quota for >=5
-// processes / >=10 on-chain elections / >=200 census). It creates real on-chain
-// elections and casts 40 real votes, so it is excluded from the default run and
+// processes / >=11 on-chain elections / >=200 census). It creates real on-chain
+// elections and casts 44 real votes, so it is excluded from the default run and
 // takes several minutes.
 const suite = apiKey ? describe : describe.skip
 
@@ -775,7 +775,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
 
       step(`done — ${nullifiers.size} votes cast across ${questionCount} on-chain processes`)
     },
-    // 5 processes / 10 on-chain elections / 40 votes, each vote a CSP sign + relay
+    // 5 processes / 11 on-chain elections / 44 votes, each vote a CSP sign + relay
     // + job poll, plus publish jobs and the indexer lag before the tally settles.
     // Kept under the CI job's timeout-minutes (25) so a hang surfaces as a test
     // failure with the suite's own diagnostics, not as a killed runner.

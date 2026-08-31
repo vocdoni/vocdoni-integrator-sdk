@@ -20,7 +20,7 @@ so there are no dev-DB fixtures to rot. It runs in CI
 (`.github/workflows/integration.yml`) against a disposable saas-api + vochain
 container on every pull request, on pushes to `main`, and on a nightly
 schedule. The whole job takes ~7 minutes (~5.7 min of it the suite itself:
-10 on-chain elections and 40 votes, each a CSP sign + relay + job poll).
+11 on-chain elections and 44 votes, each a CSP sign + relay + job poll).
 
 To run the same stack locally:
 
@@ -107,7 +107,7 @@ asserted here rather than only the two named question types.
 | `INTEGRATION_API_KEY` | — (suite skips without it)         | Integrator API key (`vsk_…`)  |
 
 The key's organization must be an **integrator** with scopes `managed:write` +
-`members:write` + `voting:write`, and quota for ≥5 processes / ≥10 on-chain
+`members:write` + `voting:write`, and quota for ≥5 processes / ≥11 on-chain
 elections / ≥300 census size. The suite creates real on-chain elections and
 casts 40 real votes, so expect it to take ~6 minutes. (The disposable stack
 above provisions all of that for you — this only applies when pointing
