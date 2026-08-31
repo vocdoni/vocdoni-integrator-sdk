@@ -1,5 +1,5 @@
 import { mod } from '@noble/curves/abstract/modular'
-import { bytesToNumberBE } from '@noble/curves/abstract/utils'
+import { bytesToNumberBE, bytesToNumberLE, numberToBytesBE, numberToVarBytesBE } from '@noble/curves/abstract/utils'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { keccak_256 } from '@noble/hashes/sha3'
 import type { BlindPoint, BlindSignature } from './blind-secp256k1'
@@ -32,23 +32,19 @@ export function verify(m: bigint, signature: BlindSignature, q: BlindPoint): boo
 export function salt(processId: Uint8Array, weight: bigint): bigint {
   const preimage = new Uint8Array(processId.length + 32)
   preimage.set(processId)
-  for (let i = 31, rest = weight; i >= 0; i--, rest >>= 8n) preimage[processId.length + i] = Number(rest & 0xffn)
+  preimage.set(numberToBytesBE(weight, 32), processId.length)
   return bytesToNumberBE(keccak_256(preimage).subarray(0, 20))
 }
 
-/** Go's `big.Int.Bytes()`: minimal big-endian, leading zeros dropped. */
-export function minimalBytes(value: bigint): Uint8Array {
-  let hex = value.toString(16)
-  if (hex === '0') return new Uint8Array(0)
-  if (hex.length % 2 === 1) hex = `0${hex}`
-  return fromHex(hex)
-}
+/** Go's `big.Int.Bytes()`: minimal big-endian, leading zeros dropped — zero is empty. */
+export const minimalBytes = (value: bigint): Uint8Array =>
+  value === 0n ? new Uint8Array(0) : numberToVarBytesBE(value)
 
 /** go-blindsecp256k1 `Point.Compress`: X big-endian (32 bytes) then an oddness byte. */
 export function compress(point: BlindPoint): Uint8Array {
   const { x, y } = point.toAffine()
   const out = new Uint8Array(33)
-  for (let i = 31, rest = x; i >= 0; i--, rest >>= 8n) out[i] = Number(rest & 0xffn)
+  out.set(numberToBytesBE(x, 32))
   out[32] = y & 1n ? 1 : 0
   return out
 }
@@ -61,16 +57,9 @@ export function scalar32(): bigint {
   }
 }
 
-/** Fixed 32-byte big-endian encoding, the width the wire uses. */
-export function bytes32(value: bigint): Uint8Array {
-  const out = new Uint8Array(32)
-  for (let i = 31, rest = value; i >= 0; i--, rest >>= 8n) out[i] = Number(rest & 0xffn)
-  return out
-}
-
 /** The inverse of `serializeBlindSignature`: `LE32(s) | LE32(F.x) | LE32(F.y)`. */
 export function deserializeBlindSignature(bytes: Uint8Array): BlindSignature {
-  const le = (from: number) => bytesToNumberBE(bytes.slice(from, from + 32).reverse())
+  const le = (from: number) => bytesToNumberLE(bytes.subarray(from, from + 32))
   return { s: le(0), f: secp256k1.ProjectivePoint.fromAffine({ x: le(32), y: le(64) }) }
 }
 
@@ -86,7 +75,12 @@ export const mockBlindCsp = {
 
   /** Blind-signs a blinded message (hex in, 32-byte scalar hex out). */
   sign: (electionId: string, blindedMessage: string, weight: string): string =>
-    toHex(bytes32(blindSign(BigInt(`0x${blindedMessage}`), mockSaltedKey(electionId, weight), mockNonce(electionId)))),
+    toHex(
+      numberToBytesBE(
+        blindSign(BigInt(`0x${blindedMessage}`), mockSaltedKey(electionId, weight), mockNonce(electionId)),
+        32,
+      ),
+    ),
 
   /** The salted census key the chain would verify this election's ballots against. */
   censusKey: (electionId: string, weight: string): BlindPoint =>

@@ -1,8 +1,7 @@
 import { invert, mod } from '@noble/curves/abstract/modular'
 import { secp256k1 } from '@noble/curves/secp256k1'
 import { keccak_256 } from '@noble/hashes/sha3'
-import { bytesToNumberBE } from '@noble/curves/abstract/utils'
-import { fromHex } from './hex'
+import { bytesToNumberBE, numberToBytesLE, numberToVarBytesBE } from '@noble/curves/abstract/utils'
 
 /**
  * Blind signatures over secp256k1, as used by the Vocdoni CSP for anonymous
@@ -116,9 +115,9 @@ export function unblind(sBlind: bigint, secret: BlindUserSecret): BlindSignature
 export function serializeBlindSignature(signature: BlindSignature): Uint8Array {
   const { x, y } = signature.f.toAffine()
   const out = new Uint8Array(BLIND_SIGNATURE_BYTES)
-  out.set(toLittleEndian32(signature.s), 0)
-  out.set(toLittleEndian32(x), 32)
-  out.set(toLittleEndian32(y), 64)
+  out.set(numberToBytesLE(signature.s, 32), 0)
+  out.set(numberToBytesLE(x, 32), 32)
+  out.set(numberToBytesLE(y, 32), 64)
   return out
 }
 
@@ -139,24 +138,11 @@ export function blindMessageFromBundle(bundle: Uint8Array): bigint {
  * every 256 votes.
  */
 function hashScalar(m: bigint): bigint {
-  let hex = m.toString(16)
-  if (hex === '0') return bytesToNumberBE(keccak_256(new Uint8Array(0)))
-  if (hex.length % 2 === 1) hex = `0${hex}`
-  return bytesToNumberBE(keccak_256(fromHex(hex)))
+  // Go's minimal encoding of zero is empty; noble's is a single 0x00 byte.
+  return bytesToNumberBE(keccak_256(m === 0n ? new Uint8Array(0) : numberToVarBytesBE(m)))
 }
 
 /** A uniform scalar in [1, n-1], the range Go's `newRand` draws from. */
 function randomScalar(): bigint {
   return bytesToNumberBE(secp256k1.utils.randomPrivateKey())
-}
-
-/** Fixed-width 32-byte little-endian encoding of a scalar. */
-function toLittleEndian32(value: bigint): Uint8Array {
-  const out = new Uint8Array(32)
-  let rest = value
-  for (let i = 0; i < 32; i++) {
-    out[i] = Number(rest & 0xffn)
-    rest >>= 8n
-  }
-  return out
 }
