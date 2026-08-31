@@ -129,7 +129,9 @@ custom flow.
 
 ```ts
 // Round 1 — one blind point per election. Atomic and idempotent: a repeat
-// returns the same tokenR, so retrying the flow is safe.
+// returns the same tokenR, so this round is safe to retry. Round 2 is not —
+// a signed election has spent its nonce, and re-blinding under a fresh secret
+// makes the signature you already hold the only usable one.
 const { points } = await client.processes.blindPoint(processId, {
   authToken,
   electionIds: [question.upstreamId!],

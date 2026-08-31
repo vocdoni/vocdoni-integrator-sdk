@@ -18,13 +18,17 @@
  * Everything else — auth, check, ballot encoding, encryption — is identical.
  *
  * Prerequisites:
- *   pnpm add @vocdoni/api-client @vocdoni/api-voting @vocdoni/ballot @vocdoni/proto
+ *   pnpm add @vocdoni/api-client @vocdoni/api-voting @vocdoni/ballot
  */
 
 import { VocdoniApiClient } from '@vocdoni/api-client'
-import { EphemeralSigner, signBlindCspBallots, VotingClient } from '@vocdoni/api-voting'
+import {
+  EphemeralSigner,
+  ProofCA_Type,
+  signBlindCspBallots,
+  VotingClient,
+} from '@vocdoni/api-voting'
 import { encodeQuestionBallot } from '@vocdoni/ballot'
-import { ProofCA_Type } from '@vocdoni/proto/vochain'
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -77,8 +81,12 @@ if (votable.length === 0) throw new Error('Nothing left to vote on')
 //   POST /blind-sign   → the CSP signs bytes it cannot read
 //   (unblind locally)  → a 96-byte ProofCA signature
 //
-// Retrying the whole call is safe: round 1 is idempotent and a failed round 2
-// does not consume the election's one-time nonce.
+// On retry: round 1 is idempotent, and a question this call reported as failed
+// BEFORE round 2 never consumed anything, so it is safe to ask again. One that
+// came back signed is not — its nonce is spent and a rerun blinds under a fresh
+// secret, so the signature you already hold is the only usable one. If the
+// round-2 response is lost in flight the outcome is simply unknown: check the
+// voter state rather than re-signing blind.
 
 const signers = votable.map(() => new EphemeralSigner())
 
@@ -113,7 +121,11 @@ for (const [i, result] of signed.entries()) {
     //                            into the salt of the key the chain verifies
     //                            against, so changing it breaks the signature
     proofType: ProofCA_Type.ECDSA_BLIND_PIDSALTED,
-    encryptionKeys: question.encryptionKeys, // ignored unless secretUntilTheEnd
+    // Only for a secret question: buildVotePackage encrypts whenever keys are
+    // present and never reads secretUntilTheEnd, so passing them on a cleartext
+    // question seals a ballot no keykeeper will ever unseal — the chain accepts
+    // it and the scrutinizer drops it at tally.
+    encryptionKeys: question.secretUntilTheEnd ? question.encryptionKeys : undefined,
   })
 
   const job = await client.jobs.waitFor(jobId, { timeoutMs: 90_000 })

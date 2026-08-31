@@ -128,9 +128,12 @@ const {
   resend,        // ({ email?, phone? }) => Promise<void>
   check,         // () => Promise<ProcessCheckResponse> — per-question canVote/hasVoted
   sign,          // (electionId, address) => Promise<ElectionSignResult> — electionId = question.upstreamId
-  signBatch,     // (ballots: {electionId, address}[]) => Promise<ElectionSignBatchResult[]>
-                 //   all questions in one call; picks the plain or blind CSP flow itself
-                 //   from census.anonymous. Results are in request order, one per ballot.
+                 //   throws on an anonymous census: that proof would be rooted at the
+                 //   wrong key, and asking would spend the one-shot authorization
+  signBatch,     // (ballots: ElectionSignBatchBallot[]) => Promise<ElectionSignBatchResult[]>
+                 //   ballot = {electionId, address}. All questions in one call; picks the
+                 //   plain or blind CSP flow itself from census.anonymous. Results are in
+                 //   request order, one per ballot.
   // voting
   isInCensus,    // boolean — true if voter belongs to this process's census
   voterQuestions,// ProcessQuestionStatus[] — per-question canVote/hasVoted (empty until connected)
@@ -197,7 +200,7 @@ Casting is **phased** so a failure can never half-vote silently:
 
 1. **Pre-flight** — every question is validated up front (`upstreamId` present; `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
 2. **Resume check** — a fresh `processes.check()` marks questions already voted; they are skipped, so calling `vote()` again after a failure completes the remaining questions instead of dying on a double-vote.
-3. **Sign + build** — every remaining question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch`) and each tx is built locally. A failure here aborts with **zero** votes relayed. On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure.
+3. **Sign + build** — every remaining question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure.
 4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. If, on chain, some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`, and refreshes `voterQuestions`/`hasVoted` to the on-chain truth. Catch it and offer a retry — the next `vote()` call resumes.
 
 Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx built, batch not yet sent) → `confirming` (enqueued, awaiting the chain) → `confirmed` | `failed`.

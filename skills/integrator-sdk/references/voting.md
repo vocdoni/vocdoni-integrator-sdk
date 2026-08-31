@@ -418,8 +418,9 @@ stays `false` and `@vocdoni/api-voting-zk` is a different path entirely.
 the blinding/unblinding:
 
 ```ts
-import { signBlindCspBallots, EphemeralSigner, buildVoteTransaction } from '@vocdoni/api-voting'
-import { ProofCA_Type } from '@vocdoni/proto/vochain'
+import {
+  signBlindCspBallots, EphemeralSigner, buildVoteTransaction, ProofCA_Type,
+} from '@vocdoni/api-voting'
 
 const process = await client.elections.get(processMongoId)
 if (!process.census?.anonymous) throw new Error('not an anonymous census')
@@ -469,9 +470,14 @@ Rules that bite if ignored:
 - **One ephemeral signer per ballot, chosen before signing.** The address is
   inside the blinded CA bundle; a different signer at build time produces a tx
   the chain rejects.
-- **Retrying the whole call is safe.** Round 1 is idempotent (same election,
-  same point) and a failed round 2 does not consume the election's one-time
-  nonce. `already_consumed` is terminal for that question.
+- **Retry only what was reported failed before round 2.** Round 1 is
+  idempotent (same election, same point), and a question this call reported as
+  failed before round 2 never consumed anything, so it is safe to ask again;
+  `already_consumed` is terminal for that question. One that came back signed
+  is not safe to re-sign: its nonce is spent and a rerun blinds under a fresh
+  secret, so the signature you already hold is the only usable one. If the
+  round-2 response is lost in flight the outcome is unknown — check the voter
+  state instead of re-signing blind.
 - **No nullifier.** `processes.signInfo()` reports no `address` and no
   `nullifier` for an anonymous census, by design — vote ids exist only for the
   session that cast them.
@@ -481,6 +487,25 @@ The primitives (`blind`, `unblind`, `decompressBlindPoint`,
 implementing a custom flow; the encodings mirror `arnaucube/go-blindsecp256k1`
 byte for byte and are pinned by Go-generated fixtures in the test suite. Use
 `signBlindCspBallots()` unless you have a reason not to.
+
+### buildCaBundle / encodeCaBundle
+
+Both take `{ processId, address, weight? }` — `processId` is the **on-chain**
+election id (`upstreamId`), `address` the ephemeral signer's, `weight` the hex
+census weight verbatim:
+
+```ts
+import { buildCaBundle, encodeCaBundle } from '@vocdoni/api-voting'
+
+const bundle = buildCaBundle({ processId, address, weight })   // → CAbundle message
+const bytes = encodeCaBundle({ processId, address, weight })   // → protobuf bytes
+```
+
+`buildVoteTransaction()` and the blind flow both go through these, and that is
+the point: in the blind flow the bytes are hashed and blinded *before* the CSP
+sees them, so the bundle blinded in round 1 and the bundle put on chain later
+must be byte-identical. Only reach for them when hand-rolling a custom flow —
+`buildVoteTransaction()` builds the bundle for you.
 
 ---
 

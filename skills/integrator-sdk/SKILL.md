@@ -68,7 +68,9 @@ two-round blind signature, so the CSP signs a ballot it cannot read:
 5.  buildVoteTransaction({ …, proofType: ProofCA_Type.ECDSA_BLIND_PIDSALTED })
 ```
 
-`signBlindCspBallots()` from `@vocdoni/api-voting` does 4a–4d in one call; steps
+`signBlindCspBallots()` and `ProofCA_Type` both come from `@vocdoni/api-voting`
+— import the enum from there, never from `@vocdoni/proto` directly, or a bundler
+inlines protobufjs into your app for one integer. It does 4a–4d in one call; steps
 5–6 are unchanged (the relay is proof-type-agnostic). `ElectionProvider` picks
 the branch automatically from `census.anonymous` — nothing to configure.
 
