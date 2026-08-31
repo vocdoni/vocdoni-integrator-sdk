@@ -1,6 +1,6 @@
 ---
-'@vocdoni/api-types': minor
-'@vocdoni/api-client': minor
+'@vocdoni/api-types': major
+'@vocdoni/api-client': major
 '@vocdoni/api-voting': minor
 '@vocdoni/react-providers': minor
 '@vocdoni/api-voting-zk': patch
@@ -19,8 +19,15 @@ The blind and unblind operations are the voter's, by construction, so they have 
 
 This is a blind signature, not zero-knowledge: `EnvelopeType.Anonymous` stays `false` and `@vocdoni/api-voting-zk` remains a separate, unrelated path.
 
-**Type-level break:** `QuestionConsumedAddress.address` and `.nullifier` are now optional. An anonymous census reports neither — the CSP never learns the address — so the backend omits them. Code that read either field unconditionally needs a guard. The practical consequence is that vote ids on an anonymous process exist only for the session that cast them: `useElection().voteIds` cannot be recovered from `sign-info` after a reload.
+**BREAKING CHANGE:** `QuestionConsumedAddress.address` and `.nullifier` are now optional (`string` → `string | undefined`). An anonymous census reports neither — the CSP never learns the address — so the backend omits them, and the type has to admit it. TypeScript code that reads either field unconditionally stops compiling; the fix is a guard:
 
-**Why this is a minor and not a major.** Widening a property to optional is nominally breaking, but nothing that works today stops working: a non-anonymous census still returns both fields on every `sign-info` entry, byte for byte as before. The only code the change can reach is a reader of those two fields, and only once it points at an anonymous census — where the value never existed to begin with, because the CSP never learned the address. A reader that adds the guard keeps behaving identically on every process it already handles.
+```ts
+// before
+const nullifier = entry.nullifier.toLowerCase()
+// after
+const nullifier = entry.nullifier?.toLowerCase()
+```
+
+Runtime behaviour on a non-anonymous process is unchanged: both fields are still populated on every `sign-info` entry. `@vocdoni/api-client` majors with the types it re-exports. The practical consequence is that vote ids on an anonymous process exist only for the session that cast them: `useElection().voteIds` cannot be recovered from `sign-info` after a reload.
 
 `@vocdoni/proto` is bumped `1.15.13` → `1.15.14` in the three packages that pin it exactly. The published diff is one additive line (`CensusOrigin.OFF_CHAIN_CA_V2`); nothing here needs it to build, but the pin is the version of the protocol the SDK claims to speak. `@vocdoni/api-voting-zk` moves only for that.
