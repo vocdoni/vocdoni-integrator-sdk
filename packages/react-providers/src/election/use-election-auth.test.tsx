@@ -125,4 +125,31 @@ describe('useElectionAuth', () => {
       expect(result.current.election.voteId).toBeNull()
     })
   })
+
+  it('refuses a plain sign() on an anonymous census instead of spending the authorization', async () => {
+    let signCalls = 0
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          census: { authFields: ['memberNumber'], twoFaFields: [], anonymous: true },
+        }),
+      ),
+      http.post('http://localhost/processes/:id/sign', () => {
+        signCalls++
+        return HttpResponse.json({ signature: 'ab'.repeat(65) })
+      }),
+    )
+    const { result } = renderHook(useHooks, { wrapper })
+    await waitFor(() => expect(result.current.election.election?.census?.anonymous).toBe(true))
+    await act(async () => {
+      await result.current.auth.auth0({ memberNumber: '5' })
+    })
+
+    // The endpoint would answer — with a proof rooted at the wrong key, after
+    // the one-shot authorization is already spent.
+    await expect(result.current.auth.sign('aa'.repeat(32), '0x' + '11'.repeat(20))).rejects.toThrow(/signBatch/)
+    expect(signCalls).toBe(0)
+  })
 })

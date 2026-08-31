@@ -222,8 +222,11 @@ export class PartialVoteError extends Error {
 }
 
 /** Folds a `succeeded` list into the `questionId → voteId` map shape. */
+// Entries with no id are dropped: a vote can land without a recoverable vote id
+// (an anonymous census has no nullifier to recover), and mapping the question to
+// an empty string would read as "voted, id known to be blank".
 const byQuestion = (succeeded: Array<{ questionId: string; voteId: string }>): Record<string, string> =>
-  Object.fromEntries(succeeded.map((s) => [s.questionId, s.voteId]))
+  Object.fromEntries(succeeded.filter((s) => !!s.voteId).map((s) => [s.questionId, s.voteId]))
 
 const ElectionContext = createContext<ElectionContextValue | undefined>(undefined)
 
@@ -333,7 +336,9 @@ export function ElectionProvider({
         //
         // An anonymous census reports no nullifier by design — the CSP blind
         // signs and never learns the address — so there is nothing to recover
-        // there and vote ids live only for the session that cast them.
+        // there and vote ids live only for the session that cast them. Skip
+        // the request entirely rather than pay for a provably empty answer.
+        if (election.census?.anonymous) return
         if (!res.questions.some((q) => q.hasVoted)) return
         const info = await client.processes
           .signInfo(election.id, { authToken: session.authToken! })
@@ -452,13 +457,25 @@ export function ElectionProvider({
       // ECDSA signature over the bundle.
       const proofType = election.census?.anonymous ? ProofCA_Type.ECDSA_BLIND_PIDSALTED : undefined
 
+      // A CSP signature is one-shot: signBatch() has already consumed every
+      // authorization it granted. Throwing here would discard the successful
+      // ones unrelayed — check() would still report those questions unvoted,
+      // and a retry would sign a FRESH address and be told `already_consumed`,
+      // so those votes could never be cast at all. Relay what did sign and
+      // report the rest as a partial failure.
       const signed: Array<{ question: (typeof election.questions)[number]; i: number; txPayload: string }> = []
+      const signFailures: Array<{ questionId: string; error: unknown }> = []
       pending.forEach(({ question, i }, k) => {
         const result = signatures[k]
         if (!result?.signature) {
-          throw new Error(
-            `The CSP did not sign question ${i} ("${question.id}"): ${result?.error ?? result?.code ?? 'no result'}`,
-          )
+          signFailures.push({
+            questionId: question.id,
+            error: new Error(
+              `The CSP did not sign question ${i} ("${question.id}"): ${result?.error ?? result?.code ?? 'no result'}`,
+            ),
+          })
+          setVoteStatus((st) => ({ ...st, [question.id]: 'failed' }))
+          return
         }
         signed.push({
           question,
@@ -477,6 +494,11 @@ export function ElectionProvider({
         })
         setVoteStatus((st) => ({ ...st, [question.id]: 'submitting' }))
       })
+
+      // Nothing signed at all: nothing was consumed that a retry could not
+      // consume again, so this is a plain, fully-retryable error — no partial
+      // state to report and no empty batch to relay.
+      if (signed.length === 0) throw signFailures[0].error
 
       // One job covers the batch; its per-envelope entries settle one by one
       // while the job is pending — mirror every poll into voteStatus so UIs
@@ -629,7 +651,8 @@ export function ElectionProvider({
       }
 
       const succeeded: Array<{ questionId: string; voteId: string }> = []
-      const failed: Array<{ questionId: string; error: unknown }> = []
+      // Questions the CSP refused start out failed: they were never relayed.
+      const failed: Array<{ questionId: string; error: unknown }> = [...signFailures]
       signed.forEach(({ question }, idx) => {
         const outcome = outcomes[idx]
         if (outcome?.status === 'completed') {
@@ -678,7 +701,10 @@ export function ElectionProvider({
       }
 
       if (failed.length > 0) {
-        if (succeeded.length > 0) setVoteId((prev) => prev ?? succeeded[0].voteId)
+        // `voteId` is null-or-a-real-nullifier; '' would break that for every
+        // consumer that treats it as "the vote id we have".
+        const firstVoteId = succeeded.find((s) => !!s.voteId)?.voteId
+        if (firstVoteId) setVoteId((prev) => prev ?? firstVoteId)
         // Truthful partial state: reflect what actually landed on chain, so
         // `voterQuestions`/`hasVoted` don't claim "not voted" for cast votes.
         try {
@@ -695,9 +721,11 @@ export function ElectionProvider({
       setVoterQuestions((qs) => qs.map((q) => ({ ...q, hasVoted: true })))
       setHasVoted(true)
       // The first cast question's vote id (on a resumed call, the first of the
-      // questions cast by THIS call).
+      // questions cast by THIS call). An anonymous census produces none — the
+      // returned '' says "cast, no recoverable id", but `voteId` keeps its
+      // null-or-a-real-nullifier contract.
       const resultVoteId = succeeded[0]?.voteId ?? ''
-      setVoteId(resultVoteId)
+      if (resultVoteId) setVoteId(resultVoteId)
       return resultVoteId
     },
     [election, session, chainId, client, voterQuestions, voteOptions],

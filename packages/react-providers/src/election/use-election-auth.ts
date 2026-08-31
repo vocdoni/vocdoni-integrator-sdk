@@ -171,11 +171,17 @@ export function useVoterSession(
   const sign = useCallback(
     async (electionId: string, address: string): Promise<ElectionSignResult> => {
       if (!id || !authToken) throw new Error('Must authenticate before signing')
+      // The plain endpoint would happily return a signature here, but an
+      // anonymous census is rooted at the CSP's BLIND public key: the chain
+      // rejects that proof, after the one-shot authorization is already spent.
+      if (process?.census?.anonymous) {
+        throw new Error('This process has an anonymous census — use signBatch(), which blind-signs')
+      }
       const res = await client.processes.sign(id, { authToken, electionId, payload: address })
       if (!res.signature) throw new Error('Process sign did not return a signature')
       return { signature: res.signature, weight: res.weight }
     },
-    [client, id, authToken],
+    [client, id, authToken, process],
   )
 
   const signBatch = useCallback(

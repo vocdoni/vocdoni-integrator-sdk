@@ -569,7 +569,7 @@ describe('ElectionProvider', () => {
     expect(result.current.election.hasVoted).toBe(false)
   })
 
-  it('consumes every CSP sign before relaying anything — a sign failure casts zero votes', async () => {
+  it('relays the questions that did sign when the CSP refuses one of them', async () => {
     let signCalls = 0
     server.use(
       http.get(`http://localhost/processes/:id`, ({ params }) =>
@@ -585,8 +585,8 @@ describe('ElectionProvider', () => {
       http.post(`http://localhost/processes/:processId/sign-batch`, async ({ request }) => {
         signCalls++
         const body = (await request.json()) as { ballots: Array<{ upstreamId: string }> }
-        // First question signs, second is refused inline: with the old
-        // interleaved loop the first would already be on chain by now.
+        // First question signs, second is refused inline. That signature is
+        // one-shot and already spent — dropping it would strand q-0 forever.
         return HttpResponse.json({
           signatures: body.ballots.map((b, i) =>
             i === 0
@@ -603,11 +603,38 @@ describe('ElectionProvider', () => {
     await connect(result)
     await waitFor(() => expect(result.current.election.isAbleToVote).toBe(true))
 
-    await expect(result.current.election.vote([[0], [1]])).rejects.toThrow()
+    const err = await result.current.election.vote([[0], [1]]).catch((e) => e)
+    expect(err).toBeInstanceOf(PartialVoteError)
+    expect(err.succeeded.map((s: { questionId: string }) => s.questionId)).toEqual(['q-0'])
+    expect(err.failed.map((f: { questionId: string }) => f.questionId)).toEqual(['q-1'])
     expect(signCalls).toBe(1)
-    // Nothing was relayed: the failure aborted with zero votes on chain.
-    expect(relayed).toHaveLength(0)
+    // q-0's spent signature went on chain rather than being thrown away.
+    expect(relayed).toHaveLength(1)
     expect(result.current.election.hasVoted).toBe(false)
+  })
+
+  it('is a plain retryable error when the CSP signs nothing at all', async () => {
+    server.use(
+      http.post(`http://localhost/processes/:processId/sign-batch`, async ({ request }) => {
+        const body = (await request.json()) as { ballots: Array<{ upstreamId: string }> }
+        return HttpResponse.json({
+          signatures: body.ballots.map((b) => ({ upstreamId: b.upstreamId, code: 'sign_failed', error: 'csp down' })),
+        })
+      }),
+    )
+    const relayed = captureBatchVotes()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.election).not.toBeNull())
+    await connect(result)
+    await waitFor(() => expect(result.current.election.isAbleToVote).toBe(true))
+
+    // Nothing was consumed that a retry can't consume again, so there is no
+    // partial state to report — and no empty batch to relay.
+    const err = await result.current.election.vote([[0]]).catch((e) => e)
+    expect(err).not.toBeInstanceOf(PartialVoteError)
+    expect(err.message).toMatch(/did not sign/)
+    expect(relayed).toHaveLength(0)
   })
 
   it('resumes a half-voted process: skips questions the check reports as voted', async () => {
