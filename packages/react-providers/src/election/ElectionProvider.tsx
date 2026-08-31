@@ -5,8 +5,7 @@ import type {
   VotingProcessResponse,
   VotingProcessResultsResponse,
 } from '@vocdoni/api-types'
-import { buildVoteTransaction, EphemeralSigner, MAX_MEMO_BYTES } from '@vocdoni/api-voting'
-import { ProofCA_Type } from '@vocdoni/proto/vochain'
+import { buildVoteTransaction, EphemeralSigner, MAX_MEMO_BYTES, ProofCA_Type } from '@vocdoni/api-voting'
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import {
   createContext,

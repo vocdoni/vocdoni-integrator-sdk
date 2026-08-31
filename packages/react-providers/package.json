@@ -55,7 +55,7 @@
     "@tanstack/react-query": "^5.0.0",
     "@vocdoni/api-client": "workspace:^",
     "@vocdoni/api-types": "workspace:^",
-    "@vocdoni/api-voting": "workspace:>=0.1.2 <2",
+    "@vocdoni/api-voting": "workspace:>=1.1.0 <2",
     "react": ">=18.0.0"
   },
   "devDependencies": {
