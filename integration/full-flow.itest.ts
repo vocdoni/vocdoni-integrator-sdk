@@ -1,5 +1,5 @@
 import type { VotingProcessQuestion } from '@vocdoni/api-types'
-import { EphemeralSigner, VotingClient } from '@vocdoni/api-voting'
+import { EphemeralSigner, ProofCA_Type, signBlindCspBallots, VotingClient } from '@vocdoni/api-voting'
 import { decodeQuestionResults, encodeQuestionBallot, unsatisfiableQuestionReason } from '@vocdoni/ballot'
 import { apiKey, makeAdminClient, makeClient } from './helpers'
 
@@ -9,9 +9,10 @@ import { apiKey, makeAdminClient, makeClient } from './helpers'
 //   2. loads a 100-member memberbase (memberNumber 1..100)
 //   3. reads the auto-created "All members" group
 //   4. builds + publishes a CSP census from that group
-//   5. creates and publishes 4 processes (single-choice, multi-choice, a
+//   5. creates and publishes 5 processes (single-choice, multi-choice, a
 //      secretUntilTheEnd single-choice — its per-question encryption keys are
-//      polled after publish, per saas-backend#594 — and a ballot-protocol
+//      polled after publish, per saas-backend#594 — an anonymous single-choice
+//      whose census is rooted at the CSP's blind key, and a ballot-protocol
 //      matrix covering every remaining type @vocdoni/ballot supports: approval,
 //      capped approval, pick-slot multichoice, ranked, budget and quadratic)
 //      sharing that one group
@@ -25,7 +26,10 @@ import { apiKey, makeAdminClient, makeClient } from './helpers'
 //      process-scoped CSP flow (client.processes: authStep0 → check → sign —
 //      the only voter flow; the bundle routes are gone), chainId read straight
 //      off the PUBLIC process read; the secret question's ballots are sealed
-//      with its encryption keys, and each vote resolves a distinct nullifier
+//      with its encryption keys, the anonymous process goes through the
+//      two-round blind flow (blindPoint → blind → blindSign → unblind) and
+//      proves its sign-info reports neither address nor nullifier, and each
+//      vote resolves a distinct nullifier
 //   7. reads the live per-question tallies (QuestionResults, saas-backend#596/
 //      #599) publicly and checks the vote counts AND the decoded per-choice
 //      tallies — the latter is the only thing that proves a vote was actually
@@ -38,9 +42,9 @@ import { apiKey, makeAdminClient, makeClient } from './helpers'
 // disposable saas-api + vochain container on every PR/push.
 //
 // Opt-in: needs INTEGRATION_API_KEY (a `vsk_…` key whose org is an integrator
-// with scopes managed:write + members:write + voting:write, and quota for >=4
-// processes / >=9 on-chain elections / >=200 census). It creates real on-chain
-// elections and casts 36 real votes, so it is excluded from the default run and
+// with scopes managed:write + members:write + voting:write, and quota for >=5
+// processes / >=10 on-chain elections / >=200 census). It creates real on-chain
+// elections and casts 40 real votes, so it is excluded from the default run and
 // takes several minutes.
 const suite = apiKey ? describe : describe.skip
 
@@ -57,6 +61,8 @@ interface ProcessSpec {
    */
   questions: VotingProcessQuestion[]
   secret: boolean
+  /** Anonymous (blind CSP) census — voted through the two-round blind flow. */
+  anonymous?: boolean
   /**
    * Raw voter selections (choice values) cast on every question of this
    * process — encoded into the wire ballot with `encodeQuestionBallot`.
@@ -156,6 +162,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       const drafts: Array<{
         label: string
         secret: boolean
+        anonymous?: boolean
         choices: number[]
         tally: number[]
         perQuestion?: ProcessSpec['perQuestion']
@@ -240,6 +247,34 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
                 ],
                 type: 'singlechoice',
                 secretUntilTheEnd: true,
+              },
+            ],
+          },
+        },
+        {
+          // Anonymous census (saas-backend#641): the census root is the CSP's
+          // BLIND public key and each ballot carries a blind-salted CA proof,
+          // so the CSP signs a vote it cannot read. This is the only place the
+          // salt agreement between SDK, backend and chain is proven — the Go
+          // fixtures in packages/api-voting/testdata only pin the encodings.
+          label: 'anonymous single-choice',
+          secret: false,
+          anonymous: true,
+          choices: [1],
+          tally: [0, VOTERS.length],
+          body: {
+            orgAddress,
+            census: { authFields: ['memberNumber'], groupId, anonymous: true },
+            title: 'Anonymous single choice',
+            endDate,
+            questions: [
+              {
+                title: 'Approve (anonymous)?',
+                choices: [
+                  { title: 'No', value: 0 },
+                  { title: 'Yes', value: 1 },
+                ],
+                type: 'singlechoice',
               },
             ],
           },
@@ -484,6 +519,12 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
         if (chainId) expect(pubInfo.chainId, 'chainId differs across processes').toBe(chainId)
         chainId = pubInfo.chainId!
         expect(pubInfo.census.size, `${d.label} public read has no census size`).toBe(MEMBER_COUNT)
+        // Echoed back on the public read — it is what a voter UI branches on to
+        // pick the blind flow, so a backend that drops it silently downgrades
+        // every anonymous voter to the linkable path.
+        expect(pubInfo.census.anonymous ?? false, `${d.label} census.anonymous mismatch`).toBe(
+          d.anonymous ?? false,
+        )
         expect(
           pubInfo.census.totalWeight,
           `${d.label} totalWeight should equal size for a non-weighted census`,
@@ -498,6 +539,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
           draftId,
           questions: info.questions,
           secret: d.secret,
+          anonymous: d.anonymous,
           choices: d.choices,
           tally: d.tally,
           perQuestion: d.perQuestion,
@@ -549,12 +591,26 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
             // secret questions) + relay through the public VotingClient, and
             // poll the relay job for the vote nullifier.
             const signer = new EphemeralSigner()
-            const sign = await voterClient.processes.sign(p.draftId, {
-              authToken: auth.authToken!,
-              electionId: status.upstreamId!,
-              payload: signer.address,
-            })
-            expect(sign.signature, `no CSP signature (${p.label})`).toBeTruthy()
+            // An anonymous census takes the two-round blind flow instead: the
+            // CSP issues a point, the client blinds the CA bundle it is about
+            // to cast, the CSP signs bytes it cannot read, and the client
+            // unblinds. The resulting proof is verified against the blind
+            // salted census key, so it must be tagged as such.
+            const sign: { signature?: string; weight?: string; error?: string } = p.anonymous
+              ? (
+                  await signBlindCspBallots({
+                    processId: p.draftId,
+                    authToken: auth.authToken!,
+                    client: voterClient,
+                    ballots: [{ upstreamId: status.upstreamId!, address: signer.address }],
+                  })
+                )[0]
+              : await voterClient.processes.sign(p.draftId, {
+                  authToken: auth.authToken!,
+                  electionId: status.upstreamId!,
+                  payload: signer.address,
+                })
+            expect(sign.signature, `no CSP signature (${p.label}): ${sign.error ?? ''}`).toBeTruthy()
 
             const jobId = await voting.vote({
               processId: status.upstreamId!,
@@ -565,6 +621,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
               signer,
               cspSignature: sign.signature!,
               cspWeight: sign.weight,
+              proofType: p.anonymous ? ProofCA_Type.ECDSA_BLIND_PIDSALTED : undefined,
               encryptionKeys: question!.secretUntilTheEnd ? question!.encryptionKeys : undefined,
               // Exercise the VoteEnvelope.memo field (proto 1.15.13) live: the
               // chain must accept envelopes that carry it.
@@ -582,6 +639,30 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       }
 
       expect(nullifiers.size).toBe(VOTERS.length * questionCount)
+
+      // 6b. Unlinkability, as the API reports it: the anonymous process knows a
+      // voter consumed its question, but not which address did it or which
+      // nullifier resulted — the CSP blind-signed a ballot it never saw. Its
+      // nullifiers came from the relay job above, which is the ONLY place an
+      // anonymous voter ever learns them. A non-anonymous process still reports
+      // both, so this is a real difference and not an empty response.
+      for (const p of processes) {
+        const auth = await voterClient.processes.authStep0(p.draftId, { memberNumber: VOTERS[0] })
+        const info = await voterClient.processes.signInfo(p.draftId, { authToken: auth.authToken! })
+        expect(info.consumed.length, `sign-info reports nothing consumed (${p.label})`).toBe(
+          p.questions.length,
+        )
+        for (const entry of info.consumed) {
+          if (p.anonymous) {
+            expect(entry.address, 'anonymous sign-info leaks the voter address').toBeUndefined()
+            expect(entry.nullifier, 'anonymous sign-info leaks the vote nullifier').toBeUndefined()
+          } else {
+            expect(entry.address, `sign-info misses the address (${p.label})`).toBeTruthy()
+            expect(entry.nullifier, `sign-info misses the nullifier (${p.label})`).toBeTruthy()
+          }
+        }
+      }
+      step(`6b. sign-info verified — anonymous process reports no address and no nullifier`)
 
       // 7. Live results (saas-backend#596 + #599): tallies are public and live —
       // no RESULTS status needed. Poll `GET /processes/{id}/results` until every
@@ -694,7 +775,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
 
       step(`done — ${nullifiers.size} votes cast across ${questionCount} on-chain processes`)
     },
-    // 4 processes / 9 on-chain elections / 36 votes, each vote a CSP sign + relay
+    // 5 processes / 10 on-chain elections / 40 votes, each vote a CSP sign + relay
     // + job poll, plus publish jobs and the indexer lag before the tally settles.
     // Kept under the CI job's timeout-minutes (25) so a hang surfaces as a test
     // failure with the suite's own diagnostics, not as a killed runner.
