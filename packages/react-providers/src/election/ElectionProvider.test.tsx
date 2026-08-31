@@ -63,6 +63,34 @@ const PLAIN_PACKAGE_MARKER = '7b226e6f6e6365'
  * while registering the batch in mockBatchJobs, so the default batch-aware
  * jobs handler keeps resolving the job.
  */
+/**
+ * Counts every endpoint that consumes a one-shot CSP authorization — both the
+ * plain batch sign and the anonymous flow's round 1. Spying on `/sign` alone
+ * counts nothing: `vote()` has not used it since the batch sign landed, so a
+ * `toBe(0)` assertion against it passes even with the pre-flight guards gone.
+ */
+function countSignConsumption() {
+  const calls = { count: 0 }
+  server.use(
+    http.post(`http://localhost/processes/:processId/sign-batch`, async ({ request }) => {
+      calls.count++
+      const body = (await request.json()) as { ballots: Array<{ upstreamId: string }> }
+      return HttpResponse.json({
+        signatures: body.ballots.map((b) => ({
+          upstreamId: b.upstreamId,
+          signature: MOCK_CSP_SIGNATURE,
+          weight: MOCK_WEIGHT_HEX,
+        })),
+      })
+    }),
+    http.post(`http://localhost/processes/:processId/blind-point`, () => {
+      calls.count++
+      return HttpResponse.json({ points: [] })
+    }),
+  )
+  return calls
+}
+
 function captureBatchVotes() {
   const txPayloads: string[] = []
   server.use(
@@ -458,7 +486,6 @@ describe('ElectionProvider', () => {
   })
 
   it('refuses to cast a cleartext ballot for a secret question without published keys', async () => {
-    let signCalls = 0
     server.use(
       http.get(`http://localhost/processes/:id`, ({ params }) =>
         HttpResponse.json({
@@ -467,11 +494,8 @@ describe('ElectionProvider', () => {
           questions: [{ ...mockProcess.questions[0], secretUntilTheEnd: true }],
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign`, () => {
-        signCalls++
-        return HttpResponse.json({ signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX })
-      }),
     )
+    const signCalls = countSignConsumption()
 
     const { result } = renderHook(useVoter, { wrapper })
     await waitFor(() => expect(result.current.election.election).not.toBeNull())
@@ -482,7 +506,7 @@ describe('ElectionProvider', () => {
       /encryption keys are not published yet/,
     )
     // The guard fires BEFORE the one-shot CSP sign gets consumed.
-    expect(signCalls).toBe(0)
+    expect(signCalls.count).toBe(0)
     expect(result.current.election.hasVoted).toBe(false)
   })
 
@@ -532,7 +556,6 @@ describe('ElectionProvider', () => {
     // Question 1 is secret without published keys. The old per-question loop
     // would cast question 0 first and only then hit the guard, half-voting the
     // process; the pre-flight must fire before ANY sign or relay.
-    let signCalls = 0
     server.use(
       http.get(`http://localhost/processes/:id`, ({ params }) =>
         HttpResponse.json({
@@ -549,11 +572,8 @@ describe('ElectionProvider', () => {
           ],
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign`, () => {
-        signCalls++
-        return HttpResponse.json({ signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX })
-      }),
     )
+    const signCalls = countSignConsumption()
     const relayed = captureBatchVotes()
 
     const { result } = renderHook(useVoter, { wrapper })
@@ -564,7 +584,7 @@ describe('ElectionProvider', () => {
     await expect(result.current.election.vote([[0], [1]])).rejects.toThrow(
       /encryption keys are not published yet/,
     )
-    expect(signCalls).toBe(0)
+    expect(signCalls.count).toBe(0)
     expect(relayed).toHaveLength(0)
     expect(result.current.election.hasVoted).toBe(false)
   })
@@ -788,7 +808,6 @@ describe('ElectionProvider', () => {
   })
 
   it('refuses to cast more than the batch cap in one call — before any CSP sign', async () => {
-    let signCalls = 0
     server.use(
       http.get(`http://localhost/processes/:id`, ({ params }) =>
         HttpResponse.json({
@@ -801,11 +820,8 @@ describe('ElectionProvider', () => {
           })),
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign`, () => {
-        signCalls++
-        return HttpResponse.json({ signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX })
-      }),
     )
+    const signCalls = countSignConsumption()
 
     const { result } = renderHook(useVoter, { wrapper })
     await waitFor(() => expect(result.current.election.election).not.toBeNull())
@@ -814,7 +830,7 @@ describe('ElectionProvider', () => {
 
     const ballots = Array.from({ length: 101 }, () => [0])
     await expect(result.current.election.vote(ballots)).rejects.toThrow('caps at 100')
-    expect(signCalls).toBe(0)
+    expect(signCalls.count).toBe(0)
   })
 
   it('renders a prefetched election immediately and still refetches by its id', async () => {
