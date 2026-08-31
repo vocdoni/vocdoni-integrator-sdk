@@ -5,7 +5,7 @@ import type {
   BlindSignResponse,
   SignFailureCode,
 } from '@vocdoni/api-types'
-import { bytesToNumberBE } from '@noble/curves/abstract/utils'
+import { bytesToNumberBE, numberToBytesBE } from '@noble/curves/abstract/utils'
 import {
   blind,
   blindMessageFromBundle,
@@ -78,9 +78,15 @@ export interface BlindCspResult {
  * chain.
  *
  * Failures are per question, reported inline with a stable `code`; the batch
- * itself only rejects on a bad auth token. Retrying the whole call is safe —
- * round 1 is idempotent (same election, same point) and a failed round 2 does
- * not consume the election's one-time nonce.
+ * itself only rejects on a bad auth token.
+ *
+ * On retry: round 1 is idempotent (same election, same point), and a question
+ * this call reported as failed *before* round 2 — no point, no weight, a point
+ * that would not decode — never consumed anything, so it is safe to ask again.
+ * A question that came back signed is not: its nonce is spent, and a rerun
+ * blinds under a fresh secret, so the earlier signature is the only usable one.
+ * If the round-2 response is lost in flight the outcome is simply unknown —
+ * check the voter state rather than re-signing blind.
  */
 export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Promise<BlindCspResult[]> {
   const { processId, authToken, ballots, client } = opts
@@ -98,22 +104,44 @@ export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Pro
 
   for (const ballot of ballots) {
     const point = pointsById.get(ballot.upstreamId)
-    if (!point?.tokenR) {
+    // A point without a weight is as unusable as no point at all: the weight is
+    // hashed into the salt of the key the chain verifies against, so signing
+    // without it would spend the nonce on a proof that can never verify.
+    if (!point?.tokenR || !point.weight) {
       results.set(ballot.upstreamId, {
         upstreamId: ballot.upstreamId,
         code: point?.code,
-        error: point?.error ?? 'the CSP issued no blind point for this election',
+        error:
+          point?.error ??
+          (point?.tokenR
+            ? 'the CSP issued a blind point with no weight for this election'
+            : 'the CSP issued no blind point for this election'),
       })
       continue
     }
     // The bundle blinded here is the one buildVoteTransaction puts on chain —
     // same builder, so the signature covers exactly the bytes the chain checks.
-    const bundle = encodeCaBundle({
-      processId: ballot.upstreamId,
-      address: ballot.address,
-      weight: point.weight,
-    })
-    const { mBlinded, secret } = blind(blindMessageFromBundle(bundle), decompressBlindPoint(fromHex(point.tokenR)))
+    //
+    // Blinding is local but not infallible: a malformed tokenR fails to decode
+    // and blind() gives up after 32 attempts. Either would otherwise throw out
+    // of this loop and reject the whole batch, stranding the questions that are
+    // perfectly fine — so it is reported inline like any other per-ballot fault.
+    let mBlinded: bigint
+    let secret: BlindUserSecret
+    try {
+      const bundle = encodeCaBundle({
+        processId: ballot.upstreamId,
+        address: ballot.address,
+        weight: point.weight,
+      })
+      ;({ mBlinded, secret } = blind(blindMessageFromBundle(bundle), decompressBlindPoint(fromHex(point.tokenR))))
+    } catch (err) {
+      results.set(ballot.upstreamId, {
+        upstreamId: ballot.upstreamId,
+        error: `could not blind this election's ballot: ${err instanceof Error ? err.message : String(err)}`,
+      })
+      continue
+    }
     secrets.set(ballot.upstreamId, secret)
     // Placeholder until round 2 answers; an election the CSP silently drops
     // from the response keeps it, so a missing entry never reads as a success.
@@ -121,7 +149,10 @@ export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Pro
       upstreamId: ballot.upstreamId,
       error: 'the CSP returned no result for this election',
     })
-    toSign.push({ upstreamId: ballot.upstreamId, blindedMessage: toHex(bigintTo32Bytes(mBlinded)) })
+    // Fixed 32 bytes out. The signer reads it back as a big-endian integer and
+    // then demands its *minimal* encoding be exactly 32 wide — which `blind`
+    // already guarantees, so no padding is ever stripped on the far side.
+    toSign.push({ upstreamId: ballot.upstreamId, blindedMessage: toHex(numberToBytesBE(mBlinded, 32)) })
   }
 
   if (toSign.length > 0) {
@@ -147,19 +178,4 @@ export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Pro
   return ballots.map(
     (b) => results.get(b.upstreamId) ?? { upstreamId: b.upstreamId, error: 'no result for this election' }
   )
-}
-
-/**
- * The blinded message goes out as a fixed 32 bytes. The signer parses it as a
- * big-endian integer and then requires its *minimal* encoding to be 32 bytes
- * wide — which `blind` already guarantees, so no padding is ever stripped here.
- */
-function bigintTo32Bytes(value: bigint): Uint8Array {
-  const out = new Uint8Array(32)
-  let rest = value
-  for (let i = 31; i >= 0; i--) {
-    out[i] = Number(rest & 0xffn)
-    rest >>= 8n
-  }
-  return out
 }

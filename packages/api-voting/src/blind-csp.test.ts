@@ -1,5 +1,5 @@
 import { mod } from '@noble/curves/abstract/modular'
-import { bytesToNumberBE } from '@noble/curves/abstract/utils'
+import { bytesToNumberBE, numberToBytesBE } from '@noble/curves/abstract/utils'
 import type { BlindPointRequest, BlindSignRequest } from '@vocdoni/api-types'
 import { CAbundle, ProofCA_Type, SignedTx, Tx } from '@vocdoni/proto/vochain'
 import { describe, expect, it, vi } from 'vitest'
@@ -7,7 +7,6 @@ import { signBlindCspBallots, type BlindCspApiClient } from './blind-csp'
 import { blindMessageFromBundle } from './blind-secp256k1'
 import {
   blindSign,
-  bytes32,
   compress,
   deserializeBlindSignature,
   G,
@@ -31,7 +30,17 @@ const AUTH_TOKEN = 'deadbeef'
  * against. That makes the assertions the real ones — a signature that verifies
  * end to end — instead of "we round-tripped our own fixture".
  */
-function fakeCsp(options: { weights?: Record<string, string>; pointCodes?: Record<string, string>; signCodes?: Record<string, string> } = {}) {
+function fakeCsp(
+  options: {
+    weights?: Record<string, string>
+    pointCodes?: Record<string, string>
+    signCodes?: Record<string, string>
+    /** Emit this tokenR verbatim instead of a real point — for malformed input. */
+    badTokenR?: Record<string, string>
+    /** Emit the point with no weight at all. */
+    dropWeight?: string[]
+  } = {}
+) {
   const d = scalar32()
   const nonces = new Map<string, bigint>()
   const weightOf = (electionId: string) => options.weights?.[electionId] ?? '01'
@@ -47,7 +56,11 @@ function fakeCsp(options: { weights?: Record<string, string>; pointCodes?: Recor
           if (code) return { upstreamId: electionId, code: code as never, error: 'nope' }
           const k = nonces.get(electionId) ?? scalar32()
           nonces.set(electionId, k) // idempotent, like the real endpoint
-          return { upstreamId: electionId, tokenR: toHex(compress(G.multiply(k))), weight: weightOf(electionId) }
+          return {
+            upstreamId: electionId,
+            tokenR: options.badTokenR?.[electionId] ?? toHex(compress(G.multiply(k))),
+            weight: options.dropWeight?.includes(electionId) ? undefined : weightOf(electionId),
+          }
         }),
       })),
       blindSign: vi.fn(async (_processId: string, body: BlindSignRequest) => ({
@@ -58,7 +71,7 @@ function fakeCsp(options: { weights?: Record<string, string>; pointCodes?: Recor
           const mBlinded = bytesToNumberBE(fromHex(ballot.blindedMessage))
           return {
             upstreamId: ballot.upstreamId,
-            signature: toHex(bytes32(blindSign(mBlinded, saltedKey(ballot.upstreamId), k))),
+            signature: toHex(numberToBytesBE(blindSign(mBlinded, saltedKey(ballot.upstreamId), k), 32)),
             weight: weightOf(ballot.upstreamId),
           }
         }),
@@ -182,6 +195,54 @@ describe('signBlindCspBallots', () => {
 
     expect(result.signature).toBeUndefined()
     expect(result.error).toMatch(/no result/)
+  })
+
+  it('reports a point that will not decode instead of rejecting the whole batch', async () => {
+    // A truncated tokenR makes decompressBlindPoint throw. Before this was
+    // caught, the throw escaped the per-ballot loop and B — which is perfectly
+    // signable — never got signed or cast.
+    const csp = fakeCsp({ badTokenR: { [ELECTION_A]: 'aa'.repeat(32) } })
+    const results = await signBlindCspBallots({
+      processId: PROCESS_ID,
+      authToken: AUTH_TOKEN,
+      client: csp.client,
+      ballots: [
+        { upstreamId: ELECTION_A, address: new EphemeralSigner().address },
+        { upstreamId: ELECTION_B, address: new EphemeralSigner().address },
+      ],
+    })
+
+    expect(results[0].signature).toBeUndefined()
+    expect(results[0].error).toMatch(/could not blind/)
+    expect(results[1].signature).toBeDefined()
+    // ...and A was never sent to round 2, so its nonce is untouched.
+    expect(csp.client.processes.blindSign).toHaveBeenCalledWith(
+      PROCESS_ID,
+      expect.objectContaining({ ballots: [expect.objectContaining({ upstreamId: ELECTION_B })] })
+    )
+  })
+
+  it('treats a point with no weight as a round-1 failure', async () => {
+    // The weight is hashed into the key salt: signing without it would spend
+    // the nonce on a proof the chain can never verify.
+    const csp = fakeCsp({ dropWeight: [ELECTION_A] })
+    const results = await signBlindCspBallots({
+      processId: PROCESS_ID,
+      authToken: AUTH_TOKEN,
+      client: csp.client,
+      ballots: [
+        { upstreamId: ELECTION_A, address: new EphemeralSigner().address },
+        { upstreamId: ELECTION_B, address: new EphemeralSigner().address },
+      ],
+    })
+
+    expect(results[0].signature).toBeUndefined()
+    expect(results[0].error).toMatch(/no weight/)
+    expect(results[1].signature).toBeDefined()
+    expect(csp.client.processes.blindSign).toHaveBeenCalledWith(
+      PROCESS_ID,
+      expect.objectContaining({ ballots: [expect.objectContaining({ upstreamId: ELECTION_B })] })
+    )
   })
 
   it('sends a fixed-width 32-byte blinded message', async () => {
