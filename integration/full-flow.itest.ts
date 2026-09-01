@@ -557,17 +557,34 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
             )
             const question = p.questions.find((q) => q.id === status.questionId)
             expect(question, `check reported unknown question ${status.questionId}`).toBeTruthy()
+          }
 
-            // CSP sign over a fresh ephemeral address, then build + seal (for
-            // secret questions) + relay through the public VotingClient, and
-            // poll the relay job for the vote nullifier.
-            const signer = new EphemeralSigner()
-            const sign = await voterClient.processes.sign(p.draftId, {
-              authToken: auth.authToken!,
-              electionId: status.upstreamId!,
-              payload: signer.address,
-            })
-            expect(sign.signature, `no CSP signature (${p.label})`).toBeTruthy()
+          // CSP-sign a fresh ephemeral address for EVERY question in ONE
+          // sign-batch call (saas-backend#634) — the same endpoint the react
+          // provider's vote() consumes — then build + seal (for secret
+          // questions) + relay per question through the public VotingClient,
+          // polling each relay job for the vote nullifier.
+          const signers = check.questions.map(() => new EphemeralSigner())
+          const batch = await voterClient.processes.signBatch(p.draftId, {
+            authToken: auth.authToken!,
+            ballots: check.questions.map((status, i) => ({
+              upstreamId: status.upstreamId!,
+              address: signers[i].address,
+            })),
+          })
+          expect(batch.signatures, `sign-batch entry count (${p.label})`).toHaveLength(
+            check.questions.length,
+          )
+
+          for (const [i, status] of check.questions.entries()) {
+            const question = p.questions.find((q) => q.id === status.questionId)
+            // Match by upstreamId, never by position — a dropped entry must
+            // fail loudly here, not shift a signature onto the wrong question.
+            const sign = batch.signatures.find((s) => s.upstreamId === status.upstreamId)
+            expect(
+              sign?.signature,
+              `no CSP signature (${p.label}): ${sign?.code ?? ''} ${sign?.error ?? ''}`,
+            ).toBeTruthy()
 
             const jobId = await voting.vote({
               processId: status.upstreamId!,
@@ -575,9 +592,9 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
               // the same codec path react-components voters go through.
               choices: encodeQuestionBallot(question!, specFor(p, status.questionId).choices),
               chainId: chainId!,
-              signer,
-              cspSignature: sign.signature!,
-              cspWeight: sign.weight,
+              signer: signers[i],
+              cspSignature: sign!.signature!,
+              cspWeight: sign!.weight,
               encryptionKeys: question!.secretUntilTheEnd ? question!.encryptionKeys : undefined,
               // Exercise the VoteEnvelope.memo field (proto 1.15.13) live: the
               // chain must accept envelopes that carry it.

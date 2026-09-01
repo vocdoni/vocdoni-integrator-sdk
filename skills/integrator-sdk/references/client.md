@@ -100,6 +100,17 @@ const { signature, weight } = await client.processes.sign(processId, {
   payload: signer.address,          // hex Ethereum address from EphemeralSigner
 })
 
+// Same, but every question in ONE call — prefer this when casting a whole
+// process. Per-question failures are reported inline with a stable `code`;
+// the batch itself only rejects on a bad auth token or malformed request.
+const { signatures } = await client.processes.signBatch(processId, {
+  authToken,
+  ballots: [{ upstreamId: question.upstreamId!, address: signer.address }],
+})
+// signatures[i] — { upstreamId, signature?, weight?, code?, error? }
+// ⚠️ Match by `upstreamId`, do not zip: a dropped entry would silently shift
+//    every signature onto the wrong question.
+
 // Voter's census weight
 const { weight } = await client.processes.weight(processId, { authToken })
 
@@ -107,6 +118,11 @@ const { weight } = await client.processes.weight(processId, { authToken })
 // questions the voter already cast (others omitted)
 const { consumed } = await client.processes.signInfo(processId, { authToken })
 ```
+
+`SignFailureCode` (the stable `code` on a failed `signatures[i]`):
+`already_consumed`, `already_signing`, `auth_invalid`, `address_mismatch`,
+`sign_failed` (plus `blind_request_missing` / `invalid_blinded_message`, which
+only the anonymous blind-signing flow produces).
 
 (The backend also exposes `GET /processes/{id}/participants/{participantId}`,
 but it is a documented placeholder that always returns `null`, so the SDK does

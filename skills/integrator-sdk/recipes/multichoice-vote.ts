@@ -117,26 +117,52 @@ const SELECTIONS_BY_QUESTION: Record<string, number[]> = {
   // '<questionId>': [1, 3],
 }
 
-// ─── Vote — once per question ──────────────────────────────────────────────
-// A multi-question process casts one Vochain transaction per question, so
-// question-read / CSP-sign / build-transaction / relay / poll repeat for every
-// question.
+// ─── CSP sign — ALL questions in one call ──────────────────────────────────
+// One fresh ephemeral signer per question, then a single POST
+// /processes/{id}/sign-batch signs every ballot in one round trip. A signing
+// slot is one-shot, so per-question failures come back inline ({code, error})
+// instead of failing the whole batch — check each entry before building its tx.
 
-for (const status of check.questions) {
-  const processId = status.upstreamId
-  if (!processId) {
+const votable = check.questions.filter((status) => {
+  if (!status.upstreamId) {
     console.warn(`Question ${status.questionId} has no upstreamId yet (not published?) — skipping`)
-    continue
+    return false
   }
-
-  const selections = SELECTIONS_BY_QUESTION[status.questionId]
-  if (!selections) {
+  if (!SELECTIONS_BY_QUESTION[status.questionId]) {
     console.warn(`No selections configured for question ${status.questionId} — skipping`)
-    continue
+    return false
   }
-
   if (!status.canVote || status.hasVoted) {
     console.log(`Cannot vote on question ${status.questionId} (ineligible or already voted) — skipping`)
+    return false
+  }
+  return true
+})
+
+const signers = votable.map(() => new EphemeralSigner())
+const { signatures } = await client.processes.signBatch(PROCESS_ID, {
+  authToken,
+  ballots: votable.map((status, i) => ({
+    upstreamId: status.upstreamId!, // the QUESTION's vochain id, not PROCESS_ID
+    address: signers[i].address,
+  })),
+})
+// Match by upstreamId, never by position: a dropped entry would silently shift
+// every signature onto the wrong question.
+const signatureByElection = new Map(signatures.map((s) => [s.upstreamId, s]))
+
+// ─── Vote — once per question ──────────────────────────────────────────────
+// A multi-question process casts one Vochain transaction per question, so
+// question-read / build-transaction / relay / poll repeat for every question.
+
+for (const [i, status] of votable.entries()) {
+  const processId = status.upstreamId!
+  const selections = SELECTIONS_BY_QUESTION[status.questionId]
+
+  const signed = signatureByElection.get(processId)
+  if (!signed?.signature) {
+    // e.g. already_consumed (terminal) or sign_failed (retry the batch call).
+    console.warn(`CSP refused question ${status.questionId}: ${signed?.code ?? 'no result'} ${signed?.error ?? ''}`)
     continue
   }
 
@@ -152,14 +178,6 @@ for (const status of check.questions) {
   // encodeQuestionBallot falls back to type + typeSetup, so pass the whole
   // question rather than reading the protocol yourself.
 
-  const signer = new EphemeralSigner()
-  const { signature, weight } = await client.processes.sign(PROCESS_ID, {
-    authToken,
-    electionId: processId, // the QUESTION's vochain id (upstreamId), not PROCESS_ID
-    payload: signer.address,
-  })
-  if (!signature) throw new Error(`CSP did not return a signature for question ${question.id}`)
-
   // encodeQuestionBallot infers the ballot type (single-choice / approval /
   // multichoice / ranked) from question.ballotProtocol (or type + typeSetup) and
   // produces the exact on-chain `choices` array — including abstain-padding for
@@ -173,9 +191,9 @@ for (const status of check.questions) {
     processId,
     chainId: CHAIN_ID,
     choices,
-    signer,
-    cspSignature: signature,
-    cspWeight: weight,
+    signer: signers[i],
+    cspSignature: signed.signature,
+    cspWeight: signed.weight,
   })
 
   const job = await client.jobs.waitFor(jobId, { timeoutMs: 90_000 })

@@ -41,6 +41,8 @@ export {
 export {
   useElectionAuth,
   type ElectionAuthContextValue,
+  type ElectionSignBatchBallot,
+  type ElectionSignBatchResult,
   type ElectionSignResult,
 } from './election/use-election-auth'
 

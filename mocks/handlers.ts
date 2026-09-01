@@ -285,6 +285,18 @@ export const handlers = [
     HttpResponse.json({ signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX }),
   ),
 
+  // Batch sign — one signature per ballot, in request order.
+  http.post(`${BASE}/processes/:processId/sign-batch`, async ({ request }) => {
+    const body = (await request.json()) as { ballots: { upstreamId: string }[] }
+    return HttpResponse.json({
+      signatures: body.ballots.map((b) => ({
+        upstreamId: b.upstreamId,
+        signature: MOCK_CSP_SIGNATURE,
+        weight: MOCK_WEIGHT_HEX,
+      })),
+    })
+  }),
+
   http.post(`${BASE}/processes/:processId/weight`, () =>
     HttpResponse.json({ weight: MOCK_WEIGHT_HEX }),
   ),

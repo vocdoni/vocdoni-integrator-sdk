@@ -8,6 +8,8 @@ import type {
   ProcessCheckResponse,
   ProcessSignInfoResponse,
   PublicQuestionResponse,
+  SignBatchRequest,
+  SignBatchResponse,
   SignRequest,
   UserWeightRequest,
   UserWeightResponse,
@@ -33,8 +35,8 @@ import { handleError } from './errors'
  *   (`question.upstreamId` from the process read), not the process id.
  *
  * Typical voter flow: {@link authStep0} → {@link authStep1} (skip for auth-only
- * censuses) → {@link check} to learn per-question eligibility → per question,
- * {@link sign} the ephemeral address and cast the vote via `elections.vote`.
+ * censuses) → {@link check} to learn per-question eligibility → {@link signBatch}
+ * the ephemeral addresses and cast the votes via `elections.vote`.
  */
 export class ProcessesCspClient {
   constructor(private readonly fetch: UpFetch) {}
@@ -86,6 +88,23 @@ export class ProcessesCspClient {
    */
   async sign(processId: string, body: SignRequest): Promise<AuthResponse> {
     return this.fetch<AuthResponse>(`/processes/${processId}/sign`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /**
+   * Batch form of {@link sign}: one CSP signature per question of the process,
+   * in a single call. Authorization is all-or-nothing — an unauthorized token
+   * fails the whole request — while per-question failures come back inline as
+   * `{ upstreamId, code, error }` entries in `signatures`, in request order.
+   *
+   * Prefer this over looping {@link sign} when casting a whole process: it is
+   * one round trip, and you learn every failure before putting any vote on
+   * chain.
+   */
+  async signBatch(processId: string, body: SignBatchRequest): Promise<SignBatchResponse> {
+    return this.fetch<SignBatchResponse>(`/processes/${processId}/sign-batch`, {
       method: 'POST',
       body,
     }).catch(handleError)
