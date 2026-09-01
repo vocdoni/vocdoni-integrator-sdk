@@ -1040,7 +1040,11 @@ export interface SignBatchResult {
   error?: string
 }
 
-/** Response of `POST /processes/{id}/sign-batch` — one result per ballot, in request order. */
+/**
+ * Response of `POST /processes/{id}/sign-batch` — one result per ballot, in
+ * request order. Match entries by `upstreamId` rather than by position: a
+ * dropped entry would otherwise shift every signature onto the wrong ballot.
+ */
 export interface SignBatchResponse {
   signatures: SignBatchResult[]
 }

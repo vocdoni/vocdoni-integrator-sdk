@@ -244,6 +244,28 @@ describe('useElectionAuth', () => {
       expect(signed[0].error).toBe('slot is spent')
     })
 
+    it('refuses duplicate electionIds instead of letting results collapse', async () => {
+      let calls = 0
+      server.use(
+        http.post('http://localhost/processes/:id/sign-batch', () => {
+          calls++
+          return HttpResponse.json({ signatures: [] })
+        }),
+      )
+      const result = await connectAuthOnly()
+
+      // The backend would 400 the whole batch anyway; the client must fail
+      // fast BEFORE the request, not let the by-election map collapse two
+      // ballots into one result.
+      await expect(
+        result.current.auth.signBatch([
+          { electionId: 'aa'.repeat(32), address: '0x' + '11'.repeat(20) },
+          { electionId: 'aa'.repeat(32), address: '0x' + '22'.repeat(20) },
+        ]),
+      ).rejects.toThrow(/twice/)
+      expect(calls).toBe(0)
+    })
+
     it('returns [] for an empty ballot list without hitting the API', async () => {
       let calls = 0
       server.use(

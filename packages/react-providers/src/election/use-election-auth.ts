@@ -175,6 +175,13 @@ export function useVoterSession(
     async (ballots: ElectionSignBatchBallot[]): Promise<ElectionSignBatchResult[]> => {
       if (!id || !authToken) throw new Error('Must authenticate before signing')
       if (ballots.length === 0) return []
+      // The backend rejects a repeated upstreamId with a whole-batch 400
+      // anyway; failing fast here keeps the error attributable and stops the
+      // by-election map below from silently collapsing two ballots into one
+      // result.
+      if (new Set(ballots.map((b) => b.electionId)).size !== ballots.length) {
+        throw new Error('signBatch() was given the same electionId twice — pass one ballot per question')
+      }
       const res = await client.processes.signBatch(id, {
         authToken,
         ballots: ballots.map((b) => ({ upstreamId: b.electionId, address: b.address })),

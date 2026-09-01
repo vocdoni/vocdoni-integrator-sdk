@@ -156,10 +156,12 @@ const signatureByElection = new Map(signatures.map((s) => [s.upstreamId, s]))
 // question-read / build-transaction / relay / poll repeat for every question.
 
 for (const [i, status] of votable.entries()) {
-  const processId = status.upstreamId!
+  // The QUESTION's on-chain election id — what the Vochain vote tx calls its
+  // `processId`. NOT the SaaS-level PROCESS_ID used everywhere else here.
+  const upstreamId = status.upstreamId!
   const selections = SELECTIONS_BY_QUESTION[status.questionId]
 
-  const signed = signatureByElection.get(processId)
+  const signed = signatureByElection.get(upstreamId)
   if (!signed?.signature) {
     // e.g. already_consumed (terminal) or sign_failed (retry the batch call).
     console.warn(`CSP refused question ${status.questionId}: ${signed?.code ?? 'no result'} ${signed?.error ?? ''}`)
@@ -188,7 +190,7 @@ for (const [i, status] of votable.entries()) {
   const choices = encodeQuestionBallot(question, selections)
 
   const jobId = await voting.vote({
-    processId,
+    processId: upstreamId,
     chainId: CHAIN_ID,
     choices,
     signer: signers[i],

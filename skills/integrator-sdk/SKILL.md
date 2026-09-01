@@ -49,9 +49,10 @@ reads `chainId` and the questions directly:
 2. POST /processes/{id}/auth/0               → auth step 0 (identify the voter)
    POST /processes/{id}/auth/1               → auth step 1 (confirm 2FA — skip if auth-only census)
 3. POST /processes/{id}/check                → belongsToProcess + per-question {questionId, upstreamId, canVote, hasVoted}
-   [repeat steps 4–6 for each votable question]
-4. POST /processes/{id}/sign                 → CSP signs voter's ephemeral address for question.upstreamId
-   POST /processes/{id}/sign-batch           → same, all questions in one call (client.processes.signBatch — prefer it)
+4. POST /processes/{id}/sign-batch           → CSP signs a fresh ephemeral address per question — ALL
+                                               questions in ONE call (client.processes.signBatch; the
+                                               single-question POST /processes/{id}/sign still exists)
+   [repeat steps 5–6 for each votable question]
 5. buildVoteTransaction(...)                 → build + sign the protobuf tx locally
 6. POST /vote                                → relay tx → jobId
    GET  /jobs/{jobId}                        → poll until completed → voteID (nullifier)

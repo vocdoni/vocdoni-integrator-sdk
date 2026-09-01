@@ -101,7 +101,8 @@ export class ProcessesCspClient {
    *
    * Prefer this over looping {@link sign} when casting a whole process: it is
    * one round trip, and you learn every failure before putting any vote on
-   * chain.
+   * chain. Match results by `upstreamId` rather than by position — a dropped
+   * entry would otherwise shift every signature onto the wrong question.
    */
   async signBatch(processId: string, body: SignBatchRequest): Promise<SignBatchResponse> {
     return this.fetch<SignBatchResponse>(`/processes/${processId}/sign-batch`, {
