@@ -1,4 +1,9 @@
-import type { AuthRequest, ProcessCheckResponse, VotingProcessResponse } from '@vocdoni/api-types'
+import type {
+  AuthRequest,
+  ProcessCheckResponse,
+  SignFailureCode,
+  VotingProcessResponse,
+} from '@vocdoni/api-types'
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import { useClient } from '../client/ClientProvider'
 
@@ -17,6 +22,29 @@ export interface ElectionSignResult {
   signature: string
   /** Hex-encoded census weight the CSP signed with. */
   weight?: string
+}
+
+/** One question's ballot in a {@link ElectionAuthContextValue.signBatch} call. */
+export interface ElectionSignBatchBallot {
+  /** The question's on-chain election id (its `upstreamId`). */
+  electionId: string
+  /** Ephemeral address that will cast this question's vote. */
+  address: string
+}
+
+/**
+ * One question's outcome in a batch sign — exactly one of `signature` and
+ * `code` is set, so a failure for one question never fails the others.
+ */
+export interface ElectionSignBatchResult {
+  /** The question's on-chain election id (its `upstreamId`). */
+  electionId: string
+  /** CSP signature (hex) to pass as `cspSignature`, on success. */
+  signature?: string
+  /** Weight the CSP authorized — pass it back as `cspWeight`, unchanged. */
+  weight?: string
+  code?: SignFailureCode
+  error?: string
 }
 
 /**
@@ -53,6 +81,12 @@ export interface ElectionAuthContextValue {
    * election (`electionId` is the question's `upstreamId`).
    */
   sign(electionId: string, address: string): Promise<ElectionSignResult>
+  /**
+   * Request every question's CSP signature in one call — what `vote()` uses.
+   * One round trip for the whole process; results come back in request order,
+   * with per-question failures reported inline rather than thrown.
+   */
+  signBatch(ballots: ElectionSignBatchBallot[]): Promise<ElectionSignBatchResult[]>
   /** Clear all auth/voter state. */
   clear(): void
 }
@@ -137,6 +171,41 @@ export function useVoterSession(
     [client, id, authToken],
   )
 
+  const signBatch = useCallback(
+    async (ballots: ElectionSignBatchBallot[]): Promise<ElectionSignBatchResult[]> => {
+      if (!id || !authToken) throw new Error('Must authenticate before signing')
+      if (ballots.length === 0) return []
+      // The backend rejects a repeated upstreamId with a whole-batch 400
+      // anyway; failing fast here keeps the error attributable and stops the
+      // by-election map below from silently collapsing two ballots into one
+      // result.
+      if (new Set(ballots.map((b) => b.electionId)).size !== ballots.length) {
+        throw new Error('signBatch() was given the same electionId twice — pass one ballot per question')
+      }
+      const res = await client.processes.signBatch(id, {
+        authToken,
+        ballots: ballots.map((b) => ({ upstreamId: b.electionId, address: b.address })),
+      })
+      // Indexed rather than zipped: the response is documented as being in
+      // request order, but a dropped entry would silently shift every
+      // signature onto the wrong question.
+      const byElection = new Map(res.signatures.map((s) => [s.upstreamId, s]))
+      return ballots.map((b) => {
+        const signed = byElection.get(b.electionId)
+        return {
+          electionId: b.electionId,
+          signature: signed?.signature,
+          weight: signed?.weight,
+          code: signed?.code,
+          error: signed?.signature
+            ? undefined
+            : (signed?.error ?? 'the CSP returned no result for this question'),
+        }
+      })
+    },
+    [client, id, authToken],
+  )
+
   const clear = useCallback(() => {
     setPendingToken(null)
     setAuthToken(null)
@@ -153,9 +222,10 @@ export function useVoterSession(
       resend,
       check,
       sign,
+      signBatch,
       clear,
     }),
-    [authToken, weight, auth0, auth1, resend, check, sign, clear],
+    [authToken, weight, auth0, auth1, resend, check, sign, signBatch, clear],
   )
 }
 

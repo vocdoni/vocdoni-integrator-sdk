@@ -985,6 +985,70 @@ export interface SignRequest {
   tokenR?: string
 }
 
+// ─── Batch signing ────────────────────────────────────────────────────────────
+
+/**
+ * Why a ballot could not be signed, in {@link SignBatchResult}. Stable and
+ * machine-readable; the accompanying `error` is a human string that may change.
+ *
+ * Retryable: `already_signing` (a concurrent request holds the lock) and
+ * `sign_failed` (transient signer/storage failure). Terminal:
+ * `already_consumed`, `auth_invalid` (re-authenticate), `address_mismatch`.
+ * `blind_request_missing` and `invalid_blinded_message` belong to the blind
+ * (anonymous census) signing flow, which shares this outcome set.
+ */
+export type SignFailureCode =
+  | 'already_consumed'
+  | 'already_signing'
+  | 'auth_invalid'
+  | 'address_mismatch'
+  | 'sign_failed'
+  | 'blind_request_missing'
+  | 'invalid_blinded_message'
+
+/** One ballot of a {@link SignBatchRequest}. */
+export interface SignBatchBallot {
+  /** Vochain election id of the question (64-hex). */
+  upstreamId: string
+  /** Hex address to be signed by the CSP for this question. */
+  address: string
+}
+
+/**
+ * Body of `POST /processes/{id}/sign-batch` (saas-backend#634) — the batch
+ * form of {@link SignRequest}: one auth token, one ballot per question, signed
+ * in a single call. Authorization is all-or-nothing; per-question failures
+ * come back inline in the response.
+ */
+export interface SignBatchRequest {
+  authToken: string
+  ballots: SignBatchBallot[]
+}
+
+/**
+ * One ballot's outcome in a batch sign. Exactly one of `signature` and `code`
+ * is set.
+ */
+export interface SignBatchResult {
+  /** Vochain election id of the question (64-hex). */
+  upstreamId: string
+  /** Hex CSP signature, on success. */
+  signature?: string
+  /** Hex-encoded census weight the ballot was signed with, on success. */
+  weight?: string
+  code?: SignFailureCode
+  error?: string
+}
+
+/**
+ * Response of `POST /processes/{id}/sign-batch` — one result per ballot, in
+ * request order. Match entries by `upstreamId` rather than by position: a
+ * dropped entry would otherwise shift every signature onto the wrong ballot.
+ */
+export interface SignBatchResponse {
+  signatures: SignBatchResult[]
+}
+
 export interface UserWeightRequest {
   authToken: string
 }

@@ -53,7 +53,7 @@ const MAX_VOTE_BATCH = 100
 /**
  * Election data, results and the vote flow, plus the voter's CSP auth session
  * (inherited from {@link ElectionAuthContextValue} — `auth0`/`auth1`/`resend`
- * to authenticate, `check`/`sign` for advanced UIs; the session's `clear` is
+ * to authenticate, `check`/`signBatch` for advanced UIs; the session's `clear` is
  * exposed here as {@link clearVoter}).
  */
 export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'clear'> {
@@ -431,13 +431,37 @@ export function ElectionProvider({
         ),
       )
 
-      // Consume every one-shot CSP signature and build every transaction
-      // BEFORE relaying anything. A failure in these phases aborts with zero
-      // votes on chain.
+      // Consume every one-shot CSP signature — every question in ONE
+      // sign-batch call — and build every transaction BEFORE relaying
+      // anything.
+      const signers = pending.map(() => new EphemeralSigner())
+      const signatures = await session.signBatch(
+        pending.map(({ question }, k) => ({
+          electionId: question.upstreamId!,
+          address: signers[k].address,
+        })),
+      )
+
+      // A CSP signature is one-shot: signBatch() has already consumed every
+      // authorization it granted. Throwing here would discard the successful
+      // ones unrelayed — check() would still report those questions unvoted,
+      // and a retry would sign a FRESH address and be told `already_consumed`,
+      // so those votes could never be cast at all. Relay what did sign and
+      // report the rest as a partial failure.
       const signed: Array<{ question: (typeof election.questions)[number]; i: number; txPayload: string }> = []
-      for (const { question, i } of pending) {
-        const signer = new EphemeralSigner()
-        const { signature, weight } = await session.sign(question.upstreamId!, signer.address)
+      const signFailures: Array<{ questionId: string; error: unknown }> = []
+      pending.forEach(({ question, i }, k) => {
+        const result = signatures[k]
+        if (!result?.signature) {
+          signFailures.push({
+            questionId: question.id,
+            error: new Error(
+              `The CSP did not sign question ${i} ("${question.id}"): ${result?.error ?? result?.code ?? 'no result'}`,
+            ),
+          })
+          setVoteStatus((st) => ({ ...st, [question.id]: 'failed' }))
+          return
+        }
         signed.push({
           question,
           i,
@@ -445,15 +469,20 @@ export function ElectionProvider({
             processId: question.upstreamId!,
             choices: encodedBallots[i],
             chainId,
-            signer,
-            cspSignature: signature,
-            cspWeight: weight,
+            signer: signers[k],
+            cspSignature: result.signature,
+            cspWeight: result.weight,
             encryptionKeys: question.secretUntilTheEnd ? question.encryptionKeys : undefined,
             memo: memos?.[i],
           }),
         })
         setVoteStatus((st) => ({ ...st, [question.id]: 'submitting' }))
-      }
+      })
+
+      // Nothing signed at all: nothing was consumed that a retry could not
+      // consume again, so this is a plain, fully-retryable error — no partial
+      // state to report and no empty batch to relay.
+      if (signed.length === 0) throw signFailures[0].error
 
       // One job covers the batch; its per-envelope entries settle one by one
       // while the job is pending — mirror every poll into voteStatus so UIs
@@ -602,7 +631,8 @@ export function ElectionProvider({
       }
 
       const succeeded: Array<{ questionId: string; voteId: string }> = []
-      const failed: Array<{ questionId: string; error: unknown }> = []
+      // Questions the CSP refused start out failed: they were never relayed.
+      const failed: Array<{ questionId: string; error: unknown }> = [...signFailures]
       signed.forEach(({ question }, idx) => {
         const outcome = outcomes[idx]
         if (outcome?.status === 'completed') {
@@ -731,6 +761,7 @@ export function ElectionProvider({
       resend: session.resend,
       check: session.check,
       sign: session.sign,
+      signBatch: session.signBatch,
       isInCensus,
       voterQuestions,
       hasVoted,

@@ -125,4 +125,171 @@ describe('useElectionAuth', () => {
       expect(result.current.election.voteId).toBeNull()
     })
   })
+
+  describe('signBatch', () => {
+    async function connectAuthOnly() {
+      useAuthOnlyCensus()
+      const { result } = renderHook(useHooks, { wrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+      await act(async () => {
+        await result.current.auth.auth0({ memberNumber: '5' })
+      })
+      expect(result.current.auth.connected).toBe(true)
+      return result
+    }
+
+    it('signs every ballot in ONE sign-batch call, in request order', async () => {
+      const batches: Array<Array<{ upstreamId: string; address: string }>> = []
+      server.use(
+        http.post('http://localhost/processes/:id/sign-batch', async ({ request }) => {
+          const body = (await request.json()) as {
+            authToken: string
+            ballots: Array<{ upstreamId: string; address: string }>
+          }
+          batches.push(body.ballots)
+          return HttpResponse.json({
+            signatures: body.ballots.map((b) => ({
+              upstreamId: b.upstreamId,
+              signature: 'ab'.repeat(65),
+              weight: '2a',
+            })),
+          })
+        }),
+      )
+      const result = await connectAuthOnly()
+
+      let signed: unknown
+      await act(async () => {
+        signed = await result.current.auth.signBatch([
+          { electionId: 'aa'.repeat(32), address: '0x' + '11'.repeat(20) },
+          { electionId: 'bb'.repeat(32), address: '0x' + '22'.repeat(20) },
+        ])
+      })
+      // ONE request carrying both ballots, in request order.
+      expect(batches).toHaveLength(1)
+      expect(batches[0].map((b) => b.upstreamId)).toEqual(['aa'.repeat(32), 'bb'.repeat(32)])
+      expect(batches[0].map((b) => b.address)).toEqual(['0x' + '11'.repeat(20), '0x' + '22'.repeat(20)])
+      expect(signed).toEqual([
+        { electionId: 'aa'.repeat(32), signature: 'ab'.repeat(65), weight: '2a' },
+        { electionId: 'bb'.repeat(32), signature: 'ab'.repeat(65), weight: '2a' },
+      ])
+    })
+
+    it('matches results by upstreamId, so a reordered response cannot shift signatures', async () => {
+      server.use(
+        http.post('http://localhost/processes/:id/sign-batch', () =>
+          HttpResponse.json({
+            // Deliberately NOT in request order.
+            signatures: [
+              { upstreamId: 'bb'.repeat(32), signature: 'b2'.repeat(65), weight: '2a' },
+              { upstreamId: 'aa'.repeat(32), signature: 'a1'.repeat(65), weight: '2a' },
+            ],
+          }),
+        ),
+      )
+      const result = await connectAuthOnly()
+
+      let signed: Array<{ electionId: string; signature?: string }> = []
+      await act(async () => {
+        signed = await result.current.auth.signBatch([
+          { electionId: 'aa'.repeat(32), address: '0x' + '11'.repeat(20) },
+          { electionId: 'bb'.repeat(32), address: '0x' + '22'.repeat(20) },
+        ])
+      })
+      expect(signed[0]).toMatchObject({ electionId: 'aa'.repeat(32), signature: 'a1'.repeat(65) })
+      expect(signed[1]).toMatchObject({ electionId: 'bb'.repeat(32), signature: 'b2'.repeat(65) })
+    })
+
+    it('reports a dropped entry as an inline error instead of shifting the rest', async () => {
+      server.use(
+        http.post('http://localhost/processes/:id/sign-batch', () =>
+          HttpResponse.json({
+            // Only the SECOND ballot came back; zipping would hand its
+            // signature to the first question.
+            signatures: [{ upstreamId: 'bb'.repeat(32), signature: 'b2'.repeat(65), weight: '2a' }],
+          }),
+        ),
+      )
+      const result = await connectAuthOnly()
+
+      let signed: Array<{ electionId: string; signature?: string; error?: string }> = []
+      await act(async () => {
+        signed = await result.current.auth.signBatch([
+          { electionId: 'aa'.repeat(32), address: '0x' + '11'.repeat(20) },
+          { electionId: 'bb'.repeat(32), address: '0x' + '22'.repeat(20) },
+        ])
+      })
+      expect(signed[0].signature).toBeUndefined()
+      expect(signed[0].error).toMatch(/no result/)
+      expect(signed[1].signature).toBe('b2'.repeat(65))
+    })
+
+    it('passes per-ballot failures through inline', async () => {
+      server.use(
+        http.post('http://localhost/processes/:id/sign-batch', () =>
+          HttpResponse.json({
+            signatures: [{ upstreamId: 'aa'.repeat(32), code: 'already_consumed', error: 'slot is spent' }],
+          }),
+        ),
+      )
+      const result = await connectAuthOnly()
+
+      let signed: Array<{ electionId: string; code?: string; error?: string }> = []
+      await act(async () => {
+        signed = await result.current.auth.signBatch([
+          { electionId: 'aa'.repeat(32), address: '0x' + '11'.repeat(20) },
+        ])
+      })
+      expect(signed[0].code).toBe('already_consumed')
+      expect(signed[0].error).toBe('slot is spent')
+    })
+
+    it('refuses duplicate electionIds instead of letting results collapse', async () => {
+      let calls = 0
+      server.use(
+        http.post('http://localhost/processes/:id/sign-batch', () => {
+          calls++
+          return HttpResponse.json({ signatures: [] })
+        }),
+      )
+      const result = await connectAuthOnly()
+
+      // The backend would 400 the whole batch anyway; the client must fail
+      // fast BEFORE the request, not let the by-election map collapse two
+      // ballots into one result.
+      await expect(
+        result.current.auth.signBatch([
+          { electionId: 'aa'.repeat(32), address: '0x' + '11'.repeat(20) },
+          { electionId: 'aa'.repeat(32), address: '0x' + '22'.repeat(20) },
+        ]),
+      ).rejects.toThrow(/twice/)
+      expect(calls).toBe(0)
+    })
+
+    it('returns [] for an empty ballot list without hitting the API', async () => {
+      let calls = 0
+      server.use(
+        http.post('http://localhost/processes/:id/sign-batch', () => {
+          calls++
+          return HttpResponse.json({ signatures: [] })
+        }),
+      )
+      const result = await connectAuthOnly()
+
+      let signed: unknown
+      await act(async () => {
+        signed = await result.current.auth.signBatch([])
+      })
+      expect(signed).toEqual([])
+      expect(calls).toBe(0)
+    })
+
+    it('throws before authenticating', async () => {
+      const { result } = renderHook(useHooks, { wrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+      await expect(
+        result.current.auth.signBatch([{ electionId: 'aa'.repeat(32), address: '0x' + '11'.repeat(20) }]),
+      ).rejects.toThrow(/authenticate/)
+    })
+  })
 })
