@@ -10,11 +10,11 @@
     "providers",
     "hooks"
   ],
-  "homepage": "https://github.com/vocdoni/integrator-sdk",
-  "bugs": "https://github.com/vocdoni/integrator-sdk/issues",
+  "homepage": "https://github.com/vocdoni/vocdoni-integrator-sdk",
+  "bugs": "https://github.com/vocdoni/vocdoni-integrator-sdk/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vocdoni/integrator-sdk.git",
+    "url": "https://github.com/vocdoni/vocdoni-integrator-sdk.git",
     "directory": "packages/react-providers"
   },
   "type": "module",

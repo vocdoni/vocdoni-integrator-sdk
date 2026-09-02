@@ -58,7 +58,7 @@ set of headless React providers and UI components.
 | [`@vocdoni/api-types`](./packages/api-types) | Shared TypeScript types for the SaaS API. |
 | [`@vocdoni/ballot`](./packages/ballot) | Framework-agnostic ballot semantics: type inference, choice encoding, results decoding. |
 | [`@vocdoni/api-voting`](./packages/api-voting) | Client-side voting: CSP auth, vote envelope, encrypted ballots. |
-| [`@vocdoni/api-voting-zk`](./packages/api-voting-zk) | ZK / anonymous voting (phase 2, not yet published). |
+| [`@vocdoni/api-voting-zk`](./packages/api-voting-zk) | ZK / anonymous voting. |
 | [`@vocdoni/react-providers`](./packages/react-providers) | Headless React providers and hooks. |
 | [`@vocdoni/react-components`](./packages/react-components) | React UI components for voting. |
 

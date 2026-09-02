@@ -7,8 +7,8 @@
 </p>
 
 <p align="center" width="100%">
-    <a href="https://github.com/vocdoni/integrator-sdk/commits/main/"><img src="https://img.shields.io/github/commit-activity/m/vocdoni/integrator-sdk" /></a>
-    <a href="https://github.com/vocdoni/integrator-sdk/issues"><img src="https://img.shields.io/github/issues/vocdoni/integrator-sdk" /></a>
+    <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/commits/main/"><img src="https://img.shields.io/github/commit-activity/m/vocdoni/vocdoni-integrator-sdk" /></a>
+    <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/issues"><img src="https://img.shields.io/github/issues/vocdoni/vocdoni-integrator-sdk" /></a>
     <a href="https://discord.gg/xFTh8Np2ga"><img src="https://img.shields.io/badge/discord-join%20chat-blue.svg" /></a>
     <a href="https://twitter.com/vocdoni"><img src="https://img.shields.io/twitter/follow/vocdoni.svg?style=social&label=Follow" /></a>
 </p>
@@ -34,9 +34,6 @@ What it provides:
   `packageZkProof`).
 - **ZK census** — register and fetch the anonymous census proof (`fetchZkCensusProof`,
   `hasRegisteredSik`).
-
-> [!WARNING]
-> This package is phase 2 of the SDK and is a work in progress — its API may change.
 
 ## Install
 

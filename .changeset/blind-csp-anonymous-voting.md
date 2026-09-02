@@ -3,7 +3,6 @@
 '@vocdoni/api-client': major
 '@vocdoni/api-voting': minor
 '@vocdoni/react-providers': minor
-'@vocdoni/api-voting-zk': patch
 ---
 
 Support anonymous (blind CSP) voting end to end.
@@ -30,4 +29,4 @@ const nullifier = entry.nullifier?.toLowerCase()
 
 Runtime behaviour on a non-anonymous process is unchanged: both fields are still populated on every `sign-info` entry. `@vocdoni/api-client` majors with the types it re-exports. The practical consequence is that vote ids on an anonymous process exist only for the session that cast them: `useElection().voteIds` cannot be recovered from `sign-info` after a reload.
 
-`@vocdoni/proto` is bumped `1.15.13` → `1.15.14` in the three packages that pin it exactly. The published diff is one additive line (`CensusOrigin.OFF_CHAIN_CA_V2`); nothing here needs it to build, but the pin is the version of the protocol the SDK claims to speak. `@vocdoni/api-voting-zk` moves only for that.
+`@vocdoni/proto` is bumped `1.15.13` → `1.15.14` in the packages that pin it exactly. The published diff is one additive line (`CensusOrigin.OFF_CHAIN_CA_V2`); nothing here needs it to build, but the pin is the version of the protocol the SDK claims to speak.
