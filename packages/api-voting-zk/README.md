@@ -35,9 +35,6 @@ What it provides:
 - **ZK census** — register and fetch the anonymous census proof (`fetchZkCensusProof`,
   `hasRegisteredSik`).
 
-> [!WARNING]
-> This package is phase 2 of the SDK and is a work in progress — its API may change.
-
 ## Install
 
 ~~~bash

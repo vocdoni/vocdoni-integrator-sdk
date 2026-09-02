@@ -14,7 +14,7 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | `@vocdoni/api-types` | Shared TypeScript interfaces — no runtime code |
 | `@vocdoni/api-client` | HTTP client wrapping the SaaS REST API ⚠️ surface in flux |
 | `@vocdoni/api-voting` | CSP auth, vote envelope, ballot encryption, vote-tx signing |
-| `@vocdoni/api-voting-zk` | ZK/anonymous voting — phase 2, not stable yet |
+| `@vocdoni/api-voting-zk` | ZK/anonymous voting: SIK derivation, Groth16 proofs, circuit fetching |
 | `@vocdoni/react-providers` | Headless React context providers and hooks |
 | `@vocdoni/react-components` | Unstyled React UI components built on react-providers |
 

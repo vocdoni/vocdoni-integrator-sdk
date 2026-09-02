@@ -1,9 +1,8 @@
 {
   "name": "@vocdoni/api-voting-zk",
   "version": "0.0.0",
-  "private": true,
   "license": "GPL-3.0-or-later",
-  "description": "ZK/anonymous voting for the Vocdoni SaaS API (phase 2)",
+  "description": "ZK/anonymous voting for the Vocdoni SaaS API",
   "keywords": [
     "vocdoni",
     "voting",
@@ -11,11 +10,11 @@
     "anonymous",
     "snark"
   ],
-  "homepage": "https://github.com/vocdoni/integrator-sdk",
-  "bugs": "https://github.com/vocdoni/integrator-sdk/issues",
+  "homepage": "https://github.com/vocdoni/vocdoni-integrator-sdk",
+  "bugs": "https://github.com/vocdoni/vocdoni-integrator-sdk/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vocdoni/integrator-sdk.git",
+    "url": "https://github.com/vocdoni/vocdoni-integrator-sdk.git",
     "directory": "packages/api-voting-zk"
   },
   "type": "module",
