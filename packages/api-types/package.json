@@ -1,6 +1,6 @@
 {
   "name": "@vocdoni/api-types",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "license": "GPL-3.0-or-later",
   "description": "Shared TypeScript types for the Vocdoni Integrator SDK",
   "keywords": [
