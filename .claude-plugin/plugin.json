@@ -6,8 +6,8 @@
     "name": "Vocdoni",
     "url": "https://vocdoni.io"
   },
-  "homepage": "https://github.com/vocdoni/integrator-sdk",
-  "repository": "https://github.com/vocdoni/integrator-sdk",
+  "homepage": "https://github.com/vocdoni/vocdoni-integrator-sdk",
+  "repository": "https://github.com/vocdoni/vocdoni-integrator-sdk",
   "license": "AGPL-3.0-or-later",
   "keywords": [
     "claude-code",

@@ -317,7 +317,7 @@ pick-slot reads the field index as a *slot* and its value as the *chosen option*
 Nothing in `ballotProtocol` separates them, so a question created without the
 declaration is labelled `multichoice`, decodes by column-sum, and reports the same
 number for every option (this was
-[integrator-sdk#22](https://github.com/vocdoni/integrator-sdk/issues/22)). The
+[integrator-sdk#22](https://github.com/vocdoni/vocdoni-integrator-sdk/issues/22)). The
 backend's own `type` vocabulary is `['singlechoice', 'multichoice']` and rejects
 anything else, so the metadata bag — which it stores and echoes back verbatim — is
 the channel. `declaresRanked(question)` reports whether a question carries it.
