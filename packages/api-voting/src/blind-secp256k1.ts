@@ -86,7 +86,7 @@ export function decompressBlindPoint(bytes: Uint8Array): BlindPoint {
  */
 export function blind(m: bigint, r: BlindPoint): { mBlinded: bigint; secret: BlindUserSecret } {
   const h = hashScalar(m)
-  // ponytail: bounded retry — each attempt fails with probability ~1/256, so
+  // Bounded retry — each attempt fails with probability ~1/256, so
   // exhausting 32 of them means something structural is wrong, not bad luck.
   for (let attempt = 0; attempt < 32; attempt++) {
     const a = randomScalar()
