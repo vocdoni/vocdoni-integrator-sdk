@@ -1,4 +1,7 @@
 import { http, HttpResponse } from 'msw'
+// A real (fixed-key) blind signer, reused rather than re-implemented here — a
+// mock that faked the crypto would let a real encoding bug through.
+import { mockBlindCsp } from '../packages/api-voting/src/blind-secp256k1.testkit'
 
 const BASE = 'http://localhost'
 export const BUNDLE_ID = 'bundle-1'
@@ -9,6 +12,13 @@ export const MOCK_PROCESS_ADDRESS =
 export const MOCK_CSP_SIGNATURE = 'ab'.repeat(64)
 /** Hex-encoded weight "2a" === 42. */
 export const MOCK_WEIGHT_HEX = '2a'
+
+/**
+ * The blind census key of `electionId`, as the Vochain would derive it. Verify
+ * a mock-signed anonymous ballot against this.
+ */
+export const mockBlindCensusKey = (electionId: string) =>
+  mockBlindCsp.censusKey(electionId, MOCK_WEIGHT_HEX)
 
 /**
  * Batch relay jobs registered by the default `POST /votes` handler: jobId →
@@ -292,6 +302,32 @@ export const handlers = [
       signatures: body.ballots.map((b) => ({
         upstreamId: b.upstreamId,
         signature: MOCK_CSP_SIGNATURE,
+        weight: MOCK_WEIGHT_HEX,
+      })),
+    })
+  }),
+
+  // Blind CSP round 1 — a genuine curve point per election; the client
+  // decompresses it and blinds against it.
+  http.post(`${BASE}/processes/:processId/blind-point`, async ({ request }) => {
+    const body = (await request.json()) as { electionIds: string[] }
+    return HttpResponse.json({
+      points: body.electionIds.map((upstreamId) => ({
+        upstreamId,
+        tokenR: mockBlindCsp.point(upstreamId),
+        weight: MOCK_WEIGHT_HEX,
+      })),
+    })
+  }),
+
+  // Blind CSP round 2 — signs the blinded message it cannot read, with the
+  // salted key {@link mockBlindCensusKey} verifies against.
+  http.post(`${BASE}/processes/:processId/blind-sign`, async ({ request }) => {
+    const body = (await request.json()) as { ballots: { upstreamId: string; blindedMessage: string }[] }
+    return HttpResponse.json({
+      signatures: body.ballots.map(({ upstreamId, blindedMessage }) => ({
+        upstreamId,
+        signature: mockBlindCsp.sign(upstreamId, blindedMessage, MOCK_WEIGHT_HEX),
         weight: MOCK_WEIGHT_HEX,
       })),
     })

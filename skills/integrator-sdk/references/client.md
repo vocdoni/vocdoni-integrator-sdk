@@ -117,12 +117,44 @@ const { weight } = await client.processes.weight(processId, { authToken })
 // Consumed sign info — per-question address/nullifier/timestamp for the
 // questions the voter already cast (others omitted)
 const { consumed } = await client.processes.signInfo(processId, { authToken })
+// ⚠️ `address` and `nullifier` are OPTIONAL — an anonymous census reports
+//    neither, because the CSP blind-signs and never learns the address.
 ```
 
-`SignFailureCode` (the stable `code` on a failed `signatures[i]`):
-`already_consumed`, `already_signing`, `auth_invalid`, `address_mismatch`,
-`sign_failed` (plus `blind_request_missing` / `invalid_blinded_message`, which
-only the anonymous blind-signing flow produces).
+### Anonymous census: blind signing
+
+When `process.census.anonymous` is `true`, `sign`/`signBatch` are replaced by
+two rounds. Prefer `signBlindCspBallots()` from `@vocdoni/api-voting`, which
+wraps both plus the client-side blinding — call these directly only for a
+custom flow.
+
+```ts
+// Round 1 — one blind point per election. Atomic and idempotent: a repeat
+// returns the same tokenR, so this round is safe to retry. Round 2 is not —
+// a signed election has spent its nonce, and re-blinding under a fresh secret
+// makes the signature you already hold the only usable one.
+const { points } = await client.processes.blindPoint(processId, {
+  authToken,
+  electionIds: [question.upstreamId!],
+})
+// points[i] — { upstreamId, tokenR?, weight?, code?, error? }
+//   tokenR — 33 bytes: X big-endian (32) then an oddness byte. NOT SEC1.
+//   weight — pinned here and hashed into the signing key's salt; carry it verbatim.
+
+// Round 2 — the CSP signs bytes it cannot read.
+const { signatures } = await client.processes.blindSign(processId, {
+  authToken,
+  ballots: [{ upstreamId: question.upstreamId!, blindedMessage }],
+})
+// Same result shape as signBatch. A failed round 2 does not consume the
+// election's one-time nonce; `already_consumed` is terminal.
+```
+
+`SignFailureCode` (the stable `code` on a failed `signatures[i]`, shared by
+`signBatch` and `blindSign`): `already_consumed`, `already_signing`,
+`auth_invalid`, `address_mismatch`, `sign_failed` (plus
+`blind_request_missing` / `invalid_blinded_message`, which only the anonymous
+blind-signing flow produces).
 
 (The backend also exposes `GET /processes/{id}/participants/{participantId}`,
 but it is a documented placeholder that always returns `null`, so the SDK does
@@ -152,7 +184,10 @@ const election = await client.elections.get(mongoId)
 //                            return the same value 0x-prefixed — normalize before comparing.
 // election.title           — MultiLangString ({ default, [lang]: string })
 // election.census          — CensusSpec ({ weighted, authFields, twoFaFields, size?,
-//                            totalWeight?, ... })
+//                            totalWeight?, anonymous?, ... })
+//   census.anonymous       — set at create time; the CSP then BLIND-signs, so it cannot
+//                            link voter → vote. Round-trips on read, and is the only
+//                            switch the voter side needs (see "Anonymous census" above).
 //   census.size            — member count (response-only; omitted when 0). There is
 //                            deliberately NO census type/uri/id over this API: the census
 //                            "type" is inferred from authFields/twoFaFields (every

@@ -5,7 +5,7 @@ import type {
   VotingProcessResponse,
   VotingProcessResultsResponse,
 } from '@vocdoni/api-types'
-import { buildVoteTransaction, EphemeralSigner, MAX_MEMO_BYTES } from '@vocdoni/api-voting'
+import { buildVoteTransaction, EphemeralSigner, MAX_MEMO_BYTES, ProofCA_Type } from '@vocdoni/api-voting'
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import {
   createContext,
@@ -221,8 +221,11 @@ export class PartialVoteError extends Error {
 }
 
 /** Folds a `succeeded` list into the `questionId → voteId` map shape. */
+// Entries with no id are dropped: a vote can land without a recoverable vote id
+// (an anonymous census has no nullifier to recover), and mapping the question to
+// an empty string would read as "voted, id known to be blank".
 const byQuestion = (succeeded: Array<{ questionId: string; voteId: string }>): Record<string, string> =>
-  Object.fromEntries(succeeded.map((s) => [s.questionId, s.voteId]))
+  Object.fromEntries(succeeded.filter((s) => !!s.voteId).map((s) => [s.questionId, s.voteId]))
 
 const ElectionContext = createContext<ElectionContextValue | undefined>(undefined)
 
@@ -329,17 +332,24 @@ export function ElectionProvider({
         // not just the ones this session's vote() produced. Only worth a
         // request once something is actually voted, and a failure here must
         // never invalidate the membership check — swallow it.
+        //
+        // An anonymous census reports no nullifier by design — the CSP blind
+        // signs and never learns the address — so there is nothing to recover
+        // there and vote ids live only for the session that cast them. Skip
+        // the request entirely rather than pay for a provably empty answer.
+        if (election.census?.anonymous) return
         if (!res.questions.some((q) => q.hasVoted)) return
         const info = await client.processes
           .signInfo(election.id, { authToken: session.authToken! })
           .catch(() => null)
         if (cancelled || !info) return
+        const consumed = info.consumed.filter((c) => !!c.nullifier)
         const recovered = byQuestion(
-          info.consumed.map((c) => ({ questionId: c.questionId, voteId: c.nullifier })),
+          consumed.map((c) => ({ questionId: c.questionId, voteId: c.nullifier! })),
         )
         // Ids cast in this session win: they came straight from the relay job.
         setVoteIds((prev) => ({ ...recovered, ...prev }))
-        const first = info.consumed[0]?.nullifier
+        const first = consumed[0]?.nullifier
         if (first) setVoteId((prev) => prev ?? first)
       })
       .catch(() => {
@@ -441,6 +451,10 @@ export function ElectionProvider({
           address: signers[k].address,
         })),
       )
+      // An anonymous census gets a blind CSP signature, which the chain
+      // verifies against the blind-salted census key rather than as a plain
+      // ECDSA signature over the bundle.
+      const proofType = election.census?.anonymous ? ProofCA_Type.ECDSA_BLIND_PIDSALTED : undefined
 
       // A CSP signature is one-shot: signBatch() has already consumed every
       // authorization it granted. Throwing here would discard the successful
@@ -472,6 +486,7 @@ export function ElectionProvider({
             signer: signers[k],
             cspSignature: result.signature,
             cspWeight: result.weight,
+            proofType,
             encryptionKeys: question.secretUntilTheEnd ? question.encryptionKeys : undefined,
             memo: memos?.[i],
           }),
@@ -515,7 +530,11 @@ export function ElectionProvider({
         const info = await client.processes
           .signInfo(election.id, { authToken: session.authToken! })
           .catch(() => null)
-        return Object.fromEntries((info?.consumed ?? []).map((c) => [c.questionId, c.nullifier]))
+        // No nullifier for an anonymous census: those votes land without a
+        // recoverable id (see the sign-info read above).
+        return Object.fromEntries(
+          (info?.consumed ?? []).filter((c) => !!c.nullifier).map((c) => [c.questionId, c.nullifier!]),
+        )
       }
 
       // The relay outcome is UNKNOWN (response lost): the backend may have
@@ -681,7 +700,10 @@ export function ElectionProvider({
       }
 
       if (failed.length > 0) {
-        if (succeeded.length > 0) setVoteId((prev) => prev ?? succeeded[0].voteId)
+        // `voteId` is null-or-a-real-nullifier; '' would break that for every
+        // consumer that treats it as "the vote id we have".
+        const firstVoteId = succeeded.find((s) => !!s.voteId)?.voteId
+        if (firstVoteId) setVoteId((prev) => prev ?? firstVoteId)
         // Truthful partial state: reflect what actually landed on chain, so
         // `voterQuestions`/`hasVoted` don't claim "not voted" for cast votes.
         try {
@@ -698,9 +720,11 @@ export function ElectionProvider({
       setVoterQuestions((qs) => qs.map((q) => ({ ...q, hasVoted: true })))
       setHasVoted(true)
       // The first cast question's vote id (on a resumed call, the first of the
-      // questions cast by THIS call).
+      // questions cast by THIS call). An anonymous census produces none — the
+      // returned '' says "cast, no recoverable id", but `voteId` keeps its
+      // null-or-a-real-nullifier contract.
       const resultVoteId = succeeded[0]?.voteId ?? ''
-      setVoteId(resultVoteId)
+      if (resultVoteId) setVoteId(resultVoteId)
       return resultVoteId
     },
     [election, session, chainId, client, voterQuestions, voteOptions],

@@ -4,6 +4,7 @@ import type {
   SignFailureCode,
   VotingProcessResponse,
 } from '@vocdoni/api-types'
+import { signBlindCspBallots } from '@vocdoni/api-voting'
 import { createContext, useCallback, useContext, useMemo, useState } from 'react'
 import { useClient } from '../client/ClientProvider'
 
@@ -83,8 +84,14 @@ export interface ElectionAuthContextValue {
   sign(electionId: string, address: string): Promise<ElectionSignResult>
   /**
    * Request every question's CSP signature in one call — what `vote()` uses.
-   * One round trip for the whole process; results come back in request order,
+   *
+   * Takes whichever flow the process needs: for an anonymous census the two
+   * round blind flow, where the CSP signs a ballot it cannot read, otherwise
+   * the plain batch sign. Either way the results come back in request order,
    * with per-question failures reported inline rather than thrown.
+   *
+   * Anonymous results must be spent as `ProofCA_Type.ECDSA_BLIND_PIDSALTED`
+   * with `cspWeight` set to the returned `weight`.
    */
   signBatch(ballots: ElectionSignBatchBallot[]): Promise<ElectionSignBatchResult[]>
   /** Clear all auth/voter state. */
@@ -164,16 +171,23 @@ export function useVoterSession(
   const sign = useCallback(
     async (electionId: string, address: string): Promise<ElectionSignResult> => {
       if (!id || !authToken) throw new Error('Must authenticate before signing')
+      // The plain endpoint would happily return a signature here, but an
+      // anonymous census is rooted at the CSP's BLIND public key: the chain
+      // rejects that proof, after the one-shot authorization is already spent.
+      if (process?.census?.anonymous) {
+        throw new Error('This process has an anonymous census — use signBatch(), which blind-signs')
+      }
       const res = await client.processes.sign(id, { authToken, electionId, payload: address })
       if (!res.signature) throw new Error('Process sign did not return a signature')
       return { signature: res.signature, weight: res.weight }
     },
-    [client, id, authToken],
+    [client, id, authToken, process],
   )
 
   const signBatch = useCallback(
     async (ballots: ElectionSignBatchBallot[]): Promise<ElectionSignBatchResult[]> => {
       if (!id || !authToken) throw new Error('Must authenticate before signing')
+      if (!process) throw new Error('Election is not loaded yet — cannot sign')
       if (ballots.length === 0) return []
       // The backend rejects a repeated upstreamId with a whole-batch 400
       // anyway; failing fast here keeps the error attributable and stops the
@@ -182,6 +196,17 @@ export function useVoterSession(
       if (new Set(ballots.map((b) => b.electionId)).size !== ballots.length) {
         throw new Error('signBatch() was given the same electionId twice — pass one ballot per question')
       }
+
+      if (process.census?.anonymous) {
+        const results = await signBlindCspBallots({
+          processId: id,
+          authToken,
+          client,
+          ballots: ballots.map((b) => ({ upstreamId: b.electionId, address: b.address })),
+        })
+        return results.map(({ upstreamId, ...rest }) => ({ electionId: upstreamId, ...rest }))
+      }
+
       const res = await client.processes.signBatch(id, {
         authToken,
         ballots: ballots.map((b) => ({ upstreamId: b.electionId, address: b.address })),
@@ -203,7 +228,7 @@ export function useVoterSession(
         }
       })
     },
-    [client, id, authToken],
+    [client, id, authToken, process],
   )
 
   const clear = useCallback(() => {

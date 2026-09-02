@@ -20,7 +20,7 @@ so there are no dev-DB fixtures to rot. It runs in CI
 (`.github/workflows/integration.yml`) against a disposable saas-api + vochain
 container on every pull request, on pushes to `main`, and on a nightly
 schedule. The whole job takes ~7 minutes (~5.7 min of it the suite itself:
-9 on-chain elections and 36 votes, each a CSP sign + relay + job poll).
+11 on-chain elections and 44 votes, each a CSP sign + relay + job poll).
 
 To run the same stack locally:
 
@@ -34,6 +34,13 @@ identical to what CI does. Tear it down afterwards with:
 
 ```bash
 scripts/integration-stack.sh down
+```
+
+The stack pins `ghcr.io/vocdoni/saas-backend:main`. Override it to run against
+an unmerged backend branch:
+
+```bash
+SAAS_BACKEND_IMAGE=ghcr.io/vocdoni/saas-backend:pr-641 pnpm test:integration:stack
 ```
 
 To drive the stack and the suite as separate steps (e.g. to reuse the same
@@ -50,11 +57,12 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
    jobs endpoint for the import.
 3. Read the auto-created "All members" group.
 4. Build and publish a CSP census from that group.
-5. Create and publish 4 processes (each embedding its census via
+5. Create and publish 5 processes (each embedding its census via
    `census: { groupId, authFields }` — publish rejects censusless processes) —
    single-choice, multi-choice, a `secretUntilTheEnd` single-choice whose
-   per-question encryption keys are polled after publish, and a **ballot
-   protocol matrix** (6 questions: approval, capped approval, pick-slot
+   per-question encryption keys are polled after publish, an **anonymous**
+   single-choice (`census.anonymous`, voted through the two-round blind CSP
+   flow), and a **ballot protocol matrix** (6 questions: approval, capped approval, pick-slot
    multichoice, ranked, budget, quadratic). For each, prove the
    **public voter surface** (saas-backend#599): the draft 404s on the
    token-less process read before publish; once published the process read is
@@ -67,8 +75,14 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
 6. 4 members vote on every question through the **process-scoped CSP flow**
    (`client.processes`: `authStep0` → `check` → `sign`), with `chainId` read
    straight off the **public** process read — no integrator handoff. The secret
-   question's ballots are sealed with its encryption keys.
-7. Assert one distinct vote nullifier per (member, question) — 36 in total.
+   question's ballots are sealed with its encryption keys. The anonymous
+   process instead goes through `signBlindCspBallots()` — `blindPoint` → blind
+   → `blindSign` → unblind — and casts an `ECDSA_BLIND_PIDSALTED` proof, which
+   is the only end-to-end check that the SDK, the backend and the chain salt
+   the census key identically.
+7. Assert one distinct vote nullifier per (member, question) — 40 in total —
+   and that `sign-info` reports neither address nor nullifier for the anonymous
+   process while reporting both for every other one.
 8. Read the live public tallies (`getResults` + single reads): every question
    reaches `voteCount = 4` with `finalResults = false`, `maxVoters` = census
    size, and — for cleartext questions — the **decoded per-choice tally**
@@ -93,8 +107,8 @@ asserted here rather than only the two named question types.
 | `INTEGRATION_API_KEY` | — (suite skips without it)         | Integrator API key (`vsk_…`)  |
 
 The key's organization must be an **integrator** with scopes `managed:write` +
-`members:write` + `voting:write`, and quota for ≥4 processes / ≥9 on-chain
+`members:write` + `voting:write`, and quota for ≥5 processes / ≥11 on-chain
 elections / ≥300 census size. The suite creates real on-chain elections and
-casts 36 real votes, so expect it to take ~6 minutes. (The disposable stack
+casts 40 real votes, so expect it to take ~6 minutes. (The disposable stack
 above provisions all of that for you — this only applies when pointing
 `INTEGRATION_API_URL` at a shared environment.)

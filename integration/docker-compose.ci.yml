@@ -81,7 +81,9 @@ services:
 
   api:
     platform: linux/amd64
-    image: ghcr.io/vocdoni/saas-backend:main
+    # Override to run the suite against an unmerged backend branch, e.g.
+    # SAAS_BACKEND_IMAGE=ghcr.io/vocdoni/saas-backend:pr-641 pnpm test:integration:stack
+    image: ${SAAS_BACKEND_IMAGE:-ghcr.io/vocdoni/saas-backend:main}
     environment:
       VOCDONI_SERVERURL: http://localhost:8080
       VOCDONI_HOST: 0.0.0.0

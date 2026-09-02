@@ -55,10 +55,10 @@ await client.elections.vote({ txPayload })
 | `choices` | `number[]` | yes | Ballot values for that one question — see "Choices format" below |
 | `chainId` | `string` | yes | From `election.chainId` on the public process read (`client.elections.get` — published processes need no auth). There is no per-question `chainId`, and `client.info().chainId` is NOT a substitute (it's the service's current chain, not the process's) |
 | `signer` | `EphemeralSigner` | yes | Fresh per-vote ephemeral keypair |
-| `cspSignature` | `string` | yes | Hex signature from `processes.sign()` |
-| `cspWeight` | `string` | no | Hex census weight from the same sign response; omit if absent |
+| `cspSignature` | `string` | yes | Hex signature from `processes.sign()` / `signBatch()`, or the 96-byte blind signature from `signBlindCspBallots()` |
+| `cspWeight` | `string` | no | Hex census weight from the same sign response; omit if absent. On the blind flow it is **not** optional in practice — the weight is baked into the key salt, so a changed or dropped weight invalidates the signature |
 | `encryptionKeys` | `EncryptionKey[]` | no | Required when `question.secretUntilTheEnd` is `true`; see "Encrypted elections" below for how keys are sourced |
-| `proofType` | `ProofCA_Type` | no | Defaults to `ECDSA_PIDSALTED` (correct for all SaaS CSP processes) |
+| `proofType` | `ProofCA_Type` | no | Defaults to `ECDSA_PIDSALTED` (correct for every non-anonymous SaaS CSP process). Pass `ECDSA_BLIND_PIDSALTED` for an anonymous census — see "Anonymous voting" below |
 | `memo` | `string` | no | Free-text note attached to the vote (e.g. an open "Other" answer). Max 256 UTF-8 **bytes** (`MAX_MEMO_BYTES`, validated client-side; throws when over). ⚠️ Always cleartext on the envelope — never put sensitive text here, even on `secretUntilTheEnd` elections (only the vote package is encrypted) |
 
 ---
@@ -477,6 +477,108 @@ When multiple keys are present they are applied in ascending `index` order (inne
 > **absent** (not an empty array) until then — treat absence as "not yet
 > published" and poll before building the ballot. See
 > `recipes/encrypted-vote.ts`.
+
+---
+
+## Anonymous voting (blind CSP)
+
+When the process's census has `anonymous: true`, the CSP signs a message it
+cannot read, so it cannot link the authorization it granted to the ballot that
+lands on chain. This is a **blind signature, not ZK** — `EnvelopeType.Anonymous`
+stays `false` and `@vocdoni/api-voting-zk` is a different path entirely.
+
+`signBlindCspBallots()` replaces `processes.sign()` and does both rounds plus
+the blinding/unblinding:
+
+```ts
+import {
+  signBlindCspBallots, EphemeralSigner, buildVoteTransaction, ProofCA_Type,
+} from '@vocdoni/api-voting'
+
+const process = await client.elections.get(processMongoId)
+if (!process.census?.anonymous) throw new Error('not an anonymous census')
+
+const signers = questions.map(() => new EphemeralSigner())
+
+const results = await signBlindCspBallots({
+  processId: processMongoId,   // the Mongo id — these endpoints are process-scoped
+  authToken,
+  client,                      // VocdoniApiClient satisfies BlindCspApiClient structurally
+  ballots: questions.map((q, i) => ({ upstreamId: q.upstreamId!, address: signers[i].address })),
+})
+
+results.forEach((result, i) => {
+  if (!result.signature) throw new Error(`CSP refused: ${result.code ?? result.error}`)
+  const txPayload = buildVoteTransaction({
+    processId: result.upstreamId,
+    choices: [0],
+    chainId: process.chainId!,
+    signer: signers[i],
+    cspSignature: result.signature,           // 96 bytes, not the usual 65
+    cspWeight: result.weight,                 // MUST be passed back verbatim
+    proofType: ProofCA_Type.ECDSA_BLIND_PIDSALTED,
+  })
+  // relay as usual — POST /vote is proof-type-agnostic
+})
+```
+
+### SignBlindCspBallotsOptions / BlindCspResult
+
+| Field | Type | Notes |
+|---|---|---|
+| `processId` | `string` | The **Mongo** id, not `upstreamId` — both blind endpoints are scoped by process |
+| `authToken` | `string` | Verified CSP auth token; authorization is all-or-nothing per batch |
+| `ballots` | `{ upstreamId, address }[]` | One entry per question, each with its **own** fresh `EphemeralSigner` |
+| `client` | `BlindCspApiClient` | Structural slice — `{ processes: { blindPoint, blindSign } }` |
+
+Results come back in request order, one per ballot: `{ upstreamId, signature?,
+weight?, code?, error? }` — exactly one of `signature` and `code` is set, same
+shape as the plain `SignBatchResult`, so callers branch identically.
+
+Rules that bite if ignored:
+
+- **The `weight` is load-bearing.** It is hashed into the salt of the key the
+  chain verifies against, so pass `result.weight` straight through as
+  `cspWeight`. Altering or dropping it invalidates an otherwise valid signature.
+- **One ephemeral signer per ballot, chosen before signing.** The address is
+  inside the blinded CA bundle; a different signer at build time produces a tx
+  the chain rejects.
+- **Retry only what was reported failed before round 2.** Round 1 is
+  idempotent (same election, same point), and a question this call reported as
+  failed before round 2 never consumed anything, so it is safe to ask again;
+  `already_consumed` is terminal for that question. One that came back signed
+  is not safe to re-sign: its nonce is spent and a rerun blinds under a fresh
+  secret, so the signature you already hold is the only usable one. If the
+  round-2 response is lost in flight the outcome is unknown — check the voter
+  state instead of re-signing blind.
+- **No nullifier.** `processes.signInfo()` reports no `address` and no
+  `nullifier` for an anonymous census, by design — vote ids exist only for the
+  session that cast them.
+
+The primitives (`blind`, `unblind`, `decompressBlindPoint`,
+`serializeBlindSignature`, `blindMessageFromBundle`) are exported for anyone
+implementing a custom flow; the encodings mirror `arnaucube/go-blindsecp256k1`
+byte for byte and are pinned by Go-generated fixtures in the test suite. Use
+`signBlindCspBallots()` unless you have a reason not to.
+
+### buildCaBundle / encodeCaBundle
+
+Both take `{ processId, address, weight? }` — `processId` is the **on-chain**
+election id (`upstreamId`), `address` the ephemeral signer's, `weight` the hex
+census weight verbatim:
+
+```ts
+import { buildCaBundle, encodeCaBundle } from '@vocdoni/api-voting'
+
+const bundle = buildCaBundle({ processId, address, weight })   // → CAbundle message
+const bytes = encodeCaBundle({ processId, address, weight })   // → protobuf bytes
+```
+
+`buildVoteTransaction()` and the blind flow both go through these, and that is
+the point: in the blind flow the bytes are hashed and blinded *before* the CSP
+sees them, so the bundle blinded in round 1 and the bundle put on chain later
+must be byte-identical. Only reach for them when hand-rolling a custom flow —
+`buildVoteTransaction()` builds the bundle for you.
 
 ---
 

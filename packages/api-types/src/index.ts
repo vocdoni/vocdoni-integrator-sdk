@@ -566,6 +566,18 @@ export interface CensusSpec {
   twoFaFields?: OrgMemberTwoFaField[]
   weighted?: boolean
   /**
+   * Anonymous (blind CSP) census. The CSP blind-signs a ballot it cannot read,
+   * so it never learns which voter cast which vote — publish uses the CSP's
+   * blind public key as census root and ballots carry a blind-salted CA proof.
+   *
+   * Set at create/update time and echoed back on reads. Voting an anonymous
+   * process takes the two-round blind flow (`blindPoint` → `blindSign`), not
+   * the plain single `sign`; `sign-info` reports neither address nor nullifier
+   * for it. Unrelated to zk-SNARK anonymous voting: the vote envelope's
+   * anonymous flag stays false.
+   */
+  anonymous?: boolean
+  /**
    * Number of members in the census. Response-only (ignored on create/update);
    * for a published process it equals the on-chain `maxCensusSize` of its
    * whole-census questions. Serialized with `omitempty`, so `0` arrives absent.
@@ -985,17 +997,19 @@ export interface SignRequest {
   tokenR?: string
 }
 
-// ─── Batch signing ────────────────────────────────────────────────────────────
+// ─── Batch signing (plain + blind) ────────────────────────────────────────────
 
 /**
- * Why a ballot could not be signed, in {@link SignBatchResult}. Stable and
- * machine-readable; the accompanying `error` is a human string that may change.
+ * Why a ballot could not be signed, in {@link SignBatchResult} and
+ * {@link BlindPointResult}. Stable and machine-readable; the accompanying
+ * `error` is a human string that may change.
  *
- * Retryable: `already_signing` (a concurrent request holds the lock) and
- * `sign_failed` (transient signer/storage failure). Terminal:
- * `already_consumed`, `auth_invalid` (re-authenticate), `address_mismatch`.
- * `blind_request_missing` and `invalid_blinded_message` belong to the blind
- * (anonymous census) signing flow, which shares this outcome set.
+ * Retryable: `already_signing` (a concurrent request holds the lock),
+ * `sign_failed` (transient signer/storage failure) and
+ * `invalid_blinded_message` (re-blind against the SAME blind point — the
+ * one-time nonce is not consumed). Terminal: `already_consumed`,
+ * `auth_invalid` (re-authenticate), `address_mismatch`,
+ * `blind_request_missing` (request a blind point first).
  */
 export type SignFailureCode =
   | 'already_consumed'
@@ -1027,7 +1041,9 @@ export interface SignBatchRequest {
 
 /**
  * One ballot's outcome in a batch sign. Exactly one of `signature` and `code`
- * is set.
+ * is set. Also the element type of {@link BlindSignResponse}, where
+ * `signature` is the raw blind-signature scalar to unblind rather than a
+ * ready-to-use CSP signature.
  */
 export interface SignBatchResult {
   /** Vochain election id of the question (64-hex). */
@@ -1046,6 +1062,65 @@ export interface SignBatchResult {
  * dropped entry would otherwise shift every signature onto the wrong ballot.
  */
 export interface SignBatchResponse {
+  signatures: SignBatchResult[]
+}
+
+/**
+ * Body of `POST /processes/{id}/blind-point` — round 1 of the anonymous (blind
+ * CSP) flow. For each named on-chain election the CSP issues a fresh blind
+ * point R the client blinds its CA bundle against. Atomic and idempotent: a
+ * repeat for the same election returns the same R.
+ */
+export interface BlindPointRequest {
+  authToken: string
+  /** Vochain election ids (64-hex) of the questions to be voted. */
+  electionIds: string[]
+}
+
+/**
+ * One election's round-1 outcome. Exactly one of `tokenR` and `code` is set.
+ * The `weight` is pinned here and salts round 2 — carry it verbatim into the
+ * CA bundle, or the signature will not verify on chain.
+ */
+export interface BlindPointResult {
+  /** Vochain election id of the question (64-hex). */
+  upstreamId: string
+  /** Blind point R, hex, compressed (33 bytes). */
+  tokenR?: string
+  /** Hex-encoded census weight authorized for this election. */
+  weight?: string
+  code?: SignFailureCode
+  error?: string
+}
+
+/** Response of `POST /processes/{id}/blind-point` — one point per election, in request order. */
+export interface BlindPointResponse {
+  points: BlindPointResult[]
+}
+
+/** One ballot of a {@link BlindSignRequest}. */
+export interface BlindSignBallot {
+  /** Vochain election id of the question (64-hex). */
+  upstreamId: string
+  /** Hex blinded CA-bundle hash, blinded against this election's round-1 `tokenR`. */
+  blindedMessage: string
+}
+
+/**
+ * Body of `POST /processes/{id}/blind-sign` — round 2. The voter address is
+ * never sent; that is what keeps the ballot unlinkable.
+ */
+export interface BlindSignRequest {
+  authToken: string
+  ballots: BlindSignBallot[]
+}
+
+/**
+ * Response of `POST /processes/{id}/blind-sign` — one result per ballot, in
+ * request order. Each `signature` is the raw blind-signature scalar; the client
+ * unblinds it into the final `ProofCA` signature.
+ */
+export interface BlindSignResponse {
   signatures: SignBatchResult[]
 }
 
@@ -1078,10 +1153,17 @@ export interface QuestionConsumedAddress {
   questionId: string
   /** Vochain election id of the question (64-hex). */
   upstreamId: string
-  /** Ephemeral address that consumed the question's election. */
-  address: string
-  /** Vote nullifier. */
-  nullifier: string
+  /**
+   * Ephemeral address that consumed the question's election. Absent for an
+   * anonymous ({@link CensusSpec.anonymous}) census — the CSP never learns it.
+   */
+  address?: string
+  /**
+   * Vote nullifier. Absent for an anonymous census: with no address the CSP
+   * cannot derive it, so an anonymous voter has no server-side way to recover
+   * its vote id across reloads.
+   */
+  nullifier?: string
   /** Consumption timestamp. */
   at: string
 }

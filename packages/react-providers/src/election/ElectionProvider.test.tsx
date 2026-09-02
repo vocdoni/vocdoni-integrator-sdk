@@ -1,10 +1,22 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { SignedTx, Tx } from '@vocdoni/proto/vochain'
-import { fromHex } from '@vocdoni/api-voting'
+import { CAbundle, ProofCA_Type, SignedTx, Tx } from '@vocdoni/proto/vochain'
+import { blindMessageFromBundle, fromHex } from '@vocdoni/api-voting'
 import type { VotingProcessResponse } from '@vocdoni/api-types'
 import { describe, expect, it } from 'vitest'
-import { MOCK_CSP_SIGNATURE, MOCK_WEIGHT_HEX, mockBatchJobs, mockProcess } from '../../../../mocks/handlers'
+// The chain's side of the blind check — test-only, same helper the api-voting
+// crypto tests are anchored on.
+import {
+  deserializeBlindSignature,
+  verify as verifyBlindSignature,
+} from '../../../api-voting/src/blind-secp256k1.testkit'
+import {
+  MOCK_CSP_SIGNATURE,
+  MOCK_WEIGHT_HEX,
+  mockBatchJobs,
+  mockBlindCensusKey,
+  mockProcess,
+} from '../../../../mocks/handlers'
 import { server } from '../../../../mocks/server'
 import { TestProvider } from '../test-utils'
 import { ElectionProvider, PartialVoteError, useElection } from './ElectionProvider'
@@ -66,10 +78,10 @@ function captureBatchVotes() {
 }
 
 /**
- * Counts every call that consumes a one-shot CSP authorization. Spying on
- * `/sign` alone counts nothing: `vote()` signs through `/sign-batch` now, so a
- * `toBe(0)` assertion against `/sign` would pass even with the pre-flight
- * guards gone.
+ * Counts every endpoint that consumes a one-shot CSP authorization — both the
+ * plain batch sign and the anonymous flow's round 1. Spying on `/sign` alone
+ * counts nothing: `vote()` has not used it since the batch sign landed, so a
+ * `toBe(0)` assertion against it passes even with the pre-flight guards gone.
  */
 function countSignConsumption() {
   const calls = { count: 0 }
@@ -85,9 +97,14 @@ function countSignConsumption() {
         })),
       })
     }),
+    http.post(`http://localhost/processes/:processId/blind-point`, () => {
+      calls.count++
+      return HttpResponse.json({ points: [] })
+    }),
   )
   return calls
 }
+
 
 describe('ElectionProvider', () => {
   it('starts loading then resolves the election', async () => {
@@ -226,6 +243,49 @@ describe('ElectionProvider', () => {
     const tx = Tx.decode(signedTx.tx)
     if (tx.payload?.$case !== 'vote') throw new Error('expected a vote payload')
     expect(new TextDecoder().decode(tx.payload.vote.memo!)).toBe('Other: neither')
+  })
+
+  it('votes an anonymous census through the blind CSP flow', async () => {
+    // The whole point of the anonymous path: the CSP signs a ballot it never
+    // sees. This drives it end to end against a real (fixed-key) blind signer
+    // and checks the envelope the chain would receive — the proof type, and a
+    // blind signature that verifies against the salted census key over the
+    // bundle the transaction itself carries.
+    server.use(
+      http.get(`http://localhost/processes/:id`, ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          census: { ...mockProcess.census, anonymous: true },
+        }),
+      ),
+    )
+    const txPayloads = captureBatchVotes()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.election?.census?.anonymous).toBe(true))
+    await connect(result)
+    await waitFor(() => expect(result.current.election.isAbleToVote).toBe(true))
+
+    await act(async () => {
+      await result.current.election.vote([[0]])
+    })
+
+    expect(txPayloads).toHaveLength(1)
+    const tx = Tx.decode(SignedTx.decode(fromHex(txPayloads[0])).tx)
+    if (tx.payload?.$case !== 'vote') throw new Error('expected a vote payload')
+    const proof = tx.payload.vote.proof?.payload
+    if (proof?.$case !== 'ca') throw new Error('expected a CA proof')
+
+    expect(proof.ca.type).toBe(ProofCA_Type.ECDSA_BLIND_PIDSALTED)
+    const bundle = new Uint8Array(CAbundle.encode(proof.ca.bundle!).finish())
+    expect(
+      verifyBlindSignature(
+        blindMessageFromBundle(bundle),
+        deserializeBlindSignature(new Uint8Array(proof.ca.signature!)),
+        mockBlindCensusKey(mockProcess.questions[0].upstreamId),
+      ),
+    ).toBe(true)
   })
 
   it('resolves per-question results from the results endpoint', async () => {

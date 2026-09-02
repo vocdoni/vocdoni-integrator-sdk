@@ -28,6 +28,7 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | Create, cast or tally a **ranked** question | `references/voting.md` (ranked section) | `recipes/multichoice-vote.ts` (Format C) |
 | Cast a vote on an encrypted election | `references/voting.md` | `recipes/encrypted-vote.ts` |
 | Set up the CSP auth flow manually | `references/client.md` + `references/voting.md` | `recipes/single-choice-vote.ts` |
+| Cast a vote on an anonymous (blind CSP) census | `references/voting.md` | `recipes/anonymous-vote.ts` |
 | Add voting to a React app | `references/react.md` | — |
 | Manage election lifecycle (pause/end/cancel) | `references/react.md` + `references/client.md` | — |
 | ZK/anonymous voting | `references/zk-voting.md` | — |
@@ -57,6 +58,23 @@ reads `chainId` and the questions directly:
 6. POST /vote                                → relay tx → jobId
    GET  /jobs/{jobId}                        → poll until completed → voteID (nullifier)
 ```
+
+**Anonymous census** (`process.census.anonymous === true`) replaces step 4 with a
+two-round blind signature, so the CSP signs a ballot it cannot read:
+
+```
+4a. POST /processes/{id}/blind-point         → one blind point (tokenR) + weight per election
+4b. (client blinds the CA bundle locally)
+4c. POST /processes/{id}/blind-sign          → CSP signs the blinded messages
+4d. (client unblinds → 96-byte ProofCA signature)
+5.  buildVoteTransaction({ …, proofType: ProofCA_Type.ECDSA_BLIND_PIDSALTED })
+```
+
+`signBlindCspBallots()` and `ProofCA_Type` both come from `@vocdoni/api-voting`
+— import the enum from there, never from `@vocdoni/proto` directly, or a bundler
+inlines protobufjs into your app for one integer. It does 4a–4d in one call; steps
+5–6 are unchanged (the relay is proof-type-agnostic). `ElectionProvider` picks
+the branch automatically from `census.anonymous` — nothing to configure.
 
 Steps 1–4 are handled by `@vocdoni/api-client` (`client.elections.get` /
 `getResults` for the public reads; `client.processes` — `ProcessesCspClient` —
@@ -127,6 +145,7 @@ console.log('nullifier:', job.result?.voteID)
 - **The vote tx is signed by an ephemeral key, not the voter's wallet.** `EphemeralSigner` generates a fresh secp256k1 keypair per vote; the CSP signs its Ethereum address. This decouples the voter's identity from the on-chain signature.
 - **Relaying is async.** `elections.vote()` returns a `jobId`. Poll `jobs.waitFor(jobId)` to get the vote nullifier (`voteID`). The `VotingClient.vote()` method returns the jobId; the React `useElection().vote()` awaits the full job for each question.
 - **One nullifier per question, not per process.** A voter who answered N questions holds N vote ids. Read them all from `useElection().voteIds` (`Record<questionId, string>`) — the older single `voteId` is deprecated and only ever shows one. Server-side, `processes.signInfo(id, { authToken })` returns the same set as `consumed[]`.
+- **An anonymous census is unlinkable, not ZK.** `census.anonymous: true` makes the CSP blind-sign — it never sees the ephemeral address, so it cannot link voter → vote. `EnvelopeType.Anonymous` stays **false**; this is a blind signature, not a zk-SNARK (that is `@vocdoni/api-voting-zk`, a separate path). Consequence: `signInfo().consumed[]` carries **no `address` and no `nullifier`** for such a process — both fields are optional now. Vote ids come only from the relay job, so they are lost on reload and `useElection().voteIds` cannot be recovered cross-session.
 
 ## A note on api-client stability
 
