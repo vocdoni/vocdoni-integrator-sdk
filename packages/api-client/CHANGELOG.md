@@ -1,5 +1,150 @@
 # @vocdoni/api-client
 
+## 2.0.0
+
+### Major Changes
+
+- e6ff0b2: Support anonymous (blind CSP) voting end to end.
+
+  A census can now be created with `anonymous: true` (vocdoni/saas-backend#641). Such a process publishes under the `OFF_CHAIN_CA_V2` census origin (vocdoni/vocdoni-node#1434) with the CSP's _blind_ public key as census root: the CSP signs a ballot it cannot read, so it can no longer link the authorization it granted to the vote that appears on chain. Until now every SaaS process was CSP-based but linkable — the CSP signed a `CAbundle` carrying the voter's plaintext ephemeral address.
+
+  The blind and unblind operations are the voter's, by construction, so they have to live in the SDK. This adds them:
+
+  - **`@vocdoni/api-types`** — `CensusSpec.anonymous` and the `BlindPoint*` / `BlindSign*` request and response types. Both blind rounds reuse the batch sign's `SignBatchResult` and `SignFailureCode`, which the sign-batch release adds; the two blind-only codes are `blind_request_missing` and `invalid_blinded_message`.
+  - **`@vocdoni/api-client`** — `processes.blindPoint()` and `processes.blindSign()`, the two rounds. There is no single-election blind endpoint: authorization is checked once per batch.
+  - **`@vocdoni/api-voting`** — `signBlindCspBallots()` runs both rounds and the client-side blinding in one call, returning the same result shape as the plain batch sign. The primitives (`blind`, `unblind`, `decompressBlindPoint`, `serializeBlindSignature`, `blindMessageFromBundle`) are exported for custom flows; they are built on the already-present `@noble/curves`, add no dependency, and their encodings are pinned byte-for-byte against Go-generated fixtures from `arnaucube/go-blindsecp256k1`. `buildCaBundle` / `encodeCaBundle` are now exported so the bundle that gets blinded and the bundle that goes on chain are built at one site and cannot drift apart.
+  - **`@vocdoni/react-providers`** — `useElectionAuth().signBatch()` picks the plain or blind flow itself from `census.anonymous`, and `ElectionProvider.vote()` tags anonymous ballots `ProofCA_Type.ECDSA_BLIND_PIDSALTED`. Nothing to configure — an anonymous process votes anonymously.
+
+  This is a blind signature, not zero-knowledge: `EnvelopeType.Anonymous` stays `false` and `@vocdoni/api-voting-zk` remains a separate, unrelated path.
+
+  **BREAKING CHANGE:** `QuestionConsumedAddress.address` and `.nullifier` are now optional (`string` → `string | undefined`). An anonymous census reports neither — the CSP never learns the address — so the backend omits them, and the type has to admit it. TypeScript code that reads either field unconditionally stops compiling; the fix is a guard:
+
+  ```ts
+  // before
+  const nullifier = entry.nullifier.toLowerCase();
+  // after
+  const nullifier = entry.nullifier?.toLowerCase();
+  ```
+
+  Runtime behaviour on a non-anonymous process is unchanged: both fields are still populated on every `sign-info` entry. `@vocdoni/api-client` majors with the types it re-exports. The practical consequence is that vote ids on an anonymous process exist only for the session that cast them: `useElection().voteIds` cannot be recovered from `sign-info` after a reload.
+
+  `@vocdoni/proto` is bumped `1.15.13` → `1.15.14` in the packages that pin it exactly. The published diff is one additive line (`CensusOrigin.OFF_CHAIN_CA_V2`); nothing here needs it to build, but the pin is the version of the protocol the SDK claims to speak.
+
+### Minor Changes
+
+- 7492468: Sign every question of a process in one call via `POST /processes/{id}/sign-batch` (vocdoni/saas-backend#634).
+
+  - `@vocdoni/api-types`: the `SignBatchRequest` / `SignBatchResponse` / `SignBatchResult` / `SignBatchBallot` shapes and the stable `SignFailureCode` union the backend reports per-ballot failures with.
+  - `@vocdoni/api-client`: `processes.signBatch()` wraps the endpoint — one auth token, N ballots, one response, always in request order.
+  - `@vocdoni/react-providers`: `useElectionAuth().signBatch()` signs every ballot in one round trip (matching results by `upstreamId`, so a dropped entry can never shift a signature onto the wrong question), and `vote()` now uses it instead of looping `processes.sign` per question — even for a single question. Per-question sign refusals are reported inline: the questions that DID sign are still built and relayed (a CSP signature is one-shot — discarding it would strand those questions forever), surfacing as `PartialVoteError`; when nothing signs at all the call throws a plain, fully-retryable error and relays nothing.
+
+### Patch Changes
+
+- 833a472: Read a ranking back out of a ranked election.
+
+  A ranked question could be encoded but not decoded: its results were only ever readable as
+  "how many voters ranked each option", which is the same number for every option and
+  therefore useless. The winner was unrecoverable through the SDK, and any UI built on
+  `inferQuestionBallotType` rendered a checkbox group for it.
+
+  The obstacle is that a ranked `ballotProtocol` is **byte-identical** to a pick-slot
+  multichoice whose voters fill every slot, while meaning the transpose of it — ranked reads
+  the field index as the _option_ and its value as the _rank_; pick-slot reads the field
+  index as a _slot_ and its value as the _chosen option_. No shape rule can separate them, so
+  this plugs into the declared-name channel instead:
+
+  ```ts
+  // creation — the raw protocol alone is ambiguous, the metadata bag is not
+  {
+    choices: [/* … */],
+    ballotProtocol: { maxCount: 4, maxValue: 3, uniqueValues: true, /* … */ },
+    metadata: { type: { name: 'ranked' } },
+  }
+  ```
+
+  The backend's own `type` vocabulary is `['singlechoice', 'multichoice']` and rejects
+  anything else, but it stores and echoes the creator metadata bag verbatim — the same route
+  the legacy `multiple-choice` name already uses — so no backend change is involved.
+  `type: 'ranked'` is read too, for callers keeping their own record of the kind.
+
+  **`@vocdoni/ballot`**
+
+  - `BallotType.Ranked`, selected only by that declaration. It is never inferred from the
+    protocol, because nothing in the protocol distinguishes it.
+  - `decodeQuestionResults` / `decodeResults` aggregate ranked questions with **Borda**
+    (`Σ count × rank`) — the only method the tally can express, since it is a per-field
+    histogram with the individual ballots already discarded, and what `saas-integrator-demo`
+    computes. `votes` is therefore **points, not voters**, and percentages are each option's
+    share of the total points. **No `abstain` bucket**: those sentinel columns are a pick-slot
+    device for unfilled slots, and a ranking has none.
+  - `rankedOrderToScores(question, order)` turns the voter's ordering (choice values, best
+    first) into the wire ballot, applying the canonical **highest = best** orientation. Use it
+    rather than building the array by hand: the decode is an index-weighted sum, so a ballot
+    ranked with `0` as "best" is perfectly valid and elects the loser, with nothing on either
+    side able to notice. It throws on a ranking that repeats a choice, names an unpublished
+    one, or leaves any option unranked.
+  - `encodeQuestionSelections(question, selections)` encodes what a voter-facing form
+    collects, for **any** ballot type: the ordering for a ranked question (transposed for
+    you), the raw selections for everything else. The per-type branch lives here rather than
+    at every call site, where writing it the wrong way round produces a valid ballot that
+    elects the loser. Prefer it over `encodeQuestionBallot` in UI code.
+  - `encodeQuestionBallot` / `encodeBallot` keep passing a ranking straight through, and still
+    refuse a duplicated rank or one above `maxValue`. They now also refuse a ranking that is
+    not **one rank per option** — previously a short slate encoded fine while
+    `validateSelections` rejected the identical input, so a UI gating its submit button on the
+    validator disagreed with the codec. `validateSelections` gained the matching ranked rules,
+    `questionSelectionRange` reports `{min: n, max: n}` (a partial ranking cannot be counted),
+    and `declaresRanked(question)` exposes the check — resolving the declared name exactly as
+    `inferQuestionBallotType` does, so the two can never disagree in either direction.
+  - Two more ranked defects are refused for every voter and at creation, because no individual
+    ballot shows either: **two choices sharing a `value`** (the ballots stay well-formed, but
+    the decoded rows are keyed by choice value, so two options return under one id and a
+    ranking cannot order them), and an election-level `ranked` declaration carrying **more than
+    one question** — a ranking fills the whole ballot, so `inferBallotType` now throws rather
+    than let `encodeBallot` put only `questions[0]` on the wire and `decodeResults` report
+    `questions[0]`'s scores for every question.
+  - `unrankableProtocolReason(numChoices, maxValue)` catches the one protocol a ranking can
+    never survive: `maxValue: 0`. That means "no upper bound" for every other type, but on
+    chain it switches the scrutinizer to discrete aggregation — one column per option instead
+    of a histogram — so the Borda index-weighted sum scores every option zero however anyone
+    votes, and the result is indistinguishable from an election nobody voted in. Folded into
+    `unsatisfiableQuestionReason` (whose parameter type gained `metadata`, needed to see the
+    declaration) and refused up front by both encoders and `validateSelections`, so the three
+    cannot drift apart.
+
+  **`@vocdoni/react-components`**
+
+  - Ranked questions render a **rank widget** — one position control per option, through a new
+    `QuestionRankChoice` slot — instead of the checkbox group they used to get. Assigning an
+    option a position another holds swaps the two. The default slot is a `<select>`; override
+    it for drag-and-drop.
+  - `QuestionSelectionMode` gained `'ranked'` alongside `'single'` / `'multiple'`.
+  - The form collects the voter's ordering and `QuestionsFormProvider` encodes it with
+    `encodeQuestionSelections`; submitting is blocked until every option is placed. Assigning
+    a position held by another option when the moved one was unranked now **reseats** the
+    displaced option in the first free place instead of silently dropping it.
+  - `<QuestionsTypeBadge />` and `<QuestionTip />` label and count ranked questions.
+
+  **`@vocdoni/api-client`**
+
+  - `elections.create` / `update` validate each question's ballot config with the
+    _question_-level rule instead of the protocol-level one, so a question declared `ranked`
+    with `maxValue: 0` — or with duplicate choice values — is refused at the one moment it can
+    still be fixed. The protocol-level rule waves both through by design: it mirrors the
+    backend, which has no concept of a ranked question.
+
+  The integration suite now casts a real ranked vote and asserts the recovered ordering plus
+  the raw matrix the chain produced, replacing the placeholder that had to enshrine a
+  meaningless tally.
+
+  Closes #22.
+
+- Updated dependencies [e6ff0b2]
+- Updated dependencies [833a472]
+- Updated dependencies [7492468]
+  - @vocdoni/api-types@2.0.0
+  - @vocdoni/ballot@1.2.0
+
 ## 1.2.1
 
 ### Patch Changes

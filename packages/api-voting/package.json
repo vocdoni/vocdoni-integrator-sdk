@@ -1,6 +1,6 @@
 {
   "name": "@vocdoni/api-voting",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "license": "GPL-3.0-or-later",
   "description": "Client-side voting for the Vocdoni SaaS API (CSP auth, vote envelope, encrypted ballots)",
   "keywords": [
