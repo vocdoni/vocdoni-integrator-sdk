@@ -20,8 +20,12 @@ signatureToVocdoniSikSignature(personalSign: string): string
 calcSik(address: string, personalSign: string, password?: string): Promise<string>
 
 // Field-encoded signature/password/election id + the poseidon nullifier
-calcCircuitInputs(signature: string, password: string, electionId: string)
-  : Promise<{ nullifier: bigint; arboElectionId: string[]; ffsignature: string; ffpassword: string }>
+calcCircuitInputs(signature: string, password: string, electionId: string): Promise<{
+  nullifier: bigint
+  arboElectionId: string[]
+  ffsignature: string
+  ffpassword: string
+}>
 
 // Vote nullifier for the (signature, password, election) triple
 calcNullifier(signature: string, password: string, electionId: string): Promise<bigint>
@@ -31,9 +35,9 @@ calcVoteId(signature: string, password: string, electionId: string): Promise<str
 
 // Full witness for proof generation (mirrors AnonymousService.prepareCircuitInputs)
 prepareCircuitInputs(
-  electionId, address, password, signature,
-  voteWeight, availableWeight,
-  sikRoot, sikSiblings, censusRoot, censusSiblings,
+  electionId: string, address: string, password: string, signature: string,
+  voteWeight: string, availableWeight: string,
+  sikRoot: string, sikSiblings: string[], censusRoot: string, censusSiblings: string[],
   votePackage: Uint8Array,
 ): Promise<CircuitInputs>
 ```
