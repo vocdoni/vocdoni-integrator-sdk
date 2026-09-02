@@ -5,7 +5,7 @@ import { QuestionChoicePresentation, QuestionLayout, QuestionSelectionMode } fro
 import { useComponents } from '../../context/useComponents'
 import { useReactComponentsLocalize } from '../../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
-import { getQuestionChoiceMeta, hasExtendedChoiceMeta, QuestionChoice } from './Choice'
+import { getQuestionChoiceMeta, hasExtendedChoiceMeta, QuestionChoice, QuestionRankChoice } from './Choice'
 import { QuestionTip } from './Tip'
 import { resolveTitle } from '../../../election/normalized'
 
@@ -14,10 +14,12 @@ export type QuestionProps = {
   index: string
 }
 
-// Approval and multichoice present as checkboxes ('multiple'); everything else presents
-// as radios ('single').
-const selectionModeForType = (ballotType: BallotType): QuestionSelectionMode =>
-  ballotType === BallotType.MultiChoice || ballotType === BallotType.Approval ? 'multiple' : 'single'
+// Approval and multichoice present as checkboxes ('multiple'), ranked as a rank widget,
+// everything else as radios ('single').
+const selectionModeForType = (ballotType: BallotType): QuestionSelectionMode => {
+  if (ballotType === BallotType.Ranked) return 'ranked'
+  return ballotType === BallotType.MultiChoice || ballotType === BallotType.Approval ? 'multiple' : 'single'
+}
 
 const getQuestionPresentation = (question: VotingProcessQuestion): QuestionChoicePresentation =>
   question.choices.some(hasExtendedChoiceMeta) ? 'extended' : 'basic'
@@ -79,9 +81,123 @@ const FieldSwitcher = (props: QuestionProps & { layout: QuestionLayout; presenta
       return <MultiChoice {...props} />
     case BallotType.Approval:
       return <ApprovalChoice {...props} />
+    case BallotType.Ranked:
+      return <RankedChoice {...props} />
     default:
       return <SingleChoice {...props} />
   }
+}
+
+/**
+ * Ranked question: the form value is the voter's **ordering** — a `string[]` of choice
+ * values, index 0 = top pick, `''` for unfilled slots (always `choices.length` long).
+ * `QuestionsFormProvider` converts it to wire ranks with `rankedOrderToScores`; the
+ * highest-is-best orientation never enters this component. Assigning a taken position
+ * swaps the two options rather than refusing, so a reorder is one step, not two.
+ */
+const RankedChoice = ({
+  index,
+  question,
+  layout,
+  presentation,
+}: QuestionProps & { layout: QuestionLayout; presentation: QuestionChoicePresentation }) => {
+  const { status, isAbleToVote } = useElection()
+  const t = useReactComponentsLocalize()
+  const { control, trigger } = useFormContext()
+  const { QuestionsError } = useComponents()
+
+  const total = question.choices.length
+  const disabled = status !== 'ONGOING' || !isAbleToVote
+
+  return (
+    <Controller
+      control={control}
+      disabled={disabled}
+      name={index}
+      rules={{
+        // All or nothing: a partial ranking repeats a rank and the chain discards the
+        // whole ballot at tally. questionSelectionRange reports {min: n, max: n}.
+        validate: (value: string[]) => {
+          const ranked = (Array.isArray(value) ? value : []).filter((entry) => entry !== '' && entry != null)
+          if (ranked.length === total) return true
+          return t('validation.rank_all', { count: total, defaultValue: `Rank all ${total} options` })
+        },
+      }}
+      render={({ field, fieldState }) => {
+        const order: string[] = Array.isArray(field.value) ? [...field.value] : []
+        while (order.length < total) order.push('')
+
+        const assign = (value: string, position: number | null) => {
+          const next = [...order]
+          const from = next.indexOf(value)
+
+          if (position === null) {
+            if (from >= 0) next[from] = ''
+          } else {
+            const to = position - 1
+            const displaced = next[to]
+            next[to] = value
+            // Swap: the displaced option takes the slot the moved one vacated. If the
+            // moved one was unranked there is no vacated slot, so the displaced option
+            // falls into the first free position rather than being silently dropped.
+            if (from >= 0) {
+              next[from] = displaced
+            } else if (displaced !== '') {
+              const free = next.indexOf('')
+              // `free` is only ever -1 when nothing was displaced.
+              if (free >= 0) next[free] = displaced
+            }
+          }
+
+          field.onChange(next)
+          trigger(index)
+        }
+
+        // Same labels for every option — build once per render, not n² per keystroke.
+        const positionLabels = Array.from({ length: total }, (_, i) =>
+          t('vote.rank_position', { position: i + 1, defaultValue: `#${i + 1}` })
+        )
+
+        return (
+          <>
+            {question.choices.map((choice: Choice) => {
+              const value = choice.value.toString()
+              const at = order.indexOf(value)
+
+              return (
+                <QuestionRankChoice
+                  key={value}
+                  choice={choice}
+                  value={value}
+                  compact={!hasChoiceImage(choice) && layout === 'list'}
+                  presentation={presentation}
+                  dataAttrs={{
+                    'data-choice-card': '',
+                    'data-choice-control': '',
+                    'data-choice-body': '',
+                    'data-choice-media': '',
+                    'data-layout': layout,
+                    'data-choice-id-base': `question-${index}-choice-${value}`,
+                    'data-choice-field-name': field.name,
+                  }}
+                  position={at >= 0 ? at + 1 : null}
+                  options={positionLabels.map((label, i) => ({
+                    position: i + 1,
+                    label,
+                    // Marked, not removed — picking a taken slot swaps the two options.
+                    taken: order[i] !== '' && order[i] !== value,
+                  }))}
+                  disabled={disabled}
+                  onRank={(position) => assign(value, position)}
+                />
+              )
+            })}
+            {fieldState.error?.message ? <QuestionsError error={fieldState.error.message} variant='field' /> : null}
+          </>
+        )
+      }}
+    />
+  )
 }
 
 const MultiChoice = ({

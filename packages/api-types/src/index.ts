@@ -1029,10 +1029,10 @@ export interface SignBatchBallot {
 }
 
 /**
- * Body of `POST /processes/{id}/sign-batch` — the batch form of
- * {@link SignRequest}: one auth token, one ballot per question, signed in a
- * single call. Authorization is all-or-nothing; per-question failures come
- * back inline in the response.
+ * Body of `POST /processes/{id}/sign-batch` (saas-backend#634) — the batch
+ * form of {@link SignRequest}: one auth token, one ballot per question, signed
+ * in a single call. Authorization is all-or-nothing; per-question failures
+ * come back inline in the response.
  */
 export interface SignBatchRequest {
   authToken: string
@@ -1056,7 +1056,11 @@ export interface SignBatchResult {
   error?: string
 }
 
-/** Response of `POST /processes/{id}/sign-batch` — one result per ballot, in request order. */
+/**
+ * Response of `POST /processes/{id}/sign-batch` — one result per ballot, in
+ * request order. Match entries by `upstreamId` rather than by position: a
+ * dropped entry would otherwise shift every signature onto the wrong ballot.
+ */
 export interface SignBatchResponse {
   signatures: SignBatchResult[]
 }

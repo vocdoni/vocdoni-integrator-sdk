@@ -12,10 +12,10 @@ A census can now be created with `anonymous: true` (vocdoni/saas-backend#641). S
 
 The blind and unblind operations are the voter's, by construction, so they have to live in the SDK. This adds them:
 
-- **`@vocdoni/api-types`** — `CensusSpec.anonymous`; the `SignBatch*` / `BlindPoint*` / `BlindSign*` request and response types; the `SignFailureCode` union of the backend's stable per-question failure codes.
-- **`@vocdoni/api-client`** — `processes.blindPoint()`, `processes.blindSign()` and `processes.signBatch()`. `sign-batch` is the non-anonymous counterpart the backend has exposed for a while and the SDK never wrapped; adding it keeps both vote paths batch-shaped instead of leaving one looping and one batching.
+- **`@vocdoni/api-types`** — `CensusSpec.anonymous` and the `BlindPoint*` / `BlindSign*` request and response types. Both blind rounds reuse the batch sign's `SignBatchResult` and `SignFailureCode`, which the sign-batch release adds; the two blind-only codes are `blind_request_missing` and `invalid_blinded_message`.
+- **`@vocdoni/api-client`** — `processes.blindPoint()` and `processes.blindSign()`, the two rounds. There is no single-election blind endpoint: authorization is checked once per batch.
 - **`@vocdoni/api-voting`** — `signBlindCspBallots()` runs both rounds and the client-side blinding in one call, returning the same result shape as the plain batch sign. The primitives (`blind`, `unblind`, `decompressBlindPoint`, `serializeBlindSignature`, `blindMessageFromBundle`) are exported for custom flows; they are built on the already-present `@noble/curves`, add no dependency, and their encodings are pinned byte-for-byte against Go-generated fixtures from `arnaucube/go-blindsecp256k1`. `buildCaBundle` / `encodeCaBundle` are now exported so the bundle that gets blinded and the bundle that goes on chain are built at one site and cannot drift apart.
-- **`@vocdoni/react-providers`** — `useElectionAuth().signBatch()` signs every question in one call and picks the plain or blind flow itself from `census.anonymous`; `ElectionProvider.vote()` uses it and tags anonymous ballots `ProofCA_Type.ECDSA_BLIND_PIDSALTED`. Nothing to configure — an anonymous process votes anonymously.
+- **`@vocdoni/react-providers`** — `useElectionAuth().signBatch()` picks the plain or blind flow itself from `census.anonymous`, and `ElectionProvider.vote()` tags anonymous ballots `ProofCA_Type.ECDSA_BLIND_PIDSALTED`. Nothing to configure — an anonymous process votes anonymously.
 
 This is a blind signature, not zero-knowledge: `EnvelopeType.Anonymous` stays `false` and `@vocdoni/api-voting-zk` remains a separate, unrelated path.
 

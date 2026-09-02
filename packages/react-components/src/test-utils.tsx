@@ -73,6 +73,13 @@ type MakeProcessQuestionInput = {
    * a genuinely named question.
    */
   type?: string
+  /**
+   * Open-ended creator metadata bag, stored and echoed verbatim by the backend. Its
+   * `type.name` is the second name source inference consults, and the only channel that
+   * can declare a `ranked` question — the backend's own `type` vocabulary is limited to
+   * `singlechoice`/`multichoice`.
+   */
+  metadata?: Record<string, unknown>
   status?: QuestionStatus
   secretUntilTheEnd?: boolean
   upstreamId?: string
@@ -133,6 +140,7 @@ export function makeProcess(opts: MakeProcessOptions = {}): VotingProcessRespons
     // with an empty type label — `inferQuestionBallotType` prefers a recognized name over
     // shape, so claiming `singlechoice` here would mask whatever the protocol expresses.
     type: q.type ?? (voteType || q.ballotProtocol ? '' : 'singlechoice'),
+    ...(q.metadata ? { metadata: q.metadata } : {}),
     secretUntilTheEnd: q.secretUntilTheEnd ?? electionType?.secretUntilTheEnd ?? false,
     status: q.status ?? status,
   }))

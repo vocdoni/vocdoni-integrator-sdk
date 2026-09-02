@@ -138,6 +138,69 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
     })
   })
 
+  describe('signBatch', () => {
+    it('POSTs every ballot to /processes/{id}/sign-batch and returns one result per ballot', async () => {
+      let body: unknown
+      server.use(
+        http.post(`${BASE_URL}/processes/${PROCESS_ID}/sign-batch`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({
+            signatures: [
+              { upstreamId: 'aa'.repeat(32), signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX },
+              { upstreamId: 'bb'.repeat(32), signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX },
+            ],
+          })
+        }),
+      )
+
+      const res = await client.processes.signBatch(PROCESS_ID, {
+        authToken: 'verified-token',
+        ballots: [
+          { upstreamId: 'aa'.repeat(32), address: '11'.repeat(20) },
+          { upstreamId: 'bb'.repeat(32), address: '22'.repeat(20) },
+        ],
+      })
+      expect(res.signatures).toHaveLength(2)
+      expect(res.signatures[0].signature).toBe(MOCK_CSP_SIGNATURE)
+      expect(res.signatures[1].weight).toBe(MOCK_WEIGHT_HEX)
+      expect(body).toEqual({
+        authToken: 'verified-token',
+        ballots: [
+          { upstreamId: 'aa'.repeat(32), address: '11'.repeat(20) },
+          { upstreamId: 'bb'.repeat(32), address: '22'.repeat(20) },
+        ],
+      })
+    })
+
+    it('passes per-ballot failures through inline instead of throwing', async () => {
+      server.use(
+        http.post(`${BASE_URL}/processes/${PROCESS_ID}/sign-batch`, () =>
+          HttpResponse.json({
+            signatures: [
+              { upstreamId: 'aa'.repeat(32), signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX },
+              {
+                upstreamId: 'bb'.repeat(32),
+                code: 'already_consumed',
+                error: "this election's signing slot is already consumed",
+              },
+            ],
+          }),
+        ),
+      )
+
+      const res = await client.processes.signBatch(PROCESS_ID, {
+        authToken: 'verified-token',
+        ballots: [
+          { upstreamId: 'aa'.repeat(32), address: '11'.repeat(20) },
+          { upstreamId: 'bb'.repeat(32), address: '22'.repeat(20) },
+        ],
+      })
+      expect(res.signatures[0].signature).toBe(MOCK_CSP_SIGNATURE)
+      expect(res.signatures[1].signature).toBeUndefined()
+      expect(res.signatures[1].code).toBe('already_consumed')
+    })
+  })
+
   describe('weight', () => {
     it('POSTs the token and returns the hex weight', async () => {
       const res = await client.processes.weight(PROCESS_ID, { authToken: 'verified-token' })

@@ -42,6 +42,10 @@ export const QuestionsTypeBadge = ({ question: questionProp, ...props }: Questio
       title = t('question_types.approval_title')
       tooltip = t('question_types.approval_tooltip', { maxcount: maxCount })
       break
+    case BallotType.Ranked:
+      title = t('question_types.ranked_title', { weighted })
+      tooltip = t('question_types.ranked_tooltip', { maxcount: maxCount })
+      break
     case BallotType.Budget:
       title = t('question_types.budget_title', { weighted })
       tooltip = t('question_types.budget_tooltip')

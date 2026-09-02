@@ -111,6 +111,7 @@ The encoding pattern depends on the question's `ballotProtocol`:
 > |---|---|---|
 > | `type` — the SaaS `question.type` field | `singlechoice`, `multichoice` | `multichoice` = **dense** 0/1 |
 > | `metadata.type.name` / `meta.type.name` — the legacy bag | `single-choice-multiquestion`, `multiple-choice`, `approval`, `budget-based`, `quadratic` | `multiple-choice` = **pick-slot** index list |
+> | *either* — names this SDK defines | `ranked` | one rank per option, highest = best |
 >
 > ```ts
 > // A question mapped over from a legacy @vocdoni/sdk election. In the SaaS model
@@ -125,8 +126,15 @@ The encoding pattern depends on the question's `ballotProtocol`:
 > reverse inverts a two-option tally. Note that a legacy `multiple-choice` name also
 > suppresses the dense remap in `decodeQuestionResults` / `encodeQuestionBallot` —
 > at two options its protocol satisfies `isDenseBallotProtocol` too, so without the
-> name the tally reads off the wrong axis. Neither list has a `ranked` entry — see
-> the ranked section below.
+> name the tally reads off the wrong axis.
+>
+> `ranked` is the odd one out: it is this SDK's own name, in neither upstream
+> vocabulary, and it is the **only** way to reach `BallotType.Ranked` — no shape rule
+> produces it, because a ranking is byte-identical to a full-slate pick-slot
+> multichoice. The backend's `type` vocabulary is fixed at
+> `singlechoice`/`multichoice`, so create a ranked question with a raw
+> `ballotProtocol` plus the metadata bag; `type: 'ranked'` is still *read* for callers
+> keeping their own record of it. See the ranked section below.
 
 ### Single choice, pick one option (value format)
 
@@ -294,54 +302,119 @@ votes is never hidden. The dense layout emits no bucket at all, so both layouts 
 
 ### Ranked / rated (unique values)
 
-`ballotProtocol.maxCount = numOptions`, `ballotProtocol.maxValue = maxRank`,
-`ballotProtocol.uniqueValues = true`
+`ballotProtocol.maxCount = numOptions`, `ballotProtocol.maxValue = numOptions - 1`,
+`ballotProtocol.uniqueValues = true`, **plus** `metadata: { type: { name: 'ranked' } }`
 
 Each option is ranked; values must not repeat. This is the one layout where
 `uniqueValues` is satisfiable — `maxValue` has to leave at least `maxCount`
 distinct values (`maxValue >= maxCount - 1`), or no ballot can fill the fields
 without repeating one.
 
-The array is one **rank per option, in choice order** — the field index is the
-option, the value is its score. **Higher wins**: give your top pick
-`numOptions - 1` and your last pick `0`. That orientation matters, because the
-SDK ships no ranked aggregation (see the caveat below) and the *manual* Borda
-snippet it recommends is index-weighted, so ranking with `0` as "best" silently
-inverts the winner. `encodeQuestionBallot` throws on a duplicate rank or a rank
-above `maxValue` — either would make the chain drop the whole ballot at tally.
+⚠️ **The metadata declaration is not optional.** A ranked protocol is byte-identical
+to a pick-slot multichoice whose voters fill every slot, and the two mean transposed
+things — ranked reads the field index as the *option* and its value as the *rank*;
+pick-slot reads the field index as a *slot* and its value as the *chosen option*.
+Nothing in `ballotProtocol` separates them, so a question created without the
+declaration is labelled `multichoice`, decodes by column-sum, and reports the same
+number for every option (this was
+[integrator-sdk#22](https://github.com/vocdoni/integrator-sdk/issues/22)). The
+backend's own `type` vocabulary is `['singlechoice', 'multichoice']` and rejects
+anything else, so the metadata bag — which it stores and echoes back verbatim — is
+the channel. `declaresRanked(question)` reports whether a question carries it.
 
 ```ts
-// 3 candidates, voter ranks C2 > C0 > C1.
-// C0 -> 1 (middle), C1 -> 0 (last), C2 -> 2 (top)
-choices: [1, 0, 2]
+await client.elections.create({
+  /* … */
+  questions: [
+    {
+      title: 'Rank the candidates',
+      choices: [{ title: 'A', value: 0 }, { title: 'B', value: 1 }, { title: 'C', value: 2 }],
+      ballotProtocol: { maxCount: 3, maxValue: 2, uniqueValues: true, /* … */ },
+      metadata: { type: { name: 'ranked' } },   // ← without this it is a multichoice
+    },
+  ],
+})
 ```
 
-> ⚠️ **Ranked is only half-supported** — see
-> [integrator-sdk#22](https://github.com/vocdoni/integrator-sdk/issues/22).
-> `encodeQuestionBallot` passes the array through correctly and the chain
-> tallies it, but `decodeQuestionResults` has **no ranked branch**: it labels the
-> question `multichoice` and reports how many voters ranked each option (the same
-> number for every option), plus an `abstain` bucket that is always `0` — a ranked
-> protocol reserves no sentinel headroom. The ranking is not recoverable through the SDK.
->
-> The protocol alone cannot distinguish ranked from a pick-slot multichoice that
-> fills every slot — they are byte-identical — which is why this needs an
-> explicit signal rather than better inference. The declared-type-name override
-> described under "Choices format" is that mechanism, but there is no `ranked`
-> name in either vocabulary yet (`BallotType` has no member for it, and neither
-> does the legacy `ElectionResultsTypeNames` enum), so a ranked question still
-> falls through to the multichoice label.
->
-> Until then, aggregate the raw matrix yourself. Borda, matching
-> `saas-integrator-demo`:
->
-> ```ts
-> const scores = results.map((field) => field.reduce((sum, count, rank) => sum + Number(count) * rank, 0))
-> ```
->
-> Note `react-components` will render such a question as a checkbox group
-> allowing up to `numOptions` picks (the minimum follows `typeSetup.minChoices`),
-> not a rank widget.
+The array is one **rank per option, in choice order** — the field index is the
+option, the value is its score. **Higher wins**: give your top pick
+`numOptions - 1` and your last pick `0`. That orientation is a convention, not
+something the protocol enforces, and both halves of the SDK assume it: the decode is
+an index-weighted sum, so a ballot ranked with `0` as "best" is perfectly valid and
+elects the loser, with nothing on either side able to notice. Build the array with
+`rankedOrderToScores` instead of by hand and it is applied for you:
+
+```ts
+import { encodeQuestionSelections } from '@vocdoni/ballot'
+
+// 3 candidates, voter ranks C2 > C0 > C1 — pass the ORDERING, best first.
+const ballot = encodeQuestionSelections(question, [2, 0, 1])   // → [1, 0, 2]
+```
+
+**`encodeQuestionSelections` is the entry point a form should use**, for every ballot
+type. It is `encodeQuestionBallot` plus the one thing that differs per type: a ranked
+question's form value is the voter's *ordering*, everything else's already is its wire
+input. Writing that branch by hand at the call site is how an ordering ends up on the
+wire unchanged — a valid ballot the Borda decode reads upside-down.
+
+The two-step form still works when you already hold wire ranks:
+
+```ts
+import { encodeQuestionBallot, rankedOrderToScores } from '@vocdoni/ballot'
+
+const ranks = rankedOrderToScores(question, [2, 0, 1])   // → [1, 0, 2]
+const ballot = encodeQuestionBallot(question, ranks)     // → [1, 0, 2] (pass-through)
+```
+
+Everything a ranking can get wrong throws rather than casting a vote the chain accepts
+and never counts. `rankedOrderToScores` rejects an ordering that repeats a choice or
+names an unpublished one; both it and `encodeQuestionBallot` reject an **incomplete**
+slate (a ranked protocol is pigeonhole-tight, so a partial ranking repeats a value and
+the chain drops the whole ballot), and `encodeQuestionBallot` additionally rejects a
+duplicate rank or one above `maxValue`. `validateSelections` gives the same verdicts on
+the wire ranks, so a UI can gate its submit button without discovering the refusal at
+cast time.
+
+Three defects are refused for **every** voter, up front, because no individual ballot
+shows them. The first two belong to the question, and `client.elections.create` refuses
+them too — the only moment they can still be fixed:
+
+- `maxValue: 0` on a ranked question. It means "unbounded" for every other type; here it
+  switches the chain to discrete aggregation and every option scores 0 however anyone
+  votes, indistinguishable from an election nobody voted in.
+- **Two choices sharing a `value`.** Ranked is position-addressed, so the ballots stay
+  well-formed — but the decoded rows are keyed by `choice.value`, so two options come
+  back under one id, and a ranking cannot order them.
+- **More than one question** on an election-level `ranked` declaration. A ranking is one
+  field per option and fills the whole ballot, so there is no room for a second question;
+  `inferBallotType`, `encodeBallot`, `validateSelections` and `decodeResults` all refuse
+  it. Rank per question with `encodeQuestionSelections` / `decodeQuestionResults`.
+
+**Decoding is Borda** — `Σ count × rank`, the index-weighted sum of each option's
+row. It is not one option among several: the tally is a per-field histogram with the
+individual ballots already discarded, and positional/Condorcet methods need the
+ballots. This matches `saas-integrator-demo`, the reference implementation.
+
+```ts
+// 3 voters all rank C2 > C0 > C1
+// raw: [['0','3','0'], ['3','0','0'], ['0','0','3']]
+const decoded = decodeQuestionResults(question, results)
+const points = decoded.map((row) => row.votes)               // [3, 0, 6]
+const ranking = [...decoded].sort((a, b) => b.votes - a.votes).map((r) => r.choice)  // [2, 0, 1] — C2 wins
+```
+
+Two things to know about the decoded shape:
+
+- `votes` is **points, not people**. Percentages are each option's share of the total
+  points. (Budget and quadratic already work this way.)
+- There is **no `abstain` bucket**. The sentinel columns the multichoice branch
+  unifies are a pick-slot device for unfilled slots, and ranked has none — every
+  option is a field.
+
+`react-components` renders a rank widget for these questions (one position control
+per option, via the `QuestionRankChoice` slot), requires a complete ranking before it
+will submit, and converts the ordering with `rankedOrderToScores` on the way out —
+see [react.md](react.md).
 
 ### Budget / quadratic (per-option amounts)
 

@@ -8,6 +8,12 @@ export const BallotType = {
   SingleChoice: 'single-choice',
   MultiChoice: 'multichoice',
   Approval: 'approval',
+  /**
+   * A ranking: one rank per option, in choice order, no two the same, **highest =
+   * best**. Never inferred from shape (byte-identical to a full-slate pick-slot
+   * multichoice) — it must be declared by name; see {@link inferQuestionBallotType}.
+   */
+  Ranked: 'ranked',
   Budget: 'budget',
   Quadratic: 'quadratic',
 } as const
@@ -45,7 +51,11 @@ export type BallotSelections = number[] | number[][]
 export interface DecodedChoiceResult {
   /** The choice's `value` (its `choice.value`, not its position in the choices array) */
   choice: number
-  /** The vote count/tally for this choice */
+  /**
+   * The tally: a voter count for single-choice / approval / multichoice, a summed
+   * amount for budget / quadratic, and the **Borda score** (`Σ count × rank`) for
+   * ranked — points, not people; sort descending for the ranking.
+   */
   votes: number
   /** The percentage of total votes (0-100), or null if not computable */
   percentage: number | null

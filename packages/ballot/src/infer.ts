@@ -14,8 +14,8 @@ import { BallotType } from './types'
  * vice versa inverts a two-option tally — so a name is only ever resolved against the
  * table belonging to the field it was read from.
  *
- * There is no `ranked` entry because neither the legacy enum nor {@link BallotType} has
- * one (see issue #22): an unrecognized name falls through to shape rather than throwing.
+ * No `ranked` entry: the legacy enum has no such member. `ranked` is this SDK's own
+ * name — see {@link SDK_TYPE_NAMES}.
  */
 const LEGACY_TYPE_NAMES: Record<string, BallotType> = {
   'single-choice-multiquestion': BallotType.SingleChoice,
@@ -37,6 +37,20 @@ const SAAS_TYPE_NAMES: Record<string, BallotType> = {
 }
 
 /**
+ * Names this SDK defines itself (`ranked`, issue #22), recognized in **both** name
+ * channels since they belong to neither upstream vocabulary. Ranked is reachable only
+ * by name: its protocol is byte-identical to a full-slate pick-slot multichoice with
+ * transposed field/value meanings, so shape carries no signal. The backend rejects
+ * `type: 'ranked'` at creation — a ranked question is created as a raw
+ * `ballotProtocol` plus `metadata: {type: {name: 'ranked'}}`, stored and echoed back
+ * verbatim — but `type` is still resolved here for callers keeping their own record.
+ * See packages/ballot/README.md for the full model.
+ */
+const SDK_TYPE_NAMES: Record<string, BallotType> = {
+  ranked: BallotType.Ranked,
+}
+
+/**
  * True when a question's legacy metadata bag declares `multiple-choice` — the *pick-slot*
  * index list, not the dense layout the SaaS `multichoice` type names.
  *
@@ -48,6 +62,23 @@ const SAAS_TYPE_NAMES: Record<string, BallotType> = {
  */
 export function declaresLegacyPickSlot(question: { metadata?: Record<string, unknown> }): boolean {
   return legacyTypeFromMeta(question.metadata) === BallotType.MultiChoice
+}
+
+/**
+ * True when a question declares itself `ranked`, in either name channel.
+ *
+ * Delegates to {@link inferQuestionBallotType} (minus its throw) so the two can never
+ * disagree — including in the negative: a recognized SaaS `type` shadows a `ranked`
+ * metadata name here exactly as it does there. The two answers feed different halves
+ * of the same form, so disagreement is a form that cannot be submitted.
+ */
+export function declaresRanked(question: { type?: string; metadata?: Record<string, unknown> }): boolean {
+  try {
+    return inferQuestionBallotType(question) === BallotType.Ranked
+  } catch {
+    // Neither a recognized name nor a protocol: nothing declares anything.
+    return false
+  }
 }
 
 /**
@@ -65,7 +96,8 @@ function legacyTypeFromMeta(meta: Record<string, unknown> | undefined): BallotTy
   const type = (meta as { type?: unknown }).type
   if (!type || typeof type !== 'object') return undefined
   const name = (type as { name?: unknown }).name
-  return typeof name === 'string' ? LEGACY_TYPE_NAMES[name] : undefined
+  if (typeof name !== 'string') return undefined
+  return LEGACY_TYPE_NAMES[name] ?? SDK_TYPE_NAMES[name]
 }
 
 /**
@@ -92,7 +124,8 @@ function legacyTypeFromMeta(meta: Record<string, unknown> | undefined): BallotTy
  * (`calculateChoiceResults`, `checkVote`) and never on shape.
  *
  * An absent, empty or unrecognized name falls through to the shape rules unchanged, so
- * callers with nothing to declare lose nothing.
+ * callers with nothing to declare lose nothing. {@link BallotType.Ranked} is reachable
+ * **only** by name — no shape rule below can produce it.
  *
  * Assumptions (shape path only):
  * - Approval/multichoice/budget/quadratic are single-question (questions.length === 1)
@@ -102,6 +135,8 @@ function legacyTypeFromMeta(meta: Record<string, unknown> | undefined): BallotTy
  * @param input - Election config with questions and voteType, optionally carrying the
  *   declared `type` and/or the legacy metadata bag (`meta.type.name`)
  * @returns The inferred ballot type
+ * @throws When the declared type is `ranked` and the election has more than one
+ *   question — see the guard below.
  */
 export function inferBallotType(
   input: Pick<Election, 'questions' | 'voteType'> & {
@@ -115,7 +150,19 @@ export function inferBallotType(
   // explicit field wins over the legacy bag, so a caller can override a stale metadata
   // name without editing the bag.
   const declared =
-    (input.type ? LEGACY_TYPE_NAMES[input.type] : undefined) ?? legacyTypeFromMeta(input.meta)
+    (input.type ? (LEGACY_TYPE_NAMES[input.type] ?? SDK_TYPE_NAMES[input.type]) : undefined) ??
+    legacyTypeFromMeta(input.meta)
+  // A multi-question ranked election describes no layout: a ranking is one field per
+  // *option* of one question, multi-question is one field per *question*, and either
+  // reading tallies garbage silently. Refuse like every other uncountable config.
+  if (declared === BallotType.Ranked && questions.length > 1) {
+    throw new Error(
+      `a ranked election must have exactly one question (got ${questions.length}): a ranking ` +
+        'lays out one ballot field per option, which leaves no room for a second question. ' +
+        'Encode and decode each ranked question on its own with encodeQuestionSelections / ' +
+        'decodeQuestionResults'
+    )
+  }
   if (declared) return declared
 
   // Rule 1: Multiple questions → single-choice per question (highest precedence)
@@ -169,6 +216,9 @@ export function inferBallotType(
  *    question because in the SaaS model each question *is* its own vochain process, so a
  *    question mapped from a legacy election carries that election's `metadata.type`.
  *
+ * Both also consult {@link SDK_TYPE_NAMES} (`ranked`) — the only route to
+ * {@link BallotType.Ranked}, since no shape rule can produce it.
+ *
  * An unrecognized or empty name (the stored form for raw-`ballotProtocol` questions) falls
  * through to the shape rules.
  *
@@ -183,7 +233,7 @@ export function inferQuestionBallotType(question: {
   metadata?: Record<string, unknown>
 }): BallotType {
   const declared =
-    (question.type ? SAAS_TYPE_NAMES[question.type] : undefined) ??
+    (question.type ? (SAAS_TYPE_NAMES[question.type] ?? SDK_TYPE_NAMES[question.type]) : undefined) ??
     legacyTypeFromMeta(question.metadata)
   if (declared) return declared
 

@@ -53,7 +53,7 @@ const MAX_VOTE_BATCH = 100
 /**
  * Election data, results and the vote flow, plus the voter's CSP auth session
  * (inherited from {@link ElectionAuthContextValue} — `auth0`/`auth1`/`resend`
- * to authenticate, `check`/`sign` for advanced UIs; the session's `clear` is
+ * to authenticate, `check`/`signBatch` for advanced UIs; the session's `clear` is
  * exposed here as {@link clearVoter}).
  */
 export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'clear'> {
@@ -441,9 +441,9 @@ export function ElectionProvider({
         ),
       )
 
-      // Consume every one-shot CSP signature and build every transaction
-      // BEFORE relaying anything. A failure in these phases aborts with zero
-      // votes on chain.
+      // Consume every one-shot CSP signature — every question in ONE
+      // sign-batch call — and build every transaction BEFORE relaying
+      // anything.
       const signers = pending.map(() => new EphemeralSigner())
       const signatures = await session.signBatch(
         pending.map(({ question }, k) => ({

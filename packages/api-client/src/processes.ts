@@ -109,7 +109,10 @@ export class ProcessesCspClient {
    *
    * Prefer this over looping {@link sign} when casting a whole process: it is
    * one round trip, and you learn every failure before putting any vote on
-   * chain. Not for anonymous censuses — those must use {@link blindPoint} +
+   * chain. Match results by `upstreamId` rather than by position — a dropped
+   * entry would otherwise shift every signature onto the wrong question.
+   *
+   * Not for anonymous censuses — those must use {@link blindPoint} +
    * {@link blindSign}, and this endpoint rejects them.
    */
   async signBatch(processId: string, body: SignBatchRequest): Promise<SignBatchResponse> {

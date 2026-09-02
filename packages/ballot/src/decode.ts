@@ -93,6 +93,20 @@ function decodeQuestion(
       return withPercentages(question, counts, abstain)
     }
 
+    case BallotType.Ranked: {
+      // Position-addressed: results[optionIndex][rank] = voters who gave that option
+      // that rank, highest = best. The tally is the Borda score (Σ count × rank) — the
+      // only aggregation a rank histogram can express, and what saas-integrator-demo
+      // computes. The orientation must match the encode side (rankedOrderToScores):
+      // read the other way round it elects the loser, and the matrix cannot tell which
+      // way it was written. No abstain bucket: ranked has no unfilled slots, so a
+      // sentinel column would be a corrupt rank, not an abstention.
+      const counts = question.choices.map((_c, i) =>
+        (results[i] ?? []).reduce((sum, cell, rank) => sum + toInt(cell) * rank, 0)
+      )
+      return withPercentages(question, counts)
+    }
+
     case BallotType.Budget:
     case BallotType.Quadratic: {
       // One field per option; value = amount allocated. `maxValue === 0` is not just

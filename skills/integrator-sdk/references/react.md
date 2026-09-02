@@ -131,9 +131,10 @@ const {
                  //   throws on an anonymous census: that proof would be rooted at the
                  //   wrong key, and asking would spend the one-shot authorization
   signBatch,     // (ballots: ElectionSignBatchBallot[]) => Promise<ElectionSignBatchResult[]>
-                 //   ballot = {electionId, address}. All questions in one call; picks the
-                 //   plain or blind CSP flow itself from census.anonymous. Results are in
-                 //   request order, one per ballot.
+                 //   ballot = {electionId, address}. All questions in ONE call — what vote()
+                 //   uses; picks the plain (POST /sign-batch) or blind CSP flow itself from
+                 //   census.anonymous. Results are in request order, one per ballot, with
+                 //   per-question failures reported inline ({code, error}) rather than thrown.
   // voting
   isInCensus,    // boolean — true if voter belongs to this process's census
   voterQuestions,// ProcessQuestionStatus[] — per-question canVote/hasVoted (empty until connected)
@@ -200,7 +201,7 @@ Casting is **phased** so a failure can never half-vote silently:
 
 1. **Pre-flight** — every question is validated up front (`upstreamId` present; `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
 2. **Resume check** — a fresh `processes.check()` marks questions already voted; they are skipped, so calling `vote()` again after a failure completes the remaining questions instead of dying on a double-vote.
-3. **Sign + build** — every remaining question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure.
+3. **Sign + build** — every remaining question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch` → `POST /processes/{id}/sign-batch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure.
 4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. If, on chain, some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`, and refreshes `voterQuestions`/`hasVoted` to the on-chain truth. Catch it and offer a retry — the next `vote()` call resumes.
 
 Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx built, batch not yet sent) → `confirming` (enqueued, awaiting the chain) → `confirmed` | `failed`.
@@ -208,13 +209,20 @@ Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx bu
 Use `@vocdoni/ballot` to encode ballots before calling `vote()`:
 
 ```tsx
-import { encodeQuestionBallot } from '@vocdoni/ballot'
+import { encodeQuestionSelections } from '@vocdoni/ballot'
 
 const encodedBallots = election.questions.map((q, i) =>
-  encodeQuestionBallot(q, answers[i])
+  encodeQuestionSelections(q, answers[i])
 )
 const nullifier = await vote(encodedBallots)
 ```
+
+`encodeQuestionSelections` — not `encodeQuestionBallot` — is the entry point for a form,
+because a ranked question's collected answer is the voter's *ordering* while the wire
+wants one rank per option (see [voting.md](voting.md)). Passing an ordering to
+`encodeQuestionBallot` produces a perfectly valid ballot that the Borda decode reads
+upside-down, so nothing fails and the loser wins. For every other type the two are
+identical.
 
 `status` is computed by `computeProcessStatus(election.questions)` from `@vocdoni/api-client`:
 - Any question `ONGOING` → `ONGOING`
@@ -322,6 +330,29 @@ whitespace-only strings do not count, so a stored `"description": ""` keeps the
 plain `basic`/`list` rendering, as does a question with no `metadata.choices` at
 all. When you hand `<ElectionProvider>` a prefetched `election`, it runs the
 same normalization, so extended choices show on the first paint too.
+
+**Ranked questions** — a question declaring `metadata.type.name = 'ranked'` (see
+[voting.md](voting.md)) renders a **rank widget** instead of the checkbox group its
+protocol would otherwise get: one position control per option, through the
+`QuestionRankChoice` slot rather than `QuestionChoice`. The question's
+`selectionMode` is `'ranked'` (a third value alongside `'single'` / `'multiple'`).
+
+The slot receives `position` (1-based, `null` while unranked), the full list of
+`options` (`{ position, label, taken }` — `taken` marks a place another option
+already holds, and picking it **swaps** the two), and `onRank(position | null)`. The
+default implementation is a `<select>` per option; override the slot for
+drag-and-drop or numbered buttons.
+
+The form value is the voter's **ordering** — a `string[]` of choice values, best
+first, padded with `''` for unfilled places — and `QuestionsFormProvider` transposes
+it into wire ranks on submit (`encodeQuestionSelections`, which owns a
+transposition that would otherwise be written out at every call site). Submitting is
+blocked until every option is placed (`questionSelectionRange` reports `{min: n, max: n}`): a
+ranked protocol leaves exactly one rank per option, so a partial ranking repeats a
+value and the chain discards the whole ballot while still counting the envelope.
+
+Note that `<ElectionResults />` shows the **Borda score** for such a question, not a
+voter count — same as it already does for budget/quadratic amounts.
 
 **Slot customization** — every component accepts a slot override for rendering:
 

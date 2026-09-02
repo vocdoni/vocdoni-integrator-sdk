@@ -2,7 +2,13 @@ import type { Election, Question, VoteType } from '@vocdoni/api-types'
 import { BallotType, type BallotSelections } from './types'
 import { inferBallotType } from './infer'
 import { normalizeSelections } from './selections'
-import { pickSlotCollisionReason, unsatisfiableProtocolReason, voteTypeBounds } from './protocol'
+import {
+  duplicateRankedValuesReason,
+  pickSlotCollisionReason,
+  unrankableProtocolReason,
+  unsatisfiableProtocolReason,
+  voteTypeBounds,
+} from './protocol'
 
 /**
  * Validate voter selections against election constraints.
@@ -55,6 +61,19 @@ export function validateSelections(
       throw new Error(`Question 0: ${collision}`)
     }
   }
+  // Ranked's question-level defects, refused in the same order as encodeBallot so the
+  // two agree on verdict and diagnosis; neither shows on any individual selection.
+  if (ballotType === BallotType.Ranked) {
+    const choices = questions[0]?.choices ?? []
+    const unrankable = unrankableProtocolReason(choices.length, voteType.maxValue)
+    if (unrankable) {
+      throw new Error(`Question 0: ${unrankable}`)
+    }
+    const ambiguous = duplicateRankedValuesReason(choices)
+    if (ambiguous) {
+      throw new Error(`Question 0: ${ambiguous}`)
+    }
+  }
 
   switch (ballotType) {
     case BallotType.SingleChoice:
@@ -67,6 +86,10 @@ export function validateSelections(
 
     case BallotType.MultiChoice:
       validateMultiChoice(voteType, questions[0], perQuestion[0] ?? [])
+      break
+
+    case BallotType.Ranked:
+      validateRanked(voteType, questions[0], perQuestion[0] ?? [])
       break
 
     case BallotType.Budget:
@@ -159,6 +182,44 @@ function validateMultiChoice(voteType: VoteType, question: Question, selections:
       throw new Error(`Question 0: multichoice with uniqueChoices does not allow picking choice ${value} twice`)
     }
     seen.add(value)
+  }
+}
+
+/**
+ * Validate ranked selections: one rank per option, in choice order, all distinct and
+ * within `maxValue`. These are **ranks, not choice values** — the wire shape itself
+ * (see `encodeRanked`); a voter-facing ordering goes through `rankedOrderToScores`
+ * first. Every rule is a way the chain would accept the vote and silently drop it at
+ * tally, and must agree with the encoder so a UI gating its submit button on this
+ * validator never enables a vote the encoder then refuses. Question-level defects are
+ * refused by {@link validateSelections} before this runs.
+ */
+function validateRanked(voteType: VoteType, question: Question, selections: number[]): void {
+  if (selections.length !== question.choices.length) {
+    throw new Error(
+      `Question 0: ranked requires one rank per option (${question.choices.length}), got ${selections.length}`
+    )
+  }
+
+  const seen = new Set<number>()
+  for (const rank of selections) {
+    if (!Number.isInteger(rank) || rank < 0) {
+      throw new Error(`Question 0: invalid rank ${rank} for ranked ballot; ranks must be non-negative integers`)
+    }
+    // maxValue 0 means "unbounded" module-wide, never a ceiling of zero.
+    if (voteType.maxValue > 0 && rank > voteType.maxValue) {
+      throw new Error(
+        `Question 0: rank ${rank} is above maxValue ${voteType.maxValue}; the chain accepts such a ` +
+          'ballot and discards it at tally'
+      )
+    }
+    if (seen.has(rank)) {
+      throw new Error(
+        `Question 0: rank ${rank} is used twice; a ranking must give every option a distinct rank ` +
+          'or the chain drops the whole ballot at tally'
+      )
+    }
+    seen.add(rank)
   }
 }
 

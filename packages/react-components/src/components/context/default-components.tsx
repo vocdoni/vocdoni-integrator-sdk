@@ -68,6 +68,8 @@ export const defaultComponents: ComponentsDefinition = {
     description,
     image,
     compact,
+    // Slot prop for overrides; destructured so it does not reach the DOM via {...props}.
+    hasImage: _hasImage,
     canOpenImageModal,
     dataAttrs,
     presentation,
@@ -110,6 +112,67 @@ export const defaultComponents: ComponentsDefinition = {
           {label}
         </span>
         <TrustedHtml html={description} />
+      </label>
+    )
+  },
+  // A `<select>` per option: the plainest ordering control, keyboard- and
+  // screen-reader-navigable with no drag-and-drop dependency. Taken positions stay
+  // selectable so a swap is one move.
+  QuestionRankChoice: ({
+    choice,
+    value,
+    label,
+    description,
+    image,
+    compact,
+    // See the note on QuestionChoice above: unused here, but it must not reach the DOM.
+    hasImage: _hasImage,
+    canOpenImageModal,
+    dataAttrs,
+    presentation,
+    position,
+    options,
+    disabled,
+    onRank,
+    ...props
+  }) => {
+    const imageSrc = image?.thumbnail ?? image?.default
+
+    return (
+      <label
+        {...props}
+        data-presentation={presentation}
+        data-selection-mode='ranked'
+        data-choice-value={value}
+        data-choice-card={dataAttrs?.['data-choice-card']}
+        data-layout={dataAttrs?.['data-layout']}
+      >
+        {imageSrc ? (
+          <img
+            src={linkifyIpfs(imageSrc)}
+            alt={label}
+            data-choice-media={dataAttrs?.['data-choice-media']}
+            data-can-open-modal={canOpenImageModal ? 'true' : undefined}
+          />
+        ) : null}
+        <span data-choice-body={dataAttrs?.['data-choice-body']} data-compact={compact ? '' : undefined}>
+          {label}
+        </span>
+        <TrustedHtml html={description} />
+        <select
+          id={`rank-${choice.value}`}
+          value={position ?? ''}
+          disabled={disabled}
+          data-choice-control={dataAttrs?.['data-choice-control']}
+          onChange={(event) => onRank(event.target.value === '' ? null : Number(event.target.value))}
+        >
+          <option value=''>—</option>
+          {options.map((option) => (
+            <option key={option.position} value={option.position} data-taken={option.taken ? '' : undefined}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </label>
     )
   },

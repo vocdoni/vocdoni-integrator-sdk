@@ -189,6 +189,13 @@ export function useVoterSession(
       if (!id || !authToken) throw new Error('Must authenticate before signing')
       if (!process) throw new Error('Election is not loaded yet — cannot sign')
       if (ballots.length === 0) return []
+      // The backend rejects a repeated upstreamId with a whole-batch 400
+      // anyway; failing fast here keeps the error attributable and stops the
+      // by-election map below from silently collapsing two ballots into one
+      // result.
+      if (new Set(ballots.map((b) => b.electionId)).size !== ballots.length) {
+        throw new Error('signBatch() was given the same electionId twice — pass one ballot per question')
+      }
 
       if (process.census?.anonymous) {
         const results = await signBlindCspBallots({

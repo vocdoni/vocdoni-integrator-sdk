@@ -63,6 +63,20 @@ const PLAIN_PACKAGE_MARKER = '7b226e6f6e6365'
  * while registering the batch in mockBatchJobs, so the default batch-aware
  * jobs handler keeps resolving the job.
  */
+function captureBatchVotes() {
+  const txPayloads: string[] = []
+  server.use(
+    http.post(`http://localhost/votes`, async ({ request }) => {
+      const body = (await request.json()) as { votes: Array<{ txPayload: string }> }
+      txPayloads.push(...body.votes.map((v) => v.txPayload))
+      const jobId = `batch-job-${mockBatchJobs.size}`
+      mockBatchJobs.set(jobId, body.votes.length)
+      return HttpResponse.json({ jobId }, { status: 202 })
+    }),
+  )
+  return txPayloads
+}
+
 /**
  * Counts every endpoint that consumes a one-shot CSP authorization — both the
  * plain batch sign and the anonymous flow's round 1. Spying on `/sign` alone
@@ -91,19 +105,6 @@ function countSignConsumption() {
   return calls
 }
 
-function captureBatchVotes() {
-  const txPayloads: string[] = []
-  server.use(
-    http.post(`http://localhost/votes`, async ({ request }) => {
-      const body = (await request.json()) as { votes: Array<{ txPayload: string }> }
-      txPayloads.push(...body.votes.map((v) => v.txPayload))
-      const jobId = `batch-job-${mockBatchJobs.size}`
-      mockBatchJobs.set(jobId, body.votes.length)
-      return HttpResponse.json({ jobId }, { status: 202 })
-    }),
-  )
-  return txPayloads
-}
 
 describe('ElectionProvider', () => {
   it('starts loading then resolves the election', async () => {
@@ -728,9 +729,16 @@ describe('ElectionProvider', () => {
           ],
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign`, () =>
-        HttpResponse.json({ signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX }),
-      ),
+      http.post(`http://localhost/processes/:processId/sign-batch`, async ({ request }) => {
+        const body = (await request.json()) as { ballots: Array<{ upstreamId: string }> }
+        return HttpResponse.json({
+          signatures: body.ballots.map((b) => ({
+            upstreamId: b.upstreamId,
+            signature: MOCK_CSP_SIGNATURE,
+            weight: MOCK_WEIGHT_HEX,
+          })),
+        })
+      }),
       // The batch is ACCEPTED (both envelopes enqueued)…
       http.post(`http://localhost/votes`, () =>
         HttpResponse.json({ jobId: 'batch-job-partial' }, { status: 202 }),
@@ -1173,9 +1181,16 @@ describe('ElectionProvider', () => {
           ],
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign`, () =>
-        HttpResponse.json({ signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX }),
-      ),
+      http.post(`http://localhost/processes/:processId/sign-batch`, async ({ request }) => {
+        const body = (await request.json()) as { ballots: Array<{ upstreamId: string }> }
+        return HttpResponse.json({
+          signatures: body.ballots.map((b) => ({
+            upstreamId: b.upstreamId,
+            signature: MOCK_CSP_SIGNATURE,
+            weight: MOCK_WEIGHT_HEX,
+          })),
+        })
+      }),
       http.post(`http://localhost/votes`, () => {
         relayReached = true
         return HttpResponse.error()
@@ -1234,9 +1249,16 @@ describe('ElectionProvider', () => {
           ],
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign`, () =>
-        HttpResponse.json({ signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX }),
-      ),
+      http.post(`http://localhost/processes/:processId/sign-batch`, async ({ request }) => {
+        const body = (await request.json()) as { ballots: Array<{ upstreamId: string }> }
+        return HttpResponse.json({
+          signatures: body.ballots.map((b) => ({
+            upstreamId: b.upstreamId,
+            signature: MOCK_CSP_SIGNATURE,
+            weight: MOCK_WEIGHT_HEX,
+          })),
+        })
+      }),
       http.post(`http://localhost/votes`, () => {
         relayReached = true
         return HttpResponse.json({ jobId: 'batch-job-exonerate' }, { status: 202 })
