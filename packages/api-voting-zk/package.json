@@ -42,6 +42,7 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "@noble/curves": "^1.4.0",
     "@noble/hashes": "^1.4.0",
     "@vocdoni/api-types": "workspace:*",
     "@vocdoni/api-voting": "workspace:*",

@@ -1,7 +1,7 @@
 // @vocdoni/api-voting-zk — anonymous (ZK-SNARK) voting for the Vocdoni SaaS API.
 // Ported from the Vocdoni SDK's AnonymousService / ZkAPI, adapted to the new
-// functional, tree-shakeable paradigm. Heavy deps (snarkjs, circomlibjs) live
-// only in this package so they never load unless anonymous voting is used.
+// functional, tree-shakeable paradigm. Heavy deps (snarkjs) live only in this
+// package so they never load unless anonymous voting is used.
 
 export {
   VOCDONI_SIK_PAYLOAD,
