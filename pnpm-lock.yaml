@@ -131,7 +131,7 @@ importers:
   packages/api-voting-zk:
     dependencies:
       '@noble/curves':
-        specifier: ^1.4.0
+        specifier: ^1.9.0
         version: 1.9.7
       '@noble/hashes':
         specifier: ^1.4.0

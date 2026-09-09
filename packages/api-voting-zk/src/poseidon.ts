@@ -4,7 +4,7 @@
 // circomlibjs's `buildPoseidon()` output bit-for-bit for every width used
 // here — consensus-critical, do not change the round counts.
 
-import { grainGenConstants, poseidon as noblePoseidon, validateOpts } from '@noble/curves/abstract/poseidon.js'
+import { grainGenConstants, poseidon as noblePoseidon } from '@noble/curves/abstract/poseidon.js'
 import { Field } from '@noble/curves/abstract/modular.js'
 import { ff } from './field'
 
@@ -25,7 +25,8 @@ function buildHasher(t: number) {
   }
   const base = { Fp, t, roundsFull: ROUNDS_FULL, roundsPartial, sboxPower: 5 }
   const constants = grainGenConstants(base)
-  return noblePoseidon(validateOpts({ ...base, ...constants }))
+  // `noblePoseidon` validates the options itself; no need to pre-run `validateOpts`.
+  return noblePoseidon({ ...base, ...constants })
 }
 
 const hashers = new Map<number, ReturnType<typeof buildHasher>>()
