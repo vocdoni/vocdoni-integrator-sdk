@@ -34,7 +34,7 @@
     "turbo": "^2.0.0",
     "typescript": "^5.7.0",
     "vite-tsconfig-paths": "^5.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.11"
   },
 
   "engines": {
