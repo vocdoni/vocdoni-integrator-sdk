@@ -6,6 +6,7 @@ import {
   mockOrganization,
   mockProcess,
 } from '../../../mocks/handlers'
+import { ElectionsClient, ProcessesCspClient } from './elections'
 import { VocdoniApiClient } from './client'
 
 const BASE_URL = 'http://localhost'
@@ -179,6 +180,21 @@ describe('VocdoniApiClient', () => {
       const token = await client.auth.login('user@example.com', 'secret')
       expect(token.token).toBe(mockAuthToken.token)
       expect(token.expirity).toBe(mockAuthToken.expirity)
+    })
+  })
+
+  describe('deprecated `processes` alias', () => {
+    it('is the very same instance as `elections`, so old call sites still work', async () => {
+      expect(client.processes).toBe(client.elections)
+
+      // Exercised through the alias, not just compared by identity.
+      const process = await client.processes.get('abc123')
+      expect(process.id).toBe('abc123')
+    })
+
+    it('exports ProcessesCspClient as an alias of ElectionsClient', () => {
+      expect(ProcessesCspClient).toBe(ElectionsClient)
+      expect(client.elections).toBeInstanceOf(ProcessesCspClient)
     })
   })
 

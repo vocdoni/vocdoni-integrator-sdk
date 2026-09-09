@@ -51,7 +51,7 @@ reads `chainId` and the questions directly:
    POST /processes/{id}/auth/1               → auth step 1 (confirm 2FA — skip if auth-only census)
 3. POST /processes/{id}/check                → belongsToProcess + per-question {questionId, upstreamId, canVote, hasVoted}
 4. POST /processes/{id}/sign-batch           → CSP signs a fresh ephemeral address per question — ALL
-                                               questions in ONE call (client.processes.signBatch; the
+                                               questions in ONE call (client.elections.signBatch; the
                                                single-question POST /processes/{id}/sign still exists)
    [repeat steps 5–6 for each votable question]
 5. buildVoteTransaction(...)                 → build + sign the protobuf tx locally
@@ -76,9 +76,9 @@ inlines protobufjs into your app for one integer. It does 4a–4d in one call; s
 5–6 are unchanged (the relay is proof-type-agnostic). `ElectionProvider` picks
 the branch automatically from `census.anonymous` — nothing to configure.
 
-Steps 1–4 are handled by `@vocdoni/api-client` (`client.elections.get` /
-`getResults` for the public reads; `client.processes` — `ProcessesCspClient` —
-for the CSP auth/check/sign routes).
+Steps 1–4 are handled by `@vocdoni/api-client`, all on `client.elections`
+(`ElectionsClient`): `get` / `getResults` for the public reads, and the CSP
+auth/check/sign routes. (`client.processes` is a deprecated alias of it.)
 Steps 5–6 are handled by `@vocdoni/api-voting` (`VotingClient` or `buildVoteTransaction` directly).
 In React, `ElectionProvider` automates the whole flow — election data, the
 voter's CSP auth session (`useElectionAuth`) and voting (`useElection`).
@@ -105,19 +105,19 @@ const process = await client.elections.get(processId)
 const chainId = process.chainId!
 
 // 1. Auth (auth-only census — no 2FA step; else follow with authStep1)
-const { authToken } = await client.processes.authStep0(processId, { memberNumber: '42' })
+const { authToken } = await client.elections.authStep0(processId, { memberNumber: '42' })
 
 // 2. Check — per-question {questionId, upstreamId, canVote, hasVoted} in one call
-const { belongsToProcess, questions } = await client.processes.check(processId, { authToken })
+const { belongsToProcess, questions } = await client.elections.check(processId, { authToken })
 const q = questions.find((s) => s.canVote && !s.hasVoted)
 if (!belongsToProcess || !q?.upstreamId) throw new Error('Cannot vote')
 
 // 3. Display data — public single-question read (choices, ballotProtocol, encryptionKeys)
-const question = await client.processes.getQuestion(processId, q.questionId)
+const question = await client.elections.getQuestion(processId, q.questionId)
 
 // 4. CSP sign — electionId is the QUESTION's on-chain id (upstreamId)
 const signer = new EphemeralSigner()
-const { signature, weight } = await client.processes.sign(processId, {
+const { signature, weight } = await client.elections.sign(processId, {
   authToken, electionId: q.upstreamId, payload: signer.address,
 })
 
@@ -132,8 +132,8 @@ console.log('nullifier:', job.result?.voteID)
 
 ## Mental model
 
-- **The voter's auth token is anchored to the process.** `client.processes` authenticates the voter directly against the voting process; one verified `authToken` covers check/sign for every question.
-- **Reads are public, writes are authed, drafts are gated.** `client.elections` reads (`get`, `list`, `getResults`) work on a token-less client for **published** processes — a draft 404s (single read) or is filtered out (list) unless the caller is an org manager/admin or a scoped API key, and the PII `eligibleMemberIds` lists are stripped for non-managers. Everything that mutates (`create`, `publish`, `setStatus`, census writes) stays API-key/JWT authed. `client.processes` is the voter-side CSP surface (auth/check/sign/weight/getQuestion — token-identified).
+- **The voter's auth token is anchored to the process.** `client.elections` authenticates the voter directly against the voting process; one verified `authToken` covers check/sign for every question.
+- **Reads are public, writes are authed, drafts are gated.** `client.elections` reads (`get`, `list`, `getResults`) work on a token-less client for **published** processes — a draft 404s (single read) or is filtered out (list) unless the caller is an org manager/admin or a scoped API key, and the PII `eligibleMemberIds` lists are stripped for non-managers. Everything that mutates (`create`, `publish`, `setStatus`, census writes) stays API-key/JWT authed. The voter-side CSP surface (auth/check/sign/weight/getQuestion — token-identified) lives on that same `client.elections`.
 - **`chainId` comes from the public process read.** Vote signatures are chain-id-bound; read the process's own `chainId` off `client.elections.get(processId)`. Do NOT use `client.info().chainId` — that is the service's *current* chain id, wrong for processes published before a chain migration.
 - **Results are live and public.** Published questions carry a live `results` (`QuestionResults`: `voteCount`, `maxVoters`, `finalResults`, tally matrix) on the single reads and on `GET /processes/{id}/results` — `finalResults` distinguishes live from final, and a `secretUntilTheEnd` tally matrix stays empty until the keys are revealed. List items never resolve results (poll a single read instead).
 - **One process, many questions.** `GET /processes/{id}` returns a `VotingProcessResponse` with a `questions[]` array. Each question is a separate on-chain Vochain election (`question.upstreamId` is its Vochain hex id — also reported publicly by the process check). Voting casts one Vochain transaction per question.
@@ -144,7 +144,7 @@ console.log('nullifier:', job.result?.voteID)
 - **A raw `ballotProtocol` must reach every published `choice.value`.** Single-choice is *value*-addressed: the ballot field and the results column are both `choice.value`, and `maxValue` is derived from the highest value (values may be sparse — unused columns just stay empty). A value above `maxValue` (or two choices sharing one value) makes that option uncastable; on a pick-slot multichoice, values that are not exactly `0..numChoices-1` collide with the abstain sentinels instead. Either way the chain accepts the ballot, counts it in `voteCount` and drops it at tally, so the option polls zero while the vote looks cast. `client.elections.create/update` refuses such a question outright — the only moment it is still fixable. At encode time `encodeQuestionBallot` / `validateSelections` refuse only the voter picking an out-of-range value (the in-range votes are recorded correctly, so refusing everyone would discard good ballots), but refuse **every** voter on a pick-slot sentinel collision, which no per-ballot check can detect. Check a question you did not create with `uncastableChoicesReason(question)` / `hasUncastableChoices(question)`. Position-addressed layouts (approval, dense multichoice, budget, quadratic) are unaffected — there `choice.value` is only a label.
 - **The vote tx is signed by an ephemeral key, not the voter's wallet.** `EphemeralSigner` generates a fresh secp256k1 keypair per vote; the CSP signs its Ethereum address. This decouples the voter's identity from the on-chain signature.
 - **Relaying is async.** `elections.vote()` returns a `jobId`. Poll `jobs.waitFor(jobId)` to get the vote nullifier (`voteID`). The `VotingClient.vote()` method returns the jobId; the React `useElection().vote()` awaits the full job for each question.
-- **One nullifier per question, not per process.** A voter who answered N questions holds N vote ids. Read them all from `useElection().voteIds` (`Record<questionId, string>`) — the older single `voteId` is deprecated and only ever shows one. Server-side, `processes.signInfo(id, { authToken })` returns the same set as `consumed[]`.
+- **One nullifier per question, not per process.** A voter who answered N questions holds N vote ids. Read them all from `useElection().voteIds` (`Record<questionId, string>`) — the older single `voteId` is deprecated and only ever shows one. Server-side, `elections.signInfo(id, { authToken })` returns the same set as `consumed[]`.
 - **An anonymous census is unlinkable, not ZK.** `census.anonymous: true` makes the CSP blind-sign — it never sees the ephemeral address, so it cannot link voter → vote. `EnvelopeType.Anonymous` stays **false**; this is a blind signature, not a zk-SNARK (that is `@vocdoni/api-voting-zk`, a separate path). Consequence: `signInfo().consumed[]` carries **no `address` and no `nullifier`** for such a process — both fields are optional now. Vote ids come only from the relay job, so they are lost on reload and `useElection().voteIds` cannot be recovered cross-session.
 
 ## A note on api-client stability

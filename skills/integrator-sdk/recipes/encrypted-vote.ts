@@ -11,7 +11,7 @@
  *
  * Key sourcing: `question.encryptionKeys` — on the public process read
  * (`elections.get`) and the public single-question read
- * (`processes.getQuestion`); no API key needed for either. The keykeepers
+ * (`elections.getQuestion`); no API key needed for either. The keykeepers
  * publish the keys asynchronously right after publish, and the field is ABSENT
  * (not an empty array) until then — treat absence as "not yet published" and
  * poll.
@@ -46,7 +46,7 @@ const CHAIN_ID = election.chainId
 
 // ─── 1. Auth ─────────────────────────────────────────────────────────────────
 
-const res0 = await client.processes.authStep0(PROCESS_ID, VOTER)
+const res0 = await client.elections.authStep0(PROCESS_ID, VOTER)
 if (!res0.authToken) throw new Error('Auth step 0 did not return a token')
 const authToken = res0.authToken
 // For 2FA censuses, also call authStep1 — see single-choice-vote.ts.
@@ -56,13 +56,13 @@ const authToken = res0.authToken
 // tells us which one is secretUntilTheEnd. Each question maps to its own
 // upstream Vochain process, and encryption keys are per question.
 
-const check = await client.processes.check(PROCESS_ID, { authToken })
+const check = await client.elections.check(PROCESS_ID, { authToken })
 if (!check.belongsToProcess) throw new Error('Voter is not in this census')
 
 let found: { questionId: string; processId: string } | undefined
 for (const s of check.questions) {
   if (!s.upstreamId) continue
-  const q = await client.processes.getQuestion(PROCESS_ID, s.questionId)
+  const q = await client.elections.getQuestion(PROCESS_ID, s.questionId)
   if (q.secretUntilTheEnd) {
     found = { questionId: s.questionId, processId: s.upstreamId }
     break
@@ -93,7 +93,7 @@ console.log(
 // ─── 4. CSP sign ─────────────────────────────────────────────────────────────
 
 const signer = new EphemeralSigner()
-const { signature, weight } = await client.processes.sign(PROCESS_ID, {
+const { signature, weight } = await client.elections.sign(PROCESS_ID, {
   authToken,
   electionId: processId, // the QUESTION's vochain id (upstreamId)
   payload: signer.address,
@@ -142,7 +142,7 @@ async function pollEncryptionKeys(
 ): Promise<EncryptionKey[]> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
-    const q = await client.processes.getQuestion(procId, qId)
+    const q = await client.elections.getQuestion(procId, qId)
     if (q.encryptionKeys?.length) return q.encryptionKeys
     if (Date.now() > deadline) {
       throw new Error('Timed out waiting for the keykeepers to publish the encryption keys')

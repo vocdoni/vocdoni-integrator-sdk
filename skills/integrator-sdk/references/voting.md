@@ -55,7 +55,7 @@ await client.elections.vote({ txPayload })
 | `choices` | `number[]` | yes | Ballot values for that one question — see "Choices format" below |
 | `chainId` | `string` | yes | From `election.chainId` on the public process read (`client.elections.get` — published processes need no auth). There is no per-question `chainId`, and `client.info().chainId` is NOT a substitute (it's the service's current chain, not the process's) |
 | `signer` | `EphemeralSigner` | yes | Fresh per-vote ephemeral keypair |
-| `cspSignature` | `string` | yes | Hex signature from `processes.sign()` / `signBatch()`, or the 96-byte blind signature from `signBlindCspBallots()` |
+| `cspSignature` | `string` | yes | Hex signature from `elections.sign()` / `signBatch()`, or the 96-byte blind signature from `signBlindCspBallots()` |
 | `cspWeight` | `string` | no | Hex census weight from the same sign response; omit if absent. On the blind flow it is **not** optional in practice — the weight is baked into the key salt, so a changed or dropped weight invalidates the signature |
 | `encryptionKeys` | `EncryptionKey[]` | no | Required when `question.secretUntilTheEnd` is `true`; see "Encrypted elections" below for how keys are sourced |
 | `proofType` | `ProofCA_Type` | no | Defaults to `ECDSA_PIDSALTED` (correct for every non-anonymous SaaS CSP process). Pass `ECDSA_BLIND_PIDSALTED` for an anonymous census — see "Anonymous voting" below |
@@ -71,7 +71,7 @@ Generates a fresh secp256k1 keypair per vote. The CSP signs its Ethereum address
 import { EphemeralSigner } from '@vocdoni/api-voting'
 
 const signer = new EphemeralSigner()
-signer.address    // '0x...' — pass to processes.sign() as `payload`
+signer.address    // '0x...' — pass to elections.sign() as `payload`
 signer.publicKey  // Uint8Array (65 bytes, uncompressed)
 signer.privateKey // Uint8Array (32 bytes) — ephemeral, safe to discard after the vote
 ```
@@ -452,7 +452,7 @@ you pass `encryptionKeys`; you don't call `BallotEncryptor` directly.
 ```ts
 // Public single-question read — no API key needed, so the voter app can call it.
 // (chainId is not here — read it off the public process read, elections.get.)
-const question = await client.processes.getQuestion(processMongoId, questionId)
+const question = await client.elections.getQuestion(processMongoId, questionId)
 // question.secretUntilTheEnd === true
 // question.encryptionKeys — the keys; may be absent right after publish (see below)
 
@@ -472,7 +472,7 @@ When multiple keys are present they are applied in ascending `index` order (inne
 > **Key sourcing:** `encryptionKeys` lives on the question — on the public
 > process read (`elections.get(id).questions[i].encryptionKeys`) and the
 > public single-question read
-> (`processes.getQuestion(id, qId).encryptionKeys`); no auth for either. The
+> (`elections.getQuestion(id, qId).encryptionKeys`); no auth for either. The
 > keykeepers publish keys asynchronously right after publish, and the field is
 > **absent** (not an empty array) until then — treat absence as "not yet
 > published" and poll before building the ballot. See
@@ -487,7 +487,7 @@ cannot read, so it cannot link the authorization it granted to the ballot that
 lands on chain. This is a **blind signature, not ZK** — `EnvelopeType.Anonymous`
 stays `false` and `@vocdoni/api-voting-zk` is a different path entirely.
 
-`signBlindCspBallots()` replaces `processes.sign()` and does both rounds plus
+`signBlindCspBallots()` replaces `elections.sign()` and does both rounds plus
 the blinding/unblinding:
 
 ```ts
@@ -551,7 +551,7 @@ Rules that bite if ignored:
   secret, so the signature you already hold is the only usable one. If the
   round-2 response is lost in flight the outcome is unknown — check the voter
   state instead of re-signing blind.
-- **No nullifier.** `processes.signInfo()` reports no `address` and no
+- **No nullifier.** `elections.signInfo()` reports no `address` and no
   `nullifier` for an anonymous census, by design — vote ids exist only for the
   session that cast them.
 
@@ -601,5 +601,5 @@ const opened = BallotEncryptor.open(sealed, recipientPk, recipientSk)
 ## Cross-references
 
 - [[integrator-sdk]] — overview and vote flow sequence
-- [[client]] — `ProcessesCspClient` (auth, check, sign), `JobsClient` (waitFor), `ElectionsClient` (vote relay)
+- [[client]] — `ElectionsClient` (auth, check, sign, vote relay), `JobsClient` (waitFor)
 - [[react]] — `useElection().vote()` automates this entire flow in React

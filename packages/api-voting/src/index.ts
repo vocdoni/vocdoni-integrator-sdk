@@ -12,6 +12,7 @@ export {
 export {
   signBlindCspBallots,
   type BlindCspApiClient,
+  type BlindCspEndpoints,
   type BlindCspBallot,
   type BlindCspResult,
   type SignBlindCspBallotsOptions,

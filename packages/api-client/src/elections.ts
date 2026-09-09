@@ -1,4 +1,13 @@
 import type {
+  AuthChallengeRequest,
+  AuthRequest,
+  AuthResendRequest,
+  AuthResponse,
+  BlindPointRequest,
+  BlindPointResponse,
+  BlindSignRequest,
+  BlindSignResponse,
+  CheckMembershipRequest,
   ConsumedAddressRequest,
   CreateVotingProcessRequest,
   CreateVotingProcessResponse,
@@ -7,6 +16,7 @@ import type {
   EnqueuedResponse,
   LocalizedInput,
   MultiLangString,
+  ProcessCheckResponse,
   ProcessParticipantLookupField,
   ProcessParticipantsResponse,
   ProcessSignInfoResponse,
@@ -17,7 +27,12 @@ import type {
   RelayVotesRequest,
   SetElectionStatusRequest,
   SetQuestionsStatusRequest,
+  SignBatchRequest,
+  SignBatchResponse,
+  SignRequest,
   UpdateProcessCensusResponse,
+  UserWeightRequest,
+  UserWeightResponse,
   ValidateProcessCensusRequest,
   ValidateProcessCensusResponse,
   VotingProcessListResponse,
@@ -146,10 +161,13 @@ function normalizeVotingProcessRequest(req: CreateVotingProcessRequest): CreateV
 }
 
 /**
- * Client for SaaS processes (elections). Creation and lifecycle changes are
- * SaaS-mediated: `create` stores a draft, while `publish` and `setStatus` submit
- * on-chain transactions asynchronously and return a job id to poll (the
- * `*AndWait` helpers do the polling for you).
+ * The whole `/processes` resource: authoring (create/publish/census/status,
+ * API-key authed), public reads, the voter CSP flow and the vote relay.
+ *
+ * Two ids: `processId` is the Mongo ObjectID, while `electionId` in
+ * {@link sign} is the QUESTION's on-chain id (`question.upstreamId`).
+ * Voter flow: {@link authStep0} → {@link check} → {@link signBatch} →
+ * {@link voteBatch}, or {@link blindPoint}/{@link blindSign} if anonymous.
  */
 export class ElectionsClient {
   private readonly jobs: JobsClient
@@ -356,8 +374,10 @@ export class ElectionsClient {
   }
 
   /**
-   * Public read of a single question including its synced status and eligibility.
-   * `GET /processes/{processId}/questions/{questionId}`.
+   * Public read of one question (`GET /processes/{id}/questions/{questionId}`).
+   * On `secretUntilTheEnd` questions `encryptionKeys` is absent until the
+   * keykeepers publish — poll until present before encrypting a ballot.
+   * Normalized like {@link get}: `READY` → `ONGOING`, choice meta folded on.
    */
   async getQuestion(processId: string, questionId: string): Promise<PublicQuestionResponse> {
     return this.fetch<PublicQuestionResponse>(`/processes/${processId}/questions/${questionId}`)
@@ -365,13 +385,127 @@ export class ElectionsClient {
       .catch(handleError)
   }
 
+  // ─── Voter CSP surface ──────────────────────────────────────────────────────
+  // Public: the voter is identified by their `authToken`, never by an API key.
+
   /**
-   * Consumed-address / sign-info via `POST /processes/{id}/sign-info`: the
-   * voter's consumed addresses and nullifiers, one entry per question already
-   * cast. Requires the voter's verified CSP `authToken`.
+   * Auth step 0 — identify the participant. Returns a token; for auth-only
+   * censuses that token is already verified, otherwise a 2FA challenge is sent
+   * and the token must be confirmed via {@link authStep1}.
    */
-  async signInfo(id: string, body: ConsumedAddressRequest): Promise<ProcessSignInfoResponse> {
-    return this.fetch<ProcessSignInfoResponse>(`/processes/${id}/sign-info`, {
+  async authStep0(processId: string, body: AuthRequest): Promise<AuthResponse> {
+    return this.fetch<AuthResponse>(`/processes/${processId}/auth/0`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /** Auth step 1 — confirm the 2FA challenge (OTP) for the step-0 token. */
+  async authStep1(processId: string, body: AuthChallengeRequest): Promise<AuthResponse> {
+    return this.fetch<AuthResponse>(`/processes/${processId}/auth/1`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /** Resend the challenge for an existing, non-verified auth token. */
+  async resend(processId: string, body: AuthResendRequest): Promise<AuthResponse> {
+    return this.fetch<AuthResponse>(`/processes/${processId}/auth/resend`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /**
+   * The voter's status for the process: census membership, weight and
+   * per-question eligibility/vote status. Ineligibility is reported as
+   * `belongsToProcess: false` with HTTP 200, not an error.
+   */
+  async check(processId: string, body: CheckMembershipRequest): Promise<ProcessCheckResponse> {
+    return this.fetch<ProcessCheckResponse>(`/processes/${processId}/check`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /**
+   * Request the CSP signature over the voter's (ephemeral) address for one
+   * question's on-chain election. `body.electionId` is the question's
+   * `upstreamId`; each question can only be signed once.
+   */
+  async sign(processId: string, body: SignRequest): Promise<AuthResponse> {
+    return this.fetch<AuthResponse>(`/processes/${processId}/sign`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /**
+   * Batch form of {@link sign}: one CSP signature per question of the process,
+   * in a single call. Authorization is all-or-nothing — an unauthorized token
+   * fails the whole request — while per-question failures come back inline as
+   * `{ upstreamId, code, error }` entries in `signatures`, in request order.
+   *
+   * Prefer this over looping {@link sign} when casting a whole process: it is
+   * one round trip, and you learn every failure before putting any vote on
+   * chain. Match results by `upstreamId` rather than by position — a dropped
+   * entry would otherwise shift every signature onto the wrong question.
+   *
+   * Not for anonymous censuses — those must use {@link blindPoint} +
+   * {@link blindSign}, and this endpoint rejects them.
+   */
+  async signBatch(processId: string, body: SignBatchRequest): Promise<SignBatchResponse> {
+    return this.fetch<SignBatchResponse>(`/processes/${processId}/sign-batch`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /**
+   * Round 1 of the anonymous (blind CSP) vote flow: ask the CSP for one blind
+   * point R per question. The client blinds its CA bundle against R, then
+   * calls {@link blindSign}.
+   *
+   * Idempotent per election — a repeat returns the same R, so a retry after a
+   * network failure is safe. The returned `weight` is pinned here and salts
+   * round 2: carry it verbatim into the bundle you blind and into the vote
+   * transaction. `@vocdoni/api-voting`'s `signBlindCspBallots` drives both
+   * rounds and the blinding for you.
+   */
+  async blindPoint(processId: string, body: BlindPointRequest): Promise<BlindPointResponse> {
+    return this.fetch<BlindPointResponse>(`/processes/${processId}/blind-point`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /**
+   * Round 2 of the anonymous vote flow: the CSP signs the blinded messages
+   * without being able to read them. Each result carries the raw
+   * blind-signature scalar, which the client unblinds into the final `ProofCA`
+   * signature.
+   */
+  async blindSign(processId: string, body: BlindSignRequest): Promise<BlindSignResponse> {
+    return this.fetch<BlindSignResponse>(`/processes/${processId}/blind-sign`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /** Get the voter's census weight for the process. */
+  async weight(processId: string, body: UserWeightRequest): Promise<UserWeightResponse> {
+    return this.fetch<UserWeightResponse>(`/processes/${processId}/weight`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /**
+   * Address, nullifier and timestamp per question the voter already cast
+   * (others omitted). Needs the voter's verified CSP `authToken`.
+   */
+  async signInfo(processId: string, body: ConsumedAddressRequest): Promise<ProcessSignInfoResponse> {
+    return this.fetch<ProcessSignInfoResponse>(`/processes/${processId}/sign-info`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -406,3 +540,11 @@ export class ElectionsClient {
     }).catch(handleError)
   }
 }
+
+/**
+ * @deprecated The voter CSP methods were merged into {@link ElectionsClient},
+ * which this now aliases exactly. Removed in the next major version.
+ */
+export const ProcessesCspClient = ElectionsClient
+/** @deprecated Use {@link ElectionsClient}. Removed in the next major version. */
+export type ProcessesCspClient = ElectionsClient

@@ -339,7 +339,7 @@ export function ElectionProvider({
         // the request entirely rather than pay for a provably empty answer.
         if (election.census?.anonymous) return
         if (!res.questions.some((q) => q.hasVoted)) return
-        const info = await client.processes
+        const info = await client.elections
           .signInfo(election.id, { authToken: session.authToken! })
           .catch(() => null)
         if (cancelled || !info) return
@@ -527,7 +527,7 @@ export function ElectionProvider({
       // whatever actually landed — used when the relay outcome had to be
       // reconciled from voter state instead of a job result.
       const recoverVoteIds = async (): Promise<Record<string, string>> => {
-        const info = await client.processes
+        const info = await client.elections
           .signInfo(election.id, { authToken: session.authToken! })
           .catch(() => null)
         // No nullifier for an anonymous census: those votes land without a

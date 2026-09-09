@@ -7,7 +7,6 @@ import { ElectionsClient } from './elections'
 import { handleError } from './errors'
 import { JobsClient } from './jobs'
 import { OrganizationsClient } from './organizations'
-import { ProcessesCspClient } from './processes'
 
 async function resolveToken(
   authToken: ApiClientConfig['authToken'],
@@ -19,10 +18,13 @@ async function resolveToken(
 }
 
 export class VocdoniApiClient {
-  /** Admin surface of `/processes` (create, publish, census, status). */
+  /** The whole `/processes` resource: reads, authoring, voter CSP, vote relay. */
   readonly elections: ElectionsClient
-  /** Voter CSP surface of `/processes` (auth, check, sign, weight). */
-  readonly processes: ProcessesCspClient
+  /**
+   * @deprecated Alias of {@link elections} — the very same instance, so every
+   * call keeps working. Removed in the next major version.
+   */
+  readonly processes: ElectionsClient
   readonly organizations: OrganizationsClient
   readonly census: CensusClient
   readonly auth: AuthClient
@@ -48,7 +50,7 @@ export class VocdoniApiClient {
 
     this.fetch = fetcher
     this.elections = new ElectionsClient(fetcher)
-    this.processes = new ProcessesCspClient(fetcher)
+    this.processes = this.elections // deprecated alias, not a second client
     this.organizations = new OrganizationsClient(fetcher)
     this.census = new CensusClient(fetcher)
     this.auth = new AuthClient(fetcher)

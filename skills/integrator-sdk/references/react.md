@@ -4,7 +4,7 @@ Two packages that work together. `react-providers` is the headless logic layer (
 
 The voter flow is process-scoped and lives in ONE provider: `ElectionProvider`
 fetches the voting process, drives the per-question vote AND holds the voter's
-CSP auth session (`client.processes`). `useElection()` exposes everything;
+CSP auth session (`client.elections`). `useElection()` exposes everything;
 `useElectionAuth()` exposes just the session (for auth-only widgets that
 shouldn't re-render on data/results updates). Query keys are exported as
 `electionQueryKeys` for cache pre-seeding/invalidation.
@@ -200,7 +200,7 @@ await auth1('123456')
 Casting is **phased** so a failure can never half-vote silently:
 
 1. **Pre-flight** — every question is validated up front (`upstreamId` present; `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
-2. **Resume check** — a fresh `processes.check()` marks questions already voted; they are skipped, so calling `vote()` again after a failure completes the remaining questions instead of dying on a double-vote.
+2. **Resume check** — a fresh `elections.check()` marks questions already voted; they are skipped, so calling `vote()` again after a failure completes the remaining questions instead of dying on a double-vote.
 3. **Sign + build** — every remaining question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch` → `POST /processes/{id}/sign-batch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure.
 4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. If, on chain, some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`, and refreshes `voterQuestions`/`hasVoted` to the on-chain truth. Catch it and offer a retry — the next `vote()` call resumes.
 

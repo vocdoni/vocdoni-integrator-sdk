@@ -32,8 +32,12 @@ const client = new VocdoniApiClient({
 Sub-clients accessed as properties:
 
 ```ts
-client.elections    // ElectionsClient — /processes: public reads (get/list/getResults), authed writes
-client.processes    // ProcessesCspClient — VOTER CSP surface of /processes (auth, check, sign)
+client.elections    // ElectionsClient — the whole /processes resource:
+                    //   public reads (get/list/getResults/getQuestion),
+                    //   authed writes (create/publish/census/status),
+                    //   voter CSP (auth/check/sign/blind-sign/weight),
+                    //   vote relay (vote/voteBatch)
+client.processes    // DEPRECATED alias of client.elections — removed next major
 client.organizations // OrganizationsClient
 client.census       // CensusClient
 client.auth         // AuthClient
@@ -48,11 +52,15 @@ against — always prefer the process's own `chainId` from the (public)
 
 ---
 
-## ProcessesCspClient (`client.processes`)
+## Voter CSP surface (`client.elections`)
 
 The voter-facing CSP / two-factor auth flow, anchored directly to a voting
 process. All routes are public: the voter is identified by the CSP
 `authToken`, never by an API key.
+
+These used to live on a separate `ProcessesCspClient` at `client.processes`,
+which now aliases `client.elections` exactly and is **removed in the next major
+version**.
 
 Ids to keep straight: `processId` is the process's **Mongo id** (what
 `elections.get` takes), and `electionId` in
@@ -66,35 +74,35 @@ questions from it directly, then uses the CSP routes below.
 ```ts
 // Public single-question read — no API key. Includes choices, ballotProtocol,
 // census auth config and (for secretUntilTheEnd questions) encryptionKeys.
-const question = await client.processes.getQuestion(processId, questionId)
+const question = await client.elections.getQuestion(processId, questionId)
 // question.encryptionKeys — ABSENT until the keykeepers publish the keys;
 //                           poll until present before building an encrypted ballot
 
 // Auth step 0 — identify the voter.
 // Pass all fields the census requires (see question.census.authFields)
-const res0 = await client.processes.authStep0(processId, {
+const res0 = await client.elections.authStep0(processId, {
   memberNumber: '42',      // or: name, surname, birthDate, nationalId, email, phone
 })
 // res0.authToken — verified immediately if question.census.twoFaFields is empty (auth-only)
 //               — pending verification otherwise (proceed to step 1)
 
 // Auth step 1 — confirm the 2FA OTP (skip for auth-only censuses)
-const res1 = await client.processes.authStep1(processId, {
+const res1 = await client.elections.authStep1(processId, {
   authToken: res0.authToken!,
   authData: ['123456'],    // OTP as first element
 })
 
 // Resend challenge
-await client.processes.resend(processId, { authToken, email: 'voter@example.com' })
+await client.elections.resend(processId, { authToken, email: 'voter@example.com' })
 
 // Voter status — census membership, weight and PER-QUESTION eligibility in one
 // call. Ineligibility is belongsToProcess=false with HTTP 200, not an error.
-const { belongsToProcess, questions, weight } = await client.processes.check(processId, { authToken })
+const { belongsToProcess, questions, weight } = await client.elections.check(processId, { authToken })
 // questions[i] — { questionId, upstreamId, canVote, hasVoted }
 
 // Get CSP signature over an ephemeral voter address, per question.
 // A question's signing slot is consumed on success — it cannot be signed twice.
-const { signature, weight } = await client.processes.sign(processId, {
+const { signature, weight } = await client.elections.sign(processId, {
   authToken,
   electionId: question.upstreamId!, // the QUESTION's vochain id, NOT the processId
   payload: signer.address,          // hex Ethereum address from EphemeralSigner
@@ -103,7 +111,7 @@ const { signature, weight } = await client.processes.sign(processId, {
 // Same, but every question in ONE call — prefer this when casting a whole
 // process. Per-question failures are reported inline with a stable `code`;
 // the batch itself only rejects on a bad auth token or malformed request.
-const { signatures } = await client.processes.signBatch(processId, {
+const { signatures } = await client.elections.signBatch(processId, {
   authToken,
   ballots: [{ upstreamId: question.upstreamId!, address: signer.address }],
 })
@@ -112,11 +120,11 @@ const { signatures } = await client.processes.signBatch(processId, {
 //    every signature onto the wrong question.
 
 // Voter's census weight
-const { weight } = await client.processes.weight(processId, { authToken })
+const { weight } = await client.elections.weight(processId, { authToken })
 
 // Consumed sign info — per-question address/nullifier/timestamp for the
 // questions the voter already cast (others omitted)
-const { consumed } = await client.processes.signInfo(processId, { authToken })
+const { consumed } = await client.elections.signInfo(processId, { authToken })
 // ⚠️ `address` and `nullifier` are OPTIONAL — an anonymous census reports
 //    neither, because the CSP blind-signs and never learns the address.
 ```
@@ -133,7 +141,7 @@ custom flow.
 // returns the same tokenR, so this round is safe to retry. Round 2 is not —
 // a signed election has spent its nonce, and re-blinding under a fresh secret
 // makes the signature you already hold the only usable one.
-const { points } = await client.processes.blindPoint(processId, {
+const { points } = await client.elections.blindPoint(processId, {
   authToken,
   electionIds: [question.upstreamId!],
 })
@@ -142,7 +150,7 @@ const { points } = await client.processes.blindPoint(processId, {
 //   weight — pinned here and hashed into the signing key's salt; carry it verbatim.
 
 // Round 2 — the CSP signs bytes it cannot read.
-const { signatures } = await client.processes.blindSign(processId, {
+const { signatures } = await client.elections.blindSign(processId, {
   authToken,
   ballots: [{ upstreamId: question.upstreamId!, blindedMessage }],
 })
@@ -167,9 +175,10 @@ read's `question.census`, or on the integrator backend's process read):
 
 ---
 
-## ElectionsClient (`client.elections`)
+## ElectionsClient (`client.elections`) — process data & authoring
 
-Reads (`get`, `list`, `getResults`) are **public** for published processes
+The voter CSP methods documented above are on this same class. Reads
+(`get`, `list`, `getResults`) are **public** for published processes
 (saas-backend#599): drafts 404 on `get` and are filtered from `list` unless the
 caller is an org manager/admin or a scoped API key, and the PII
 `eligibleMemberIds` lists are stripped for non-managers. Writes (create,
@@ -394,7 +403,7 @@ The **normal SaaS user** auth flow: a signed-up user logs in with email/password
 to get a JWT, then drives the SDK under their own organization (create processes,
 etc.). This is distinct from the **integrator** flow (a `vsk_…` API key passed as
 the client's `authToken`, used to manage orgs), and from the **voter** CSP flow
-(`ProcessesCspClient`).
+(the CSP `authToken` routes on `client.elections`).
 
 ```ts
 const session = await client.auth.login('user@example.com', 'secret')
@@ -468,7 +477,7 @@ interface QuestionResults {
                                       // questions stay empty until key reveal)
 }
 
-// Voter status for a process (client.processes.check)
+// Voter status for a process (client.elections.check)
 interface ProcessCheckResponse {
   belongsToProcess: boolean
   questions: ProcessQuestionStatus[]  // { questionId, upstreamId?, canVote, hasVoted }
@@ -517,9 +526,9 @@ keyed by choice `value`:
 ```
 
 On **read**, every question-bearing endpoint — `elections.get`,
-`elections.list`, `elections.getQuestion` and the voter-side
-`processes.getQuestion` — folds those entries onto the matching choice as
-`choice.meta`, so components read it straight off the choice:
+`elections.list` and `elections.getQuestion` — folds those entries onto the
+matching choice as `choice.meta`, so components read it straight off the
+choice:
 
 ```ts
 interface ChoiceMeta {

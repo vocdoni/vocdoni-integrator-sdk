@@ -22,11 +22,43 @@ import { encodeCaBundle } from './vote-transaction'
  * `VocdoniApiClient` satisfies it structurally, mirroring
  * {@link VoteApiClient} — api-voting never imports api-client.
  */
-export interface BlindCspApiClient {
-  processes: {
-    blindPoint(processId: string, body: BlindPointRequest): Promise<BlindPointResponse>
-    blindSign(processId: string, body: BlindSignRequest): Promise<BlindSignResponse>
+export interface BlindCspEndpoints {
+  blindPoint(processId: string, body: BlindPointRequest): Promise<BlindPointResponse>
+  blindSign(processId: string, body: BlindSignRequest): Promise<BlindSignResponse>
+}
+
+/**
+ * Either key satisfies it: `elections`, or the pre-merge `processes` name kept
+ * for hand-rolled clients and removed in the next major version.
+ *
+ * The counter-key is deliberately `unknown`: on an api-client 2.x instance
+ * `elections` is the pre-merge admin client, which has neither blind method,
+ * and typing it as {@link BlindCspEndpoints} would reject that whole client.
+ */
+export type BlindCspApiClient =
+  | { elections: BlindCspEndpoints; processes?: unknown }
+  | { processes: BlindCspEndpoints; elections?: unknown }
+
+/**
+ * Resolve the CSP endpoints by capability rather than by key name: on an
+ * api-client 2.x client BOTH keys exist, but only `processes` carries the
+ * blind methods — picking `elections` there would throw "not a function".
+ */
+function cspEndpoints(client: BlindCspApiClient): BlindCspEndpoints {
+  const asEndpoints = (value: unknown): BlindCspEndpoints | undefined => {
+    const candidate = value as Partial<BlindCspEndpoints> | undefined
+    return typeof candidate?.blindPoint === 'function' && typeof candidate?.blindSign === 'function'
+      ? (candidate as BlindCspEndpoints)
+      : undefined
   }
+  const keyed = client as { elections?: unknown; processes?: unknown }
+  const endpoints = asEndpoints(keyed.elections) ?? asEndpoints(keyed.processes)
+  if (!endpoints) {
+    throw new Error(
+      'BlindCspApiClient must expose `elections` (or the deprecated `processes`) with blindPoint/blindSign',
+    )
+  }
+  return endpoints
 }
 
 /** One question to be blind-signed. */
@@ -91,8 +123,9 @@ export interface BlindCspResult {
 export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Promise<BlindCspResult[]> {
   const { processId, authToken, ballots, client } = opts
   if (ballots.length === 0) return []
+  const csp = cspEndpoints(client)
 
-  const { points } = await client.processes.blindPoint(processId, {
+  const { points } = await csp.blindPoint(processId, {
     authToken,
     electionIds: ballots.map((b) => b.upstreamId),
   })
@@ -156,7 +189,7 @@ export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Pro
   }
 
   if (toSign.length > 0) {
-    const { signatures } = await client.processes.blindSign(processId, { authToken, ballots: toSign })
+    const { signatures } = await csp.blindSign(processId, { authToken, ballots: toSign })
     for (const signed of signatures) {
       const secret = secrets.get(signed.upstreamId)
       if (!secret) continue

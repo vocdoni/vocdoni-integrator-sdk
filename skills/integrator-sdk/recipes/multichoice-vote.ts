@@ -83,7 +83,7 @@ const election = await client.elections.get(PROCESS_ID)
 if (!election.chainId) throw new Error('Process has no chainId (not published?)')
 const CHAIN_ID = election.chainId
 
-const res0 = await client.processes.authStep0(PROCESS_ID, VOTER)
+const res0 = await client.elections.authStep0(PROCESS_ID, VOTER)
 if (!res0.authToken) throw new Error('Auth step 0 did not return a token')
 const authToken = res0.authToken
 // (add authStep1 here for 2FA censuses — see single-choice-vote.ts)
@@ -91,7 +91,7 @@ const authToken = res0.authToken
 // Membership + per-question eligibility in one call. Each entry carries the
 // question's id and its on-chain Vochain id (upstreamId) — no authed process
 // read needed to discover them.
-const check = await client.processes.check(PROCESS_ID, { authToken })
+const check = await client.elections.check(PROCESS_ID, { authToken })
 if (!check.belongsToProcess) throw new Error('Voter is not in this census')
 
 // ─── Per-question selections ──────────────────────────────────────────────
@@ -140,7 +140,7 @@ const votable = check.questions.filter((status) => {
 })
 
 const signers = votable.map(() => new EphemeralSigner())
-const { signatures } = await client.processes.signBatch(PROCESS_ID, {
+const { signatures } = await client.elections.signBatch(PROCESS_ID, {
   authToken,
   ballots: votable.map((status, i) => ({
     upstreamId: status.upstreamId!, // the QUESTION's vochain id, not PROCESS_ID
@@ -169,7 +169,7 @@ for (const [i, status] of votable.entries()) {
   }
 
   // Public single-question read — choices + ballotProtocol; no API key needed.
-  const question = await client.processes.getQuestion(PROCESS_ID, status.questionId)
+  const question = await client.elections.getQuestion(PROCESS_ID, status.questionId)
   console.log(`Question ${question.id} ballotProtocol:`, question.ballotProtocol)
   // question.ballotProtocol.maxCount      — number of ballot fields (dense: one per option)
   // question.ballotProtocol.maxValue      — max encoded value per element

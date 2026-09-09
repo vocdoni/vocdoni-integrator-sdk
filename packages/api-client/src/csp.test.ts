@@ -11,7 +11,7 @@ import { VocdoniApiClient } from './client'
 const BASE_URL = 'http://localhost'
 const PROCESS_ID = 'proc-1'
 
-describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
+describe('ElectionsClient — voter CSP routes on /processes', () => {
   let client: VocdoniApiClient
 
   beforeEach(() => {
@@ -28,7 +28,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         }),
       )
 
-      const res = await client.processes.authStep0(PROCESS_ID, { memberNumber: '42' })
+      const res = await client.elections.authStep0(PROCESS_ID, { memberNumber: '42' })
       expect(res.authToken).toBe('step0-token')
       expect(body).toEqual({ memberNumber: '42' })
     })
@@ -44,7 +44,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         }),
       )
 
-      const res = await client.processes.authStep1(PROCESS_ID, {
+      const res = await client.elections.authStep1(PROCESS_ID, {
         authToken: 'step0-token',
         authData: ['123456'],
       })
@@ -64,7 +64,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         }),
       )
 
-      const res = await client.processes.resend(PROCESS_ID, {
+      const res = await client.elections.resend(PROCESS_ID, {
         authToken: 'step0-token',
         email: 'v@example.com',
       })
@@ -88,7 +88,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         ),
       )
 
-      const res = await client.processes.check(PROCESS_ID, { authToken: 'verified-token' })
+      const res = await client.elections.check(PROCESS_ID, { authToken: 'verified-token' })
       expect(res.belongsToProcess).toBe(true)
       expect(res.weight).toBe(MOCK_WEIGHT_HEX)
       expect(res.questions).toHaveLength(2)
@@ -108,7 +108,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         ),
       )
 
-      const res = await client.processes.check(PROCESS_ID, { authToken: 'stranger-token' })
+      const res = await client.elections.check(PROCESS_ID, { authToken: 'stranger-token' })
       expect(res.belongsToProcess).toBe(false)
       expect(res.questions).toEqual([])
     })
@@ -124,7 +124,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         }),
       )
 
-      const res = await client.processes.sign(PROCESS_ID, {
+      const res = await client.elections.sign(PROCESS_ID, {
         authToken: 'verified-token',
         electionId: MOCK_PROCESS_ADDRESS,
         payload: 'aa'.repeat(20),
@@ -153,7 +153,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         }),
       )
 
-      const res = await client.processes.signBatch(PROCESS_ID, {
+      const res = await client.elections.signBatch(PROCESS_ID, {
         authToken: 'verified-token',
         ballots: [
           { upstreamId: 'aa'.repeat(32), address: '11'.repeat(20) },
@@ -188,7 +188,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         ),
       )
 
-      const res = await client.processes.signBatch(PROCESS_ID, {
+      const res = await client.elections.signBatch(PROCESS_ID, {
         authToken: 'verified-token',
         ballots: [
           { upstreamId: 'aa'.repeat(32), address: '11'.repeat(20) },
@@ -203,7 +203,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
 
   describe('weight', () => {
     it('POSTs the token and returns the hex weight', async () => {
-      const res = await client.processes.weight(PROCESS_ID, { authToken: 'verified-token' })
+      const res = await client.elections.weight(PROCESS_ID, { authToken: 'verified-token' })
       expect(res.weight).toBe(MOCK_WEIGHT_HEX)
     })
   })
@@ -228,7 +228,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         }),
       )
 
-      const res = await client.processes.signInfo(PROCESS_ID, { authToken: 'verified-token' })
+      const res = await client.elections.signInfo(PROCESS_ID, { authToken: 'verified-token' })
       expect(res.consumed).toHaveLength(1)
       expect(res.consumed[0].nullifier).toBe('bb'.repeat(32))
       expect(body).toEqual({ authToken: 'verified-token' })
@@ -245,7 +245,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         }),
       )
 
-      const q = await client.processes.getQuestion(PROCESS_ID, 'q-0')
+      const q = await client.elections.getQuestion(PROCESS_ID, 'q-0')
       expect(q.upstreamId).toBe(MOCK_PROCESS_ADDRESS)
       expect(q.ballotProtocol?.maxCount).toBe(1)
       expect(auth).toBeNull()
@@ -269,7 +269,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         ),
       )
 
-      const q = await client.processes.getQuestion(PROCESS_ID, 'q-0')
+      const q = await client.elections.getQuestion(PROCESS_ID, 'q-0')
       expect(q.choices[0].meta).toEqual({
         description: 'Unpeeled',
         image: { default: 'https://cdn.example/a.jpeg' },
@@ -289,7 +289,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         ),
       )
 
-      const q = await client.processes.getQuestion(PROCESS_ID, 'q-0')
+      const q = await client.elections.getQuestion(PROCESS_ID, 'q-0')
       expect(q.secretUntilTheEnd).toBe(true)
       expect(q.encryptionKeys).toBeUndefined()
     })
@@ -306,7 +306,7 @@ describe('ProcessesCspClient (voter CSP routes on /processes)', () => {
         ),
       )
 
-      const q = await client.processes.getQuestion(PROCESS_ID, 'q-0')
+      const q = await client.elections.getQuestion(PROCESS_ID, 'q-0')
       expect(q.encryptionKeys).toHaveLength(1)
       expect(q.encryptionKeys?.[0].key).toBe('cc'.repeat(32))
     })

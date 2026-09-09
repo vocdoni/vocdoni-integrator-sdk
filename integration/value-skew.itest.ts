@@ -110,15 +110,15 @@ suite('issue #28: sparse single-choice values (live)', () => {
       // One member per choice: member 1 → C1 (value 1), member 2 → C2, member 3 → C3.
       for (const [i, memberNumber] of VOTERS.entries()) {
         const value = VALUES[i]
-        const auth = await voterClient.processes.authStep0(draftId, { memberNumber })
+        const auth = await voterClient.elections.authStep0(draftId, { memberNumber })
         expect(auth.authToken, `auth failed (member ${memberNumber})`).toBeTruthy()
 
-        const check = await voterClient.processes.check(draftId, { authToken: auth.authToken! })
+        const check = await voterClient.elections.check(draftId, { authToken: auth.authToken! })
         const status = check.questions[0]
         expect(status.canVote, `member ${memberNumber} cannot vote`).toBe(true)
 
         const signer = new EphemeralSigner()
-        const sign = await voterClient.processes.sign(draftId, {
+        const sign = await voterClient.elections.sign(draftId, {
           authToken: auth.authToken!,
           electionId: status.upstreamId!,
           payload: signer.address,
@@ -293,11 +293,11 @@ suite('issue #28: sparse single-choice values (live)', () => {
       // Member 2 casts the unreachable value (3) — bypassing encodeQuestionBallot,
       // which is precisely what the guard exists to prevent.
       const cast = async (memberNumber: string, wireValue: number) => {
-        const auth = await voterClient.processes.authStep0(draftId, { memberNumber })
-        const check = await voterClient.processes.check(draftId, { authToken: auth.authToken! })
+        const auth = await voterClient.elections.authStep0(draftId, { memberNumber })
+        const check = await voterClient.elections.check(draftId, { authToken: auth.authToken! })
         const status = check.questions[0]
         const signer = new EphemeralSigner()
-        const sign = await voterClient.processes.sign(draftId, {
+        const sign = await voterClient.elections.sign(draftId, {
           authToken: auth.authToken!,
           electionId: status.upstreamId!,
           payload: signer.address,
