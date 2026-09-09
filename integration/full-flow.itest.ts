@@ -23,7 +23,7 @@ import { apiKey, makeAdminClient, makeClient } from './helpers'
 //      public single-question read (choices/ballotProtocol/upstreamId, and the
 //      secret question's encryption keys) and the public process list
 //   6. has 4 members vote on every question of every process via the
-//      process-scoped CSP flow (client.processes: authStep0 → check → sign —
+//      process-scoped CSP flow (client.elections: authStep0 → check → sign —
 //      the only voter flow; the bundle routes are gone), chainId read straight
 //      off the PUBLIC process read; the secret question's ballots are sealed
 //      with its encryption keys, the anonymous process goes through the
@@ -574,7 +574,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       step(`5. public process list verified — ${publicList.processes.length} published`)
 
       // 6. Every member votes on every process through the process-scoped CSP
-      // flow (client.processes — the ONLY voter flow since the backend dropped
+      // flow (client.elections — the ONLY voter flow since the backend dropped
       // the bundle routes). The auth token is anchored to the process (one
       // authStep0 per member+process), the check reports every question's
       // eligibility at once, and chainId comes straight off the PUBLIC process

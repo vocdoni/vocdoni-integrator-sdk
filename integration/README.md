@@ -73,7 +73,7 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
    an unsatisfiable ballot config, and that a multichoice question created with
    `uniqueChoices: true` was normalized to `false`.
 6. 4 members vote on every question through the **process-scoped CSP flow**
-   (`client.processes`: `authStep0` → `check` → `sign`), with `chainId` read
+   (`client.elections`: `authStep0` → `check` → `sign`), with `chainId` read
    straight off the **public** process read — no integrator handoff. The secret
    question's ballots are sealed with its encryption keys. The anonymous
    process instead goes through `signBlindCspBallots()` — `blindPoint` → blind

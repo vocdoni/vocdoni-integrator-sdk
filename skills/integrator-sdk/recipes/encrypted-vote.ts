@@ -11,7 +11,7 @@
  *
  * Key sourcing: `question.encryptionKeys` — on the public process read
  * (`elections.get`) and the public single-question read
- * (`processes.getQuestion`); no API key needed for either. The keykeepers
+ * (`elections.getQuestion`); no API key needed for either. The keykeepers
  * publish the keys asynchronously right after publish, and the field is ABSENT
  * (not an empty array) until then — treat absence as "not yet published" and
  * poll.

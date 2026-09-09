@@ -10,7 +10,7 @@
  * false and this has nothing to do with `@vocdoni/api-voting-zk`.
  *
  * What changes versus `recipes/single-choice-vote.ts`:
- *   - `processes.sign()` → `signBlindCspBallots()` (two rounds, batched, all
+ *   - `elections.sign()` → `signBlindCspBallots()` (two rounds, batched, all
  *     questions at once — there is no single-election blind endpoint)
  *   - `buildVoteTransaction` gets `proofType: ProofCA_Type.ECDSA_BLIND_PIDSALTED`
  *   - the relay (`POST /vote`) and job polling are unchanged
@@ -130,7 +130,7 @@ for (const [i, result] of signed.entries()) {
 
   const job = await client.jobs.waitFor(jobId, { timeoutMs: 90_000 })
   console.log(`Vote cast on question ${question.id} — nullifier:`, job.result?.voteID)
-  // ⚠️ This nullifier only exists for THIS session. processes.signInfo() reports
+  // ⚠️ This nullifier only exists for THIS session. elections.signInfo() reports
   // no address and no nullifier for an anonymous census — by design, since the
   // CSP never learned either — so it cannot be recovered after a reload.
 }

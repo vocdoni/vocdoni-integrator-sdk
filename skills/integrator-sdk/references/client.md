@@ -533,7 +533,7 @@ keyed by choice `value`:
 
 On **read**, every question-bearing endpoint — `elections.get`,
 `elections.list`, `elections.getQuestion` and the voter-side
-`processes.getQuestion` — folds those entries onto the matching choice as
+`elections.getQuestion` — folds those entries onto the matching choice as
 `choice.meta`, so components read it straight off the choice:
 
 ```ts
