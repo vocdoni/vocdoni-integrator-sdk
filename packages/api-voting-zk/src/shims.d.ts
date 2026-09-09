@@ -24,11 +24,3 @@ declare module 'snarkjs' {
     ): Promise<boolean>
   }
 }
-
-declare module 'circomlibjs' {
-  export interface Poseidon {
-    (inputs: Array<bigint | number | string>): Uint8Array
-    F: { toObject(value: Uint8Array): bigint }
-  }
-  export function buildPoseidon(): Promise<Poseidon>
-}

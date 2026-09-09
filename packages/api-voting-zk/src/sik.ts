@@ -2,10 +2,10 @@
 // from the Vocdoni SDK's AnonymousService. The poseidon hashing and field
 // encoding are consensus-critical and kept identical to the SDK.
 
-import { buildPoseidon } from 'circomlibjs'
 import { utf8ToBytes } from '@noble/hashes/utils'
 import { strip0x } from '@vocdoni/api-voting'
 import { arbo, arrayBufferToHex, bigIntToHex, ff, hexToArrayBuffer } from './field'
+import { poseidon } from './poseidon'
 import { VOCDONI_SIK_SIGNATURE_LENGTH, type CircuitInputs } from './types'
 
 /**
@@ -24,9 +24,7 @@ export async function calcCircuitInputs(signature: string, password: string, ele
   const ffsignature = ff.hexToFFBigInt(strip0x(safeSignature)).toString()
   const ffpassword = ff.hexToFFBigInt(arrayBufferToHex(utf8ToBytes(password))).toString()
 
-  const poseidon = await buildPoseidon()
-  const hash = poseidon([ffsignature, ffpassword, arboElectionId[0], arboElectionId[1]])
-  const nullifier: bigint = poseidon.F.toObject(hash)
+  const nullifier = poseidon([ffsignature, ffpassword, arboElectionId[0], arboElectionId[1]])
 
   return { nullifier, arboElectionId, ffsignature, ffpassword }
 }
@@ -61,9 +59,8 @@ export async function calcSik(
   const ffsignature = ff.hexToFFBigInt(safeSignature).toString()
   const ffpassword = ff.hexToFFBigInt(arrayBufferToHex(utf8ToBytes(password))).toString()
 
-  const poseidon = await buildPoseidon()
   const hash = poseidon([arboAddress, ffpassword, ffsignature])
-  return arbo.toString(poseidon.F.toObject(hash))
+  return arbo.toString(hash)
 }
 
 /**
