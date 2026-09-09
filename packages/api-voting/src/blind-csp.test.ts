@@ -111,6 +111,40 @@ describe('signBlindCspBallots', () => {
     expect(fromHex(results[0].signature!).length).toBe(96)
   })
 
+  it('picks the key that actually has the blind methods on a pre-merge api-client', async () => {
+    const csp = fakeCsp()
+    const signer = new EphemeralSigner()
+    // api-client 2.x: BOTH keys exist, but `elections` is the admin client and
+    // only `processes` carries blindPoint/blindSign. Resolving by name alone
+    // would pick `elections` here and blow up with "not a function".
+    const v2 = {
+      elections: { get: vi.fn(), vote: vi.fn() },
+      processes: csp.client.elections,
+    } satisfies BlindCspApiClient
+
+    const results = await signBlindCspBallots({
+      processId: PROCESS_ID,
+      authToken: AUTH_TOKEN,
+      client: v2,
+      ballots: [{ upstreamId: ELECTION_A, address: signer.address }],
+    })
+
+    expect(results[0].code).toBeUndefined()
+    expect(fromHex(results[0].signature!).length).toBe(96)
+    expect(csp.client.elections.blindPoint).toHaveBeenCalledTimes(1)
+  })
+
+  it('throws a clear error when neither key carries the blind endpoints', async () => {
+    await expect(
+      signBlindCspBallots({
+        processId: PROCESS_ID,
+        authToken: AUTH_TOKEN,
+        client: { elections: { get: vi.fn() } } as unknown as BlindCspApiClient,
+        ballots: [{ upstreamId: ELECTION_A, address: new EphemeralSigner().address }],
+      }),
+    ).rejects.toThrow(/blindPoint/)
+  })
+
   it('returns signatures the salted census key verifies, over the bundle that goes on chain', async () => {
     const csp = fakeCsp({ weights: { [ELECTION_A]: '01', [ELECTION_B]: '2a' } })
     const signers = [new EphemeralSigner(), new EphemeralSigner()]
