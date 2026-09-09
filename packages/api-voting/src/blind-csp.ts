@@ -28,11 +28,8 @@ export interface BlindCspEndpoints {
 }
 
 /**
- * Either key satisfies it. `elections` is the current one; `processes` is the
- * pre-merge name, kept working for hand-rolled clients written against
- * api-client 2.x and REMOVED IN THE NEXT MAJOR VERSION. A real
- * `VocdoniApiClient` carries both (they are the same object), so it matches
- * either way — only a custom object has to pick.
+ * Either key satisfies it: `elections`, or the pre-merge `processes` name kept
+ * for hand-rolled clients and removed in the next major version.
  */
 export type BlindCspApiClient =
   | { elections: BlindCspEndpoints; processes?: BlindCspEndpoints }

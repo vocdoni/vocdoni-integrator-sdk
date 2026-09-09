@@ -37,8 +37,7 @@ client.elections    // ElectionsClient — the whole /processes resource:
                     //   authed writes (create/publish/census/status),
                     //   voter CSP (auth/check/sign/blind-sign/weight),
                     //   vote relay (vote/voteBatch)
-client.processes    // DEPRECATED alias of client.elections — the same instance.
-                    //   Removed in the next major; migrate to client.elections.
+client.processes    // DEPRECATED alias of client.elections — removed next major
 client.organizations // OrganizationsClient
 client.census       // CensusClient
 client.auth         // AuthClient
@@ -59,14 +58,9 @@ The voter-facing CSP / two-factor auth flow, anchored directly to a voting
 process. All routes are public: the voter is identified by the CSP
 `authToken`, never by an API key.
 
-These used to live on a separate `ProcessesCspClient` at `client.processes`.
-They were merged into `ElectionsClient`: both always wrapped the same
-`/processes/{id}` resource through the same fetcher (so identical auth
-behaviour), `getQuestion` and `signInfo` were duplicated verbatim between them,
-and the "admin vs voter" split never held — an API-key-less voter app called
-both. `client.processes` and the exported `ProcessesCspClient` remain as
-deprecated aliases of `client.elections` / `ElectionsClient` and are **removed
-in the next major version**.
+These used to live on a separate `ProcessesCspClient` at `client.processes`,
+which now aliases `client.elections` exactly and is **removed in the next major
+version**.
 
 Ids to keep straight: `processId` is the process's **Mongo id** (what
 `elections.get` takes), and `electionId` in

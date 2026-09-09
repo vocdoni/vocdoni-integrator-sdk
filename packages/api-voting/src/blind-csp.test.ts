@@ -96,9 +96,7 @@ describe('signBlindCspBallots', () => {
   it('still accepts a client keyed by the deprecated `processes` name', async () => {
     const csp = fakeCsp()
     const signer = new EphemeralSigner()
-    // A hand-rolled client written against api-client 2.x, before the CSP
-    // methods were merged into `elections`. It must keep working until the
-    // next major.
+    // A hand-rolled pre-merge client: must keep working until the next major.
     const legacy = { processes: csp.client.elections! }
 
     const results = await signBlindCspBallots({

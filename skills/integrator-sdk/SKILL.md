@@ -78,8 +78,7 @@ the branch automatically from `census.anonymous` — nothing to configure.
 
 Steps 1–4 are handled by `@vocdoni/api-client`, all on `client.elections`
 (`ElectionsClient`): `get` / `getResults` for the public reads, and the CSP
-auth/check/sign routes. (`client.processes` is a deprecated alias of the very
-same object, removed in the next major.)
+auth/check/sign routes. (`client.processes` is a deprecated alias of it.)
 Steps 5–6 are handled by `@vocdoni/api-voting` (`VotingClient` or `buildVoteTransaction` directly).
 In React, `ElectionProvider` automates the whole flow — election data, the
 voter's CSP auth session (`useElectionAuth`) and voting (`useElection`).
@@ -134,7 +133,7 @@ console.log('nullifier:', job.result?.voteID)
 ## Mental model
 
 - **The voter's auth token is anchored to the process.** `client.elections` authenticates the voter directly against the voting process; one verified `authToken` covers check/sign for every question.
-- **Reads are public, writes are authed, drafts are gated.** `client.elections` reads (`get`, `list`, `getResults`) work on a token-less client for **published** processes — a draft 404s (single read) or is filtered out (list) unless the caller is an org manager/admin or a scoped API key, and the PII `eligibleMemberIds` lists are stripped for non-managers. Everything that mutates (`create`, `publish`, `setStatus`, census writes) stays API-key/JWT authed. The voter-side CSP surface (auth/check/sign/weight/getQuestion — token-identified) lives on that same `client.elections`: the auth boundary does not follow the resource, so the client is not split into an admin half and a voter half.
+- **Reads are public, writes are authed, drafts are gated.** `client.elections` reads (`get`, `list`, `getResults`) work on a token-less client for **published** processes — a draft 404s (single read) or is filtered out (list) unless the caller is an org manager/admin or a scoped API key, and the PII `eligibleMemberIds` lists are stripped for non-managers. Everything that mutates (`create`, `publish`, `setStatus`, census writes) stays API-key/JWT authed. The voter-side CSP surface (auth/check/sign/weight/getQuestion — token-identified) lives on that same `client.elections`.
 - **`chainId` comes from the public process read.** Vote signatures are chain-id-bound; read the process's own `chainId` off `client.elections.get(processId)`. Do NOT use `client.info().chainId` — that is the service's *current* chain id, wrong for processes published before a chain migration.
 - **Results are live and public.** Published questions carry a live `results` (`QuestionResults`: `voteCount`, `maxVoters`, `finalResults`, tally matrix) on the single reads and on `GET /processes/{id}/results` — `finalResults` distinguishes live from final, and a `secretUntilTheEnd` tally matrix stays empty until the keys are revealed. List items never resolve results (poll a single read instead).
 - **One process, many questions.** `GET /processes/{id}` returns a `VotingProcessResponse` with a `questions[]` array. Each question is a separate on-chain Vochain election (`question.upstreamId` is its Vochain hex id — also reported publicly by the process check). Voting casts one Vochain transaction per question.

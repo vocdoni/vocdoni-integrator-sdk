@@ -161,32 +161,13 @@ function normalizeVotingProcessRequest(req: CreateVotingProcessRequest): CreateV
 }
 
 /**
- * Client for SaaS voting processes (elections) — the whole `/processes`
- * resource, both the authoring side and the voter side.
+ * The whole `/processes` resource: authoring (create/publish/census/status,
+ * API-key authed), public reads, the voter CSP flow and the vote relay.
  *
- * Creation and lifecycle changes are SaaS-mediated: `create` stores a draft,
- * while `publish` and `setStatus` submit on-chain transactions asynchronously
- * and return a job id to poll (the `*AndWait` helpers do the polling for you).
- * Those writes need the API key / JWT.
- *
- * Everything a voter needs is here too, and needs **no API key**: the process
- * and question reads are public for published processes (saas-backend#599),
- * the CSP routes identify the voter by their `authToken`, and the vote relay
- * (`POST /vote`, `POST /votes`) is public. That is precisely why this client is
- * NOT split into an admin half and a voter half — the auth boundary does not
- * follow the resource, and a voter app calls both.
- *
- * Ids to keep straight:
- * - `processId` (the id {@link get} takes) is the process's Mongo ObjectID.
- * - `electionId` in {@link sign} is the QUESTION's on-chain Vochain election
- *   id (`question.upstreamId` from the process read), not the process id.
- *
- * Typical voter flow: {@link get} → {@link authStep0} → {@link authStep1}
- * (skip for auth-only censuses) → {@link check} to learn per-question
- * eligibility → {@link signBatch} the ephemeral addresses → {@link voteBatch}.
- * If the process census is `anonymous`, signing is the two-round blind flow
- * ({@link blindPoint} → {@link blindSign}) instead — the plain sign endpoints
- * reject it.
+ * Two ids: `processId` is the Mongo ObjectID, while `electionId` in
+ * {@link sign} is the QUESTION's on-chain id (`question.upstreamId`).
+ * Voter flow: {@link authStep0} → {@link check} → {@link signBatch} →
+ * {@link voteBatch}, or {@link blindPoint}/{@link blindSign} if anonymous.
  */
 export class ElectionsClient {
   private readonly jobs: JobsClient
@@ -393,19 +374,10 @@ export class ElectionsClient {
   }
 
   /**
-   * Public read of a single question via
-   * `GET /processes/{processId}/questions/{questionId}` — choices,
-   * `ballotProtocol`, synced status and eligibility, census auth config and
-   * `encryptionKeys`. No API key needed.
-   *
-   * For `secretUntilTheEnd` questions, `encryptionKeys` is absent until the
-   * keykeepers publish the keys — poll until present before building an
-   * encrypted ballot.
-   *
-   * Normalized like every other question read: the wire `READY` status becomes
-   * `ONGOING`, and `metadata.choices` is folded onto each choice as
-   * `choice.meta`, so a voter-side UI gets the same extended choice info
-   * (image, description) as {@link get}.
+   * Public read of one question (`GET /processes/{id}/questions/{questionId}`).
+   * On `secretUntilTheEnd` questions `encryptionKeys` is absent until the
+   * keykeepers publish — poll until present before encrypting a ballot.
+   * Normalized like {@link get}: `READY` → `ONGOING`, choice meta folded on.
    */
   async getQuestion(processId: string, questionId: string): Promise<PublicQuestionResponse> {
     return this.fetch<PublicQuestionResponse>(`/processes/${processId}/questions/${questionId}`)
@@ -414,8 +386,7 @@ export class ElectionsClient {
   }
 
   // ─── Voter CSP surface ──────────────────────────────────────────────────────
-  // Process-scoped CSP routes. All public: the voter is identified by the CSP
-  // `authToken`, never by an API key.
+  // Public: the voter is identified by their `authToken`, never by an API key.
 
   /**
    * Auth step 0 — identify the participant. Returns a token; for auth-only
@@ -530,10 +501,8 @@ export class ElectionsClient {
   }
 
   /**
-   * Consumed-address / sign-info via `POST /processes/{processId}/sign-info`:
-   * per-question address, nullifier and timestamp for the questions the voter
-   * has already cast (others are omitted). Requires the voter's verified CSP
-   * `authToken`.
+   * Address, nullifier and timestamp per question the voter already cast
+   * (others omitted). Needs the voter's verified CSP `authToken`.
    */
   async signInfo(processId: string, body: ConsumedAddressRequest): Promise<ProcessSignInfoResponse> {
     return this.fetch<ProcessSignInfoResponse>(`/processes/${processId}/sign-info`, {
@@ -573,16 +542,9 @@ export class ElectionsClient {
 }
 
 /**
- * @deprecated Renamed to {@link ElectionsClient}, which it now aliases exactly
- * (`ProcessesCspClient === ElectionsClient`). The voter CSP methods were merged
- * into `ElectionsClient` because both classes always wrapped the same
- * `/processes/{id}` resource through the same fetcher, and two methods were
- * duplicated verbatim between them. Import `ElectionsClient` instead — this
- * alias will be REMOVED IN THE NEXT MAJOR VERSION.
+ * @deprecated The voter CSP methods were merged into {@link ElectionsClient},
+ * which this now aliases exactly. Removed in the next major version.
  */
 export const ProcessesCspClient = ElectionsClient
-/**
- * @deprecated Renamed to {@link ElectionsClient} — this alias will be REMOVED
- * IN THE NEXT MAJOR VERSION.
- */
+/** @deprecated Use {@link ElectionsClient}. Removed in the next major version. */
 export type ProcessesCspClient = ElectionsClient

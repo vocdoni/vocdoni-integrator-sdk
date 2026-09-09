@@ -18,20 +18,11 @@ async function resolveToken(
 }
 
 export class VocdoniApiClient {
-  /**
-   * The `/processes` resource in full: public process/question/results reads,
-   * the authenticated authoring writes (create, publish, census, status), the
-   * voter CSP flow (auth, check, sign, blind sign, weight) and the vote relay.
-   */
+  /** The whole `/processes` resource: reads, authoring, voter CSP, vote relay. */
   readonly elections: ElectionsClient
   /**
    * @deprecated Alias of {@link elections} — the very same instance, so every
-   * call keeps working unchanged. The voter CSP client was merged into
-   * {@link ElectionsClient}: both always wrapped the same `/processes/{id}`
-   * resource through this same fetcher (identical auth behaviour), two methods
-   * were duplicated verbatim between them, and the "admin vs voter" split they
-   * claimed never held — an API-key-less voter app called both. Migrate to
-   * `client.elections`; this alias will be REMOVED IN THE NEXT MAJOR VERSION.
+   * call keeps working. Removed in the next major version.
    */
   readonly processes: ElectionsClient
   readonly organizations: OrganizationsClient
@@ -59,8 +50,7 @@ export class VocdoniApiClient {
 
     this.fetch = fetcher
     this.elections = new ElectionsClient(fetcher)
-    // Same instance, not a second client: see the `processes` docblock above.
-    this.processes = this.elections
+    this.processes = this.elections // deprecated alias, not a second client
     this.organizations = new OrganizationsClient(fetcher)
     this.census = new CensusClient(fetcher)
     this.auth = new AuthClient(fetcher)
