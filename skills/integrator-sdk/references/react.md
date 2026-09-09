@@ -4,7 +4,7 @@ Two packages that work together. `react-providers` is the headless logic layer (
 
 The voter flow is process-scoped and lives in ONE provider: `ElectionProvider`
 fetches the voting process, drives the per-question vote AND holds the voter's
-CSP auth session (`client.processes`). `useElection()` exposes everything;
+CSP auth session (`client.elections`). `useElection()` exposes everything;
 `useElectionAuth()` exposes just the session (for auth-only widgets that
 shouldn't re-render on data/results updates). Query keys are exported as
 `electionQueryKeys` for cache pre-seeding/invalidation.

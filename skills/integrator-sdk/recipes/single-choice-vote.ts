@@ -20,8 +20,8 @@
  * The whole flow needs NO API key: the process read (`client.elections.get`)
  * is public for published processes (drafts 404 to non-managers) and provides
  * everything the voter app needs — the chainId vote signatures are bound to,
- * the census auth shape, and the questions. The CSP flow lives on
- * `client.processes` (ProcessesCspClient).
+ * the census auth shape, and the questions. The CSP flow lives on the same
+ * `client.elections` (ElectionsClient).
  *
  * Prerequisites:
  *   pnpm add @vocdoni/api-client @vocdoni/api-voting @vocdoni/ballot
@@ -62,7 +62,7 @@ const CENSUS_HAS_2FA = (election.census.twoFaFields?.length ?? 0) > 0
 // ─── 1. Auth (auth-only census — no 2FA step) ────────────────────────────────
 // One auth token is obtained once and reused for every question in the process.
 
-const res0 = await client.processes.authStep0(PROCESS_ID, VOTER)
+const res0 = await client.elections.authStep0(PROCESS_ID, VOTER)
 if (!res0.authToken) throw new Error('Auth step 0 did not return a token')
 
 let authToken = res0.authToken
@@ -70,7 +70,7 @@ let authToken = res0.authToken
 if (CENSUS_HAS_2FA) {
   // Prompt for OTP here (SMS / email / TOTP)
   const otp = await promptForOtp() // your UI
-  const res1 = await client.processes.authStep1(PROCESS_ID, { authToken, authData: [otp] })
+  const res1 = await client.elections.authStep1(PROCESS_ID, { authToken, authData: [otp] })
   authToken = res1.authToken ?? authToken
 }
 
@@ -78,7 +78,7 @@ if (CENSUS_HAS_2FA) {
 // The process check reports every question at once — including each question's
 // id and its on-chain Vochain id (upstreamId).
 
-const check = await client.processes.check(PROCESS_ID, { authToken })
+const check = await client.elections.check(PROCESS_ID, { authToken })
 if (!check.belongsToProcess) throw new Error('Voter is not in this census')
 
 // ─── 3-7. Read, sign, build, relay and poll — once per question ──────────────
@@ -106,14 +106,14 @@ for (const status of check.questions) {
   // Public single-question read — title, choices, ballotProtocol; no API key.
   // (The same data is already in `election.questions` from step 0 — re-reading
   // here just demonstrates the single-question route.)
-  const question = await client.processes.getQuestion(PROCESS_ID, status.questionId)
+  const question = await client.elections.getQuestion(PROCESS_ID, status.questionId)
   console.log(`Question ${question.id}: ${text(question.title)}`)
   for (const [ci, c] of question.choices.entries()) {
     console.log(`  [${ci}] ${text(c.title)}`)
   }
 
   const signer = new EphemeralSigner()
-  const { signature, weight } = await client.processes.sign(PROCESS_ID, {
+  const { signature, weight } = await client.elections.sign(PROCESS_ID, {
     authToken,
     electionId: processId, // the QUESTION's vochain id (upstreamId), not PROCESS_ID
     payload: signer.address,

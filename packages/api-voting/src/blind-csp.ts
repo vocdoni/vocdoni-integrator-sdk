@@ -22,11 +22,29 @@ import { encodeCaBundle } from './vote-transaction'
  * `VocdoniApiClient` satisfies it structurally, mirroring
  * {@link VoteApiClient} — api-voting never imports api-client.
  */
-export interface BlindCspApiClient {
-  processes: {
-    blindPoint(processId: string, body: BlindPointRequest): Promise<BlindPointResponse>
-    blindSign(processId: string, body: BlindSignRequest): Promise<BlindSignResponse>
+export interface BlindCspEndpoints {
+  blindPoint(processId: string, body: BlindPointRequest): Promise<BlindPointResponse>
+  blindSign(processId: string, body: BlindSignRequest): Promise<BlindSignResponse>
+}
+
+/**
+ * Either key satisfies it. `elections` is the current one; `processes` is the
+ * pre-merge name, kept working for hand-rolled clients written against
+ * api-client 2.x and REMOVED IN THE NEXT MAJOR VERSION. A real
+ * `VocdoniApiClient` carries both (they are the same object), so it matches
+ * either way — only a custom object has to pick.
+ */
+export type BlindCspApiClient =
+  | { elections: BlindCspEndpoints; processes?: BlindCspEndpoints }
+  | { processes: BlindCspEndpoints; elections?: BlindCspEndpoints }
+
+/** Resolve the CSP endpoints from whichever key the caller supplied. */
+function cspEndpoints(client: BlindCspApiClient): BlindCspEndpoints {
+  const endpoints = client.elections ?? client.processes
+  if (!endpoints) {
+    throw new Error('BlindCspApiClient must expose `elections` (or the deprecated `processes`)')
   }
+  return endpoints
 }
 
 /** One question to be blind-signed. */
@@ -92,7 +110,7 @@ export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Pro
   const { processId, authToken, ballots, client } = opts
   if (ballots.length === 0) return []
 
-  const { points } = await client.processes.blindPoint(processId, {
+  const { points } = await cspEndpoints(client).blindPoint(processId, {
     authToken,
     electionIds: ballots.map((b) => b.upstreamId),
   })
@@ -156,7 +174,7 @@ export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Pro
   }
 
   if (toSign.length > 0) {
-    const { signatures } = await client.processes.blindSign(processId, { authToken, ballots: toSign })
+    const { signatures } = await cspEndpoints(client).blindSign(processId, { authToken, ballots: toSign })
     for (const signed of signatures) {
       const secret = secrets.get(signed.upstreamId)
       if (!secret) continue

@@ -452,7 +452,7 @@ you pass `encryptionKeys`; you don't call `BallotEncryptor` directly.
 ```ts
 // Public single-question read — no API key needed, so the voter app can call it.
 // (chainId is not here — read it off the public process read, elections.get.)
-const question = await client.processes.getQuestion(processMongoId, questionId)
+const question = await client.elections.getQuestion(processMongoId, questionId)
 // question.secretUntilTheEnd === true
 // question.encryptionKeys — the keys; may be absent right after publish (see below)
 
@@ -601,5 +601,5 @@ const opened = BallotEncryptor.open(sealed, recipientPk, recipientSk)
 ## Cross-references
 
 - [[integrator-sdk]] — overview and vote flow sequence
-- [[client]] — `ProcessesCspClient` (auth, check, sign), `JobsClient` (waitFor), `ElectionsClient` (vote relay)
+- [[client]] — `ElectionsClient` (auth, check, sign, vote relay), `JobsClient` (waitFor)
 - [[react]] — `useElection().vote()` automates this entire flow in React

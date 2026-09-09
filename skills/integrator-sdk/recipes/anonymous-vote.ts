@@ -54,17 +54,17 @@ const CHAIN_ID = election.chainId
 
 // ─── 1-2. Auth + check (unchanged by anonymity) ──────────────────────────────
 
-const res0 = await client.processes.authStep0(PROCESS_ID, VOTER)
+const res0 = await client.elections.authStep0(PROCESS_ID, VOTER)
 if (!res0.authToken) throw new Error('Auth step 0 did not return a token')
 let authToken = res0.authToken
 
 if ((election.census.twoFaFields?.length ?? 0) > 0) {
   const otp = await promptForOtp() // your UI
-  const res1 = await client.processes.authStep1(PROCESS_ID, { authToken, authData: [otp] })
+  const res1 = await client.elections.authStep1(PROCESS_ID, { authToken, authData: [otp] })
   authToken = res1.authToken ?? authToken
 }
 
-const check = await client.processes.check(PROCESS_ID, { authToken })
+const check = await client.elections.check(PROCESS_ID, { authToken })
 if (!check.belongsToProcess) throw new Error('Voter is not in this census')
 
 const votable = check.questions.filter((q) => q.canVote && !q.hasVoted && q.upstreamId)
@@ -108,7 +108,7 @@ for (const [i, result] of signed.entries()) {
     continue
   }
 
-  const question = await client.processes.getQuestion(PROCESS_ID, status.questionId)
+  const question = await client.elections.getQuestion(PROCESS_ID, status.questionId)
   const choices = encodeQuestionBallot(question, [CHOSEN_OPTION_BY_QUESTION[question.id] ?? 0])
 
   const jobId = await voting.vote({

@@ -481,7 +481,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
         // readable through the public single-question route — including, for
         // secret questions, the encryption keys the ballot is sealed with.
         for (const q of info.questions) {
-          const pub = await voterClient.processes.getQuestion(draftId, q.id)
+          const pub = await voterClient.elections.getQuestion(draftId, q.id)
           expect(pub.id).toBe(q.id)
           expect(pub.upstreamId).toBe(q.upstreamId)
           expect(pub.choices.length, `${d.label} public question has no choices`).toBeGreaterThan(0)
@@ -583,10 +583,10 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       const questionCount = processes.reduce((n, p) => n + p.questions.length, 0)
       for (const memberNumber of VOTERS) {
         for (const p of processes) {
-          const auth = await voterClient.processes.authStep0(p.draftId, { memberNumber })
+          const auth = await voterClient.elections.authStep0(p.draftId, { memberNumber })
           expect(auth.authToken, `auth failed (member ${memberNumber}, ${p.label})`).toBeTruthy()
 
-          const check = await voterClient.processes.check(p.draftId, { authToken: auth.authToken! })
+          const check = await voterClient.elections.check(p.draftId, { authToken: auth.authToken! })
           expect(check.belongsToProcess, `member ${memberNumber} not in census (${p.label})`).toBe(
             true,
           )
@@ -624,7 +624,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
                 ballots,
               })
             : (
-                await voterClient.processes.signBatch(p.draftId, {
+                await voterClient.elections.signBatch(p.draftId, {
                   authToken: auth.authToken!,
                   ballots,
                 })
@@ -676,8 +676,8 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       // anonymous voter ever learns them. A non-anonymous process still reports
       // both, so this is a real difference and not an empty response.
       for (const p of processes) {
-        const auth = await voterClient.processes.authStep0(p.draftId, { memberNumber: VOTERS[0] })
-        const info = await voterClient.processes.signInfo(p.draftId, { authToken: auth.authToken! })
+        const auth = await voterClient.elections.authStep0(p.draftId, { memberNumber: VOTERS[0] })
+        const info = await voterClient.elections.signInfo(p.draftId, { authToken: auth.authToken! })
         expect(info.consumed.length, `sign-info reports nothing consumed (${p.label})`).toBe(
           p.questions.length,
         )
@@ -822,7 +822,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
           ).toEqual(expected)
 
           const pubQ = await pollUntil(
-            () => voterClient.processes.getQuestion(p.draftId, q.id),
+            () => voterClient.elections.getQuestion(p.draftId, q.id),
             (pq) => (pq.results?.voteCount ?? 0) >= VOTES_PER_QUESTION,
           )
           expect(

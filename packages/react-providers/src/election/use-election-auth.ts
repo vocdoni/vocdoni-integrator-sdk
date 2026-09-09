@@ -126,7 +126,7 @@ export function useVoterSession(
       // and misreading an auth-only census as 2FA would strand the verified
       // step-0 token in `pendingToken` with no auth1 challenge to redeem it.
       if (!id || !process) throw new Error('Election is not loaded yet — cannot authenticate')
-      const res = await client.processes.authStep0(id, participant)
+      const res = await client.elections.authStep0(id, participant)
       if (!res.authToken) throw new Error('Process auth step 0 did not return a token')
       if (isAuthOnly) {
         // No challenge step: the step-0 token is already verified.
@@ -144,7 +144,7 @@ export function useVoterSession(
       if (!id) throw new Error('Election is not loaded yet — cannot authenticate')
       if (!pendingToken) throw new Error('Must complete auth step 0 first')
       const authData = Array.isArray(solution) ? solution : [solution]
-      const res = await client.processes.authStep1(id, { authToken: pendingToken, authData })
+      const res = await client.elections.authStep1(id, { authToken: pendingToken, authData })
       setAuthToken(res.authToken ?? pendingToken)
       if (res.weight) setWeight(parseWeight(res.weight))
     },
@@ -156,14 +156,14 @@ export function useVoterSession(
       if (!id) throw new Error('Election is not loaded yet — cannot authenticate')
       const token = pendingToken ?? authToken
       if (!token) throw new Error('No pending auth token to resend')
-      await client.processes.resend(id, { authToken: token, ...contact })
+      await client.elections.resend(id, { authToken: token, ...contact })
     },
     [client, id, pendingToken, authToken],
   )
 
   const check = useCallback(async () => {
     if (!id || !authToken) throw new Error('Must authenticate before checking membership')
-    const res = await client.processes.check(id, { authToken })
+    const res = await client.elections.check(id, { authToken })
     if (res.weight) setWeight(parseWeight(res.weight))
     return res
   }, [client, id, authToken])
@@ -177,7 +177,7 @@ export function useVoterSession(
       if (process?.census?.anonymous) {
         throw new Error('This process has an anonymous census — use signBatch(), which blind-signs')
       }
-      const res = await client.processes.sign(id, { authToken, electionId, payload: address })
+      const res = await client.elections.sign(id, { authToken, electionId, payload: address })
       if (!res.signature) throw new Error('Process sign did not return a signature')
       return { signature: res.signature, weight: res.weight }
     },
@@ -207,7 +207,7 @@ export function useVoterSession(
         return results.map(({ upstreamId, ...rest }) => ({ electionId: upstreamId, ...rest }))
       }
 
-      const res = await client.processes.signBatch(id, {
+      const res = await client.elections.signBatch(id, {
         authToken,
         ballots: ballots.map((b) => ({ upstreamId: b.electionId, address: b.address })),
       })

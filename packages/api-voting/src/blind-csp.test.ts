@@ -49,7 +49,7 @@ function fakeCsp(
     mod(d + salt(fromHex(electionId), BigInt(`0x${weightOf(electionId)}`)), N)
 
   const client: BlindCspApiClient = {
-    processes: {
+    elections: {
       blindPoint: vi.fn(async (_processId: string, body: BlindPointRequest) => ({
         points: body.electionIds.map((electionId) => {
           const code = options.pointCodes?.[electionId]
@@ -93,6 +93,26 @@ function bundleOnChain(txPayload: string): Uint8Array {
 }
 
 describe('signBlindCspBallots', () => {
+  it('still accepts a client keyed by the deprecated `processes` name', async () => {
+    const csp = fakeCsp()
+    const signer = new EphemeralSigner()
+    // A hand-rolled client written against api-client 2.x, before the CSP
+    // methods were merged into `elections`. It must keep working until the
+    // next major.
+    const legacy = { processes: csp.client.elections! }
+
+    const results = await signBlindCspBallots({
+      processId: PROCESS_ID,
+      authToken: AUTH_TOKEN,
+      client: legacy,
+      ballots: [{ upstreamId: ELECTION_A, address: signer.address }],
+    })
+
+    expect(results).toHaveLength(1)
+    expect(results[0].code).toBeUndefined()
+    expect(fromHex(results[0].signature!).length).toBe(96)
+  })
+
   it('returns signatures the salted census key verifies, over the bundle that goes on chain', async () => {
     const csp = fakeCsp({ weights: { [ELECTION_A]: '01', [ELECTION_B]: '2a' } })
     const signers = [new EphemeralSigner(), new EphemeralSigner()]
@@ -142,7 +162,7 @@ describe('signBlindCspBallots', () => {
   it('is a no-op for an empty ballot list', async () => {
     const csp = fakeCsp()
     expect(await signBlindCspBallots({ processId: PROCESS_ID, authToken: AUTH_TOKEN, client: csp.client, ballots: [] })).toEqual([])
-    expect(csp.client.processes.blindPoint).not.toHaveBeenCalled()
+    expect(csp.client.elections.blindPoint).not.toHaveBeenCalled()
   })
 
   it('reports a round-1 failure and never sends that election to round 2', async () => {
@@ -160,7 +180,7 @@ describe('signBlindCspBallots', () => {
     expect(results[0]).toMatchObject({ upstreamId: ELECTION_A, code: 'already_consumed' })
     expect(results[0].signature).toBeUndefined()
     expect(results[1].signature).toBeDefined()
-    expect(csp.client.processes.blindSign).toHaveBeenCalledWith(
+    expect(csp.client.elections.blindSign).toHaveBeenCalledWith(
       PROCESS_ID,
       expect.objectContaining({ ballots: [expect.objectContaining({ upstreamId: ELECTION_B })] })
     )
@@ -185,7 +205,7 @@ describe('signBlindCspBallots', () => {
 
   it('never reports an election the CSP silently dropped as signed', async () => {
     const csp = fakeCsp()
-    csp.client.processes.blindSign = vi.fn(async () => ({ signatures: [] }))
+    csp.client.elections.blindSign = vi.fn(async () => ({ signatures: [] }))
     const [result] = await signBlindCspBallots({
       processId: PROCESS_ID,
       authToken: AUTH_TOKEN,
@@ -216,7 +236,7 @@ describe('signBlindCspBallots', () => {
     expect(results[0].error).toMatch(/could not blind/)
     expect(results[1].signature).toBeDefined()
     // ...and A was never sent to round 2, so its nonce is untouched.
-    expect(csp.client.processes.blindSign).toHaveBeenCalledWith(
+    expect(csp.client.elections.blindSign).toHaveBeenCalledWith(
       PROCESS_ID,
       expect.objectContaining({ ballots: [expect.objectContaining({ upstreamId: ELECTION_B })] })
     )
@@ -239,7 +259,7 @@ describe('signBlindCspBallots', () => {
     expect(results[0].signature).toBeUndefined()
     expect(results[0].error).toMatch(/no weight/)
     expect(results[1].signature).toBeDefined()
-    expect(csp.client.processes.blindSign).toHaveBeenCalledWith(
+    expect(csp.client.elections.blindSign).toHaveBeenCalledWith(
       PROCESS_ID,
       expect.objectContaining({ ballots: [expect.objectContaining({ upstreamId: ELECTION_B })] })
     )
@@ -253,7 +273,7 @@ describe('signBlindCspBallots', () => {
       client: csp.client,
       ballots: [{ upstreamId: ELECTION_A, address: new EphemeralSigner().address }],
     })
-    const [, body] = vi.mocked(csp.client.processes.blindSign).mock.calls[0]
+    const [, body] = vi.mocked(csp.client.elections.blindSign).mock.calls[0]
     expect(fromHex(body.ballots[0].blindedMessage).length).toBe(32)
   })
 })

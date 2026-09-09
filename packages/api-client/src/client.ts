@@ -7,7 +7,6 @@ import { ElectionsClient } from './elections'
 import { handleError } from './errors'
 import { JobsClient } from './jobs'
 import { OrganizationsClient } from './organizations'
-import { ProcessesCspClient } from './processes'
 
 async function resolveToken(
   authToken: ApiClientConfig['authToken'],
@@ -19,10 +18,22 @@ async function resolveToken(
 }
 
 export class VocdoniApiClient {
-  /** Admin surface of `/processes` (create, publish, census, status). */
+  /**
+   * The `/processes` resource in full: public process/question/results reads,
+   * the authenticated authoring writes (create, publish, census, status), the
+   * voter CSP flow (auth, check, sign, blind sign, weight) and the vote relay.
+   */
   readonly elections: ElectionsClient
-  /** Voter CSP surface of `/processes` (auth, check, sign, weight). */
-  readonly processes: ProcessesCspClient
+  /**
+   * @deprecated Alias of {@link elections} — the very same instance, so every
+   * call keeps working unchanged. The voter CSP client was merged into
+   * {@link ElectionsClient}: both always wrapped the same `/processes/{id}`
+   * resource through this same fetcher (identical auth behaviour), two methods
+   * were duplicated verbatim between them, and the "admin vs voter" split they
+   * claimed never held — an API-key-less voter app called both. Migrate to
+   * `client.elections`; this alias will be REMOVED IN THE NEXT MAJOR VERSION.
+   */
+  readonly processes: ElectionsClient
   readonly organizations: OrganizationsClient
   readonly census: CensusClient
   readonly auth: AuthClient
@@ -48,7 +59,8 @@ export class VocdoniApiClient {
 
     this.fetch = fetcher
     this.elections = new ElectionsClient(fetcher)
-    this.processes = new ProcessesCspClient(fetcher)
+    // Same instance, not a second client: see the `processes` docblock above.
+    this.processes = this.elections
     this.organizations = new OrganizationsClient(fetcher)
     this.census = new CensusClient(fetcher)
     this.auth = new AuthClient(fetcher)
