@@ -1,8 +1,14 @@
 {
   "extends": "./library.json",
+  // Resolved relative to this file, so every react package picks up the
+  // jest-dom matcher augmentation without duplicating it.
+  "files": ["./jest-dom-vitest.d.ts"],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ESNext"],
     "jsx": "react-jsx",
-    "types": ["vitest/globals", "@testing-library/jest-dom"]
+    // "@testing-library/jest-dom" is intentionally absent: its root types entry
+    // augments the *jest* namespace (and references @types/jest, which this repo
+    // does not install). jest-dom-vitest.d.ts supplies the vitest augmentation.
+    "types": ["vitest/globals"]
   }
 }

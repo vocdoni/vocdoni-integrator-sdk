@@ -1,4 +1,4 @@
-import '@testing-library/jest-dom'
+import '@testing-library/jest-dom/vitest'
 import { TextDecoder, TextEncoder } from 'node:util'
 import { mockBatchJobs } from './mocks/handlers'
 import { server } from './mocks/server'
