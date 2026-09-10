@@ -21,9 +21,9 @@ the zero-knowledge machinery: secret identity keys (SIK), nullifiers, census pro
 Groth16 proof generation.
 
 It is ported from the Vocdoni SDK's `AnonymousService` / `ZkAPI` and adapted to the App
-SDK's functional, tree-shakeable paradigm. The heavy dependencies (`snarkjs`,
-`circomlibjs`) are isolated in this package, so they are only ever loaded by apps that
-actually use anonymous voting.
+SDK's functional, tree-shakeable paradigm. The heavy proving dependency (`snarkjs`) is
+isolated in this package, so it is only ever loaded by apps that actually use anonymous
+voting.
 
 What it provides:
 

@@ -1,6 +1,6 @@
 # Reference: @vocdoni/api-voting-zk
 
-ZK-SNARK (Groth16) anonymous-voting primitives for the Vocdoni SaaS API, ported from the Vocdoni SDK's `AnonymousService` / `ZkAPI` and adapted to the SDK's functional, tree-shakeable paradigm. The heavy proving dependencies (`snarkjs`, `circomlibjs`) live only in this package, so they never load unless anonymous voting is used.
+ZK-SNARK (Groth16) anonymous-voting primitives for the Vocdoni SaaS API, ported from the Vocdoni SDK's `AnonymousService` / `ZkAPI` and adapted to the SDK's functional, tree-shakeable paradigm. The heavy proving dependency (`snarkjs`) lives only in this package, so it never loads unless anonymous voting is used.
 
 A voter derives a **SIK** (Secret Identity Key) from a wallet signature, registers it on chain, then proves census membership with a Groth16 proof instead of revealing an address. The SIK tree and its membership proof come from a **Vochain gateway**, not the SaaS API — every function in `zk-api.ts` takes a `gatewayUrl`.
 

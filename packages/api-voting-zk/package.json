@@ -47,7 +47,6 @@
     "@vocdoni/api-types": "workspace:*",
     "@vocdoni/api-voting": "workspace:*",
     "@vocdoni/proto": "1.15.14",
-    "circomlibjs": "^0.1.7",
     "snarkjs": "^0.7.5"
   },
   "devDependencies": {
