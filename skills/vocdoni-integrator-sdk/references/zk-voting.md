@@ -95,5 +95,5 @@ hexToArrayBuffer(input: string): Uint8Array
 
 ## Cross-references
 
-- [[integrator-sdk]] — overview and packages
+- [[vocdoni-integrator-sdk]] — overview and packages
 - [[voting]] — the CSP-based vote flow (plain and blind)

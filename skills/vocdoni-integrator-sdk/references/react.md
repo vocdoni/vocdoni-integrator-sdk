@@ -434,6 +434,6 @@ export function App() {
 
 ## Cross-references
 
-- [[integrator-sdk]] — provider nesting, vote flow overview
+- [[vocdoni-integrator-sdk]] — provider nesting, vote flow overview
 - [[voting]] — `VotingClient` and `choices` format details (what `useElection().vote()` calls internally)
 - [[client]] — `VocdoniApiClient` and all sub-clients

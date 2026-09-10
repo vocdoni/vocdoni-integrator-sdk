@@ -600,6 +600,6 @@ const opened = BallotEncryptor.open(sealed, recipientPk, recipientSk)
 
 ## Cross-references
 
-- [[integrator-sdk]] — overview and vote flow sequence
+- [[vocdoni-integrator-sdk]] — overview and vote flow sequence
 - [[client]] — `ElectionsClient` (auth, check, sign, vote relay), `JobsClient` (waitFor)
 - [[react]] — `useElection().vote()` automates this entire flow in React

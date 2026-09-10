@@ -569,6 +569,6 @@ Rules:
 
 ## Cross-references
 
-- [[integrator-sdk]] — vote flow overview
+- [[vocdoni-integrator-sdk]] — vote flow overview
 - [[voting]] — `buildVoteTransaction`, `VotingClient`, choices format
 - [[react]] — `ClientProvider` wraps `VocdoniApiClient` for React apps
