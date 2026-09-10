@@ -1,6 +1,6 @@
 {
   "name": "vocdoni-integrator-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reference skill for the Vocdoni Integrator SDK (@vocdoni/api-client, @vocdoni/api-voting, @vocdoni/react-providers, @vocdoni/react-components): CSP auth flow, vote relay, ballot building, and React integration, with copy-pasteable recipes.",
   "author": {
     "name": "Vocdoni",

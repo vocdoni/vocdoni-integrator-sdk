@@ -2,7 +2,7 @@
 
 ## Skills Maintenance
 
-This repo ships a Claude Code skill at `skills/integrator-sdk/` (and its `references/` and `recipes/` subdirs). The skill is consumed by the `@vocdoni/skills` marketplace — users install it from there and Claude Code loads it as live guidance.
+This repo ships a Claude Code skill at `skills/vocdoni-integrator-sdk/` (and its `references/` and `recipes/` subdirs). The skill is consumed by the `@vocdoni/skills` marketplace — users install it from there and Claude Code loads it as live guidance.
 
 **Rule: any PR that adds or changes public API surface must either update the skill or include a brief note in the PR explaining why it's not worth documenting (e.g. internal, unstable, trivial).**
 
