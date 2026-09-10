@@ -1,5 +1,14 @@
 # @vocdoni/api-voting-zk
 
+## 1.0.1
+
+### Patch Changes
+
+- c5e803d: Remove the now-unused `circomlibjs` dependency. Poseidon hashing moved to `@noble/curves` in the previous release and nothing imports `circomlibjs` any more, but it was still declared in `package.json` and therefore still installed by every consumer. Dropping it prunes 57 packages from the install tree; no runtime behaviour changes.
+- a088d8b: Replace the `circomlibjs` Poseidon hash with an equivalent built on `@noble/curves`. Output is bit-for-bit identical (pinned by regression tests against circomlibjs reference vectors) and the built output no longer imports `circomlibjs` at runtime. `circomlibjs` remains listed in `package.json` but is no longer imported.
+- Updated dependencies [49e57c8]
+  - @vocdoni/api-voting@1.2.0
+
 ## 1.0.0
 
 ### Major Changes
