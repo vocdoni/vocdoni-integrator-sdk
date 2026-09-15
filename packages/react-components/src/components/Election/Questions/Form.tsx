@@ -6,6 +6,7 @@ import { useConfirm } from '../../../confirm/useConfirm'
 import { useReactComponentsLocalize } from '../../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
 import { QuestionsConfirmation } from './Confirmation'
+import { describeVoteError } from './vote-error'
 
 export type QuestionsFormContextState = {
   fmethods: UseFormReturn<any>
@@ -103,7 +104,22 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       return typeof raw === 'string' && raw !== '' ? raw : undefined
     })
 
-    return memos.some((m) => m !== undefined) ? baseVote(encodedBallots, memos) : baseVote(encodedBallots)
+    // Cast, and report a failure where the voter can see it. Everything from
+    // here on is the chain's verdict, relayed verbatim by the backend: a
+    // process that is not open yet, a stale census proof, an envelope the
+    // scrutinizer refuses. Letting it escape leaves `handleSubmit`'s promise
+    // rejected with nobody awaiting it — the vote is discarded and the page
+    // says nothing, which is how votes cast before the start went unnoticed
+    // (integrator-sdk#53). Mirrors the encode branch above: record the reason
+    // as a form-level error and report "did not vote" to the caller.
+    try {
+      return memos.some((m) => m !== undefined)
+        ? await baseVote(encodedBallots, memos)
+        : await baseVote(encodedBallots)
+    } catch (error) {
+      fmethods.setError('root.vote', { type: 'vote', message: describeVoteError(error, t) })
+      return false
+    }
   }
 
   useEffect(() => {

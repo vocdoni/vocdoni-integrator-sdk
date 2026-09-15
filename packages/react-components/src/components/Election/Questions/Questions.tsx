@@ -43,12 +43,18 @@ const QuestionsFormContents = ({ onInvalid }: { onInvalid?: (errors: unknown) =>
     return <QuestionsEmpty text={t('empty')} />
   }
 
+  // Why the cast failed, set by the form's vote handler. Form-level rather
+  // than per-field: the chain rejects the batch, not one answer. RHF clears
+  // `root` errors when the form is submitted again, so a retry starts clean.
+  const voteError = fmethods.formState.errors.root?.vote?.message
+
   return (
     <form onSubmit={fmethods.handleSubmit(vote, onInvalid)} id={`election-questions-${election!.id}`}>
       <Voted />
       {questions.map((question, index) => (
         <ElectionQuestion key={index} index={index.toString()} question={question} />
       ))}
+      {voteError ? <QuestionsError error={String(voteError)} variant='form' /> : null}
     </form>
   )
 }
