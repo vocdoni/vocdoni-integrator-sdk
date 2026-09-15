@@ -17,18 +17,14 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import {
-  computeProcessStatus,
-  JobFailedError,
-  normalizeVotingProcess,
-  VocdoniApiError,
-} from '@vocdoni/api-client'
+import { JobFailedError, normalizeVotingProcess, VocdoniApiError } from '@vocdoni/api-client'
 import { useClient } from '../client/ClientProvider'
 import {
   ElectionAuthContext,
   useVoterSession,
   type ElectionAuthContextValue,
 } from './use-election-auth'
+import { useProcessStatus } from './use-process-status'
 
 /**
  * Query keys the election provider reads through. Exported so consumers can
@@ -58,7 +54,12 @@ const MAX_VOTE_BATCH = 100
  */
 export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'clear'> {
   election: VotingProcessResponse | null
-  /** Derived process status from all question statuses. */
+  /**
+   * Derived process status from all question statuses, honouring the
+   * scheduled start: a live process whose `startDate` is still ahead reads as
+   * `UPCOMING` (the chain rejects votes until then) and flips to `ONGOING` by
+   * itself when the start passes — no refetch needed.
+   */
   status: QuestionStatus | null
   /** Vochain chain id the process's votes are signed against. */
   chainId: string | null
@@ -291,9 +292,7 @@ export function ElectionProvider({
 
   const chainId = election?.chainId ?? null
 
-  const status: QuestionStatus | null = election
-    ? computeProcessStatus(election.questions)
-    : null
+  const status = useProcessStatus(election)
 
   const [voteId, setVoteId] = useState<string | null>(null)
   const [voteIds, setVoteIds] = useState<Record<string, string>>({})

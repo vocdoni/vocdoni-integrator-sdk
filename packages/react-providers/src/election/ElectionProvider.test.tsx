@@ -910,6 +910,27 @@ describe('ElectionProvider', () => {
     expect(fetchCalls).toBe(1)
   })
 
+  it('reads a scheduled process as UPCOMING even though the wire reports its questions READY', async () => {
+    // The chain has no UPCOMING state: a published process with a future start
+    // is READY on the wire, but votes cast before the start are rejected.
+    const inAnHour = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    server.use(
+      http.get('http://localhost/processes/:id', () =>
+        HttpResponse.json({
+          ...mockProcess,
+          startDate: inAnHour,
+          questions: mockProcess.questions.map((q) => ({ ...q, status: 'READY' })),
+        }),
+      ),
+    )
+
+    const { result } = renderHook(useElection, { wrapper })
+    await waitFor(() => expect(result.current.election).not.toBeNull())
+
+    expect(result.current.election?.questions[0].status).toBe('ONGOING')
+    expect(result.current.status).toBe('UPCOMING')
+  })
+
   it('normalizes a prefetched election, so extended choice info shows on the first paint', async () => {
     // Raw wire data: extended choice info lives on the question, and the live
     // status arrives under its wire name.
