@@ -1,10 +1,11 @@
 import type { QuestionStatus } from '@vocdoni/api-types'
 import { format as dformat, formatDistance } from 'date-fns'
-import { ComponentPropsWithoutRef, useSyncExternalStore } from 'react'
+import { ComponentPropsWithoutRef } from 'react'
 import { useComponents } from '../context/useComponents'
 import { useReactComponentsLocalize } from '../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
 import { getElectionDate } from '../../election/normalized'
+import { useIsHydrationRender } from '../shared/useIsHydrationRender'
 
 export type ElectionScheduleProps = ComponentPropsWithoutRef<'p'> &
   Record<string, unknown> & {
@@ -13,13 +14,6 @@ export type ElectionScheduleProps = ComponentPropsWithoutRef<'p'> &
     showCreatedAt?: boolean
   }
 
-const subscribe = () => () => {}
-const useIsHydrationRender = () =>
-  useSyncExternalStore(
-    subscribe,
-    () => false,
-    () => true
-  )
 const formatDeterministicDate = (date: Date) => date.toISOString()
 
 export const ElectionSchedule = ({

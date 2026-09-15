@@ -98,6 +98,18 @@
     "abstain": "Abstain",
     "button": "Vote",
     "confirm": "Please confirm your choices:",
+    "disabled": {
+      "canceled": "Voting was canceled",
+      "ended": "Voting has ended",
+      "identify": "Identify first to vote",
+      "not_in_census": "You are not eligible to vote in this process",
+      "not_open": "Voting is not open",
+      "paused": "Voting is paused",
+      "upcoming": "Voting not open yet",
+      "upcoming_at": "Voting opens on {{ date }}",
+      "upcoming_date_format": "PPp",
+      "voted": "You have already voted"
+    },
     "rank_position": "#{{ position }}",
     "sign": "Sign first",
     "voted_description": "Your vote id is {{ id }}. You can use it to verify your vote.",
