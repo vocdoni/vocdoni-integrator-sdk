@@ -7,6 +7,7 @@ import type {
 import {
   computeProcessStatus,
   hasResults,
+  isBeforeStart,
   isLive,
   isSecretUntilTheEnd,
   isUpcoming,
@@ -172,6 +173,80 @@ describe('computeProcessStatus', () => {
     expect(computeProcessStatus([q('UPCOMING'), q('PAUSED')])).toBe('PROCESS_UNKNOWN')
     // ENDED+CANCELED: CANCELED is terminal but not ENDED/RESULTS, so the mix is unresolvable
     expect(computeProcessStatus([q('ENDED'), q('CANCELED')])).toBe('PROCESS_UNKNOWN')
+  })
+})
+
+describe('computeProcessStatus with startDate (scheduled processes)', () => {
+  // The backend reports a scheduled-but-not-started question as READY (the
+  // chain has no UPCOMING state), yet the chain rejects votes until the start.
+  const now = new Date('2026-09-15T12:00:00Z')
+  const future = '2026-09-29T09:00:00Z'
+  const past = '2026-09-01T09:00:00Z'
+
+  it('reads a live question as UPCOMING while the start date is ahead', () => {
+    expect(computeProcessStatus([q(READY)], { startDate: future, now })).toBe('UPCOMING')
+    expect(computeProcessStatus([q('ONGOING'), q('ONGOING')], { startDate: future, now })).toBe('UPCOMING')
+    expect(computeProcessStatus([q(READY)], { startDate: new Date(future), now })).toBe('UPCOMING')
+  })
+
+  it('reads a live question as ONGOING once the start date has passed', () => {
+    expect(computeProcessStatus([q(READY)], { startDate: past, now })).toBe('ONGOING')
+    // Exactly at the start instant voting is open.
+    expect(computeProcessStatus([q(READY)], { startDate: now.toISOString(), now })).toBe('ONGOING')
+  })
+
+  it('leaves non-live statuses untouched before the start', () => {
+    expect(computeProcessStatus([q('PAUSED'), q('PAUSED')], { startDate: future, now })).toBe('PAUSED')
+    expect(computeProcessStatus([q('CANCELED')], { startDate: future, now })).toBe('CANCELED')
+    expect(computeProcessStatus([q('ENDED'), q('RESULTS')], { startDate: future, now })).toBe('ENDED')
+  })
+
+  it('does not let a live question win the mix while before the start', () => {
+    // Rule 1 (any ONGOING wins) must not apply to a question that is really
+    // UPCOMING — otherwise the mix would read as votable.
+    expect(computeProcessStatus([q(READY), q('PAUSED')], { startDate: future, now })).toBe('PROCESS_UNKNOWN')
+  })
+
+  it('treats a missing or unparseable start date as already started', () => {
+    expect(computeProcessStatus([q(READY)], { startDate: undefined, now })).toBe('ONGOING')
+    expect(computeProcessStatus([q(READY)], { startDate: null, now })).toBe('ONGOING')
+    expect(computeProcessStatus([q(READY)], { startDate: '', now })).toBe('ONGOING')
+    expect(computeProcessStatus([q(READY)], { startDate: 'not a date', now })).toBe('ONGOING')
+  })
+
+  it('defaults `now` to the current time', () => {
+    const inAnHour = new Date(Date.now() + 60 * 60 * 1000).toISOString()
+    const anHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+    expect(computeProcessStatus([q(READY)], { startDate: inAnHour })).toBe('UPCOMING')
+    expect(computeProcessStatus([q(READY)], { startDate: anHourAgo })).toBe('ONGOING')
+  })
+
+  it('isLive / isUpcoming honour the process start date', () => {
+    const scheduled: VotingProcessResponse = { ...base, startDate: future, questions: [q(READY)] }
+    expect(isLive(scheduled, now)).toBe(false)
+    expect(isUpcoming(scheduled, now)).toBe(true)
+    // Past the start, the same process is live.
+    const later = new Date('2026-09-29T09:00:01Z')
+    expect(isLive(scheduled, later)).toBe(true)
+    expect(isUpcoming(scheduled, later)).toBe(false)
+  })
+})
+
+describe('isBeforeStart', () => {
+  const now = new Date('2026-09-15T12:00:00Z')
+
+  it('is true only for a parseable start after now', () => {
+    expect(isBeforeStart('2026-09-16T12:00:00Z', now)).toBe(true)
+    expect(isBeforeStart(new Date('2026-09-16T12:00:00Z'), now)).toBe(true)
+    expect(isBeforeStart('2026-09-15T12:00:00Z', now)).toBe(false)
+    expect(isBeforeStart('2026-09-14T12:00:00Z', now)).toBe(false)
+  })
+
+  it('is false for missing or unparseable dates', () => {
+    expect(isBeforeStart(undefined, now)).toBe(false)
+    expect(isBeforeStart(null, now)).toBe(false)
+    expect(isBeforeStart('', now)).toBe(false)
+    expect(isBeforeStart('garbage', now)).toBe(false)
   })
 })
 
