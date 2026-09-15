@@ -8,13 +8,18 @@ import { handleError } from './errors'
 import { JobsClient } from './jobs'
 import { OrganizationsClient } from './organizations'
 
-async function resolveToken(
-  authToken: ApiClientConfig['authToken'],
+/**
+ * Config fields double as getters (sync or async) so callers can keep a live
+ * source of truth — a store, an i18n instance — instead of rebuilding the
+ * client whenever the value changes. Resolved on every request.
+ */
+async function resolveConfigValue(
+  value: ApiClientConfig['authToken'] | ApiClientConfig['lang'],
 ): Promise<string | null | undefined> {
-  if (typeof authToken === 'function') {
-    return authToken()
+  if (typeof value === 'function') {
+    return value()
   }
-  return authToken
+  return value
 }
 
 export class VocdoniApiClient {
@@ -30,13 +35,26 @@ export class VocdoniApiClient {
   readonly auth: AuthClient
   readonly jobs: JobsClient
   private readonly fetch: UpFetch
+  private readonly config: ApiClientConfig
 
   constructor(config: ApiClientConfig) {
+    // Copied, not referenced: `setLang()` mutates this object, and the caller's
+    // config is theirs, not ours. The defaults callback below reads the copy on
+    // every request, which is what makes a later `setLang()` take effect
+    // without rebuilding the fetcher.
+    this.config = { ...config }
+
     const fetcher = up(fetch, async () => {
-      const token = await resolveToken(config.authToken)
+      const [token, lang] = await Promise.all([
+        resolveConfigValue(this.config.authToken),
+        resolveConfigValue(this.config.lang),
+      ])
       return {
-        baseUrl: config.apiUrl,
+        baseUrl: this.config.apiUrl,
         headers: token ? { Authorization: `Bearer ${token}` } : {},
+        // A default param, so per-call `params` still win on a key clash —
+        // and an unset lang adds nothing to the query string at all.
+        params: lang ? { lang } : undefined,
         parseResponse: async (res) => {
           if (res.status === 204) return undefined as never
           const text = await res.text()
@@ -68,5 +86,17 @@ export class VocdoniApiClient {
    */
   async info(): Promise<InfoResponse> {
     return this.fetch<InfoResponse>('/info').catch(handleError)
+  }
+
+  /**
+   * Change the language sent with every subsequent request — the voter picked a
+   * new locale mid-session and the next OTP should follow them there.
+   *
+   * Takes the same shapes as the `lang` config field (string, sync or async
+   * getter); pass `undefined` to stop sending the param and let the backend
+   * fall back on its own. Requests already in flight keep the old value.
+   */
+  setLang(lang: ApiClientConfig['lang']): void {
+    this.config.lang = lang
   }
 }

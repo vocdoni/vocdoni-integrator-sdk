@@ -1498,4 +1498,14 @@ export interface InfoResponse {
 export interface ApiClientConfig {
   apiUrl: string
   authToken?: string | (() => string | null | undefined) | (() => Promise<string | null | undefined>)
+  /**
+   * Language for anything the backend renders on the caller's behalf — above
+   * all the OTP email/SMS sent by the CSP auth endpoints. Resolved per request
+   * and sent as a `lang` query param; leave it out (or resolve to an empty
+   * value) and the backend picks its own fallback. Like {@link authToken} it
+   * accepts a getter, so an app whose locale lives in a store can pass
+   * `lang: () => i18n.language` once instead of re-creating the client on every
+   * language switch.
+   */
+  lang?: string | (() => string | null | undefined) | (() => Promise<string | null | undefined>)
 }

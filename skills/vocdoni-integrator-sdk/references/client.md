@@ -19,6 +19,9 @@ const client = new VocdoniApiClient({
   apiUrl: 'https://saas-api.vocdoni.net',
   // Optional — string or sync/async getter; resolved and attached as Bearer on every request
   authToken: () => myStore.getToken(),
+  // Optional — same shapes; sent as ?lang= on every request so backend-rendered
+  // OTP emails/SMS come out in the voter's language
+  lang: () => i18n.language,
 })
 ```
 
@@ -28,6 +31,7 @@ const client = new VocdoniApiClient({
 |---|---|---|
 | `apiUrl` | `string` | Base URL of the SaaS API |
 | `authToken` | `string \| (() => string \| null)` \| async version | Optional; omit for public (voter) flows |
+| `lang` | `string \| (() => string \| null)` \| async version | Optional; appended as a `lang` query param on every request. Drives the language of anything the backend renders for you — above all the 2FA OTP email/SMS from `auth/0` and `auth/resend`. Unset (or resolving to an empty value) sends nothing and lets the backend fall back |
 
 Sub-clients accessed as properties:
 
@@ -44,11 +48,26 @@ client.auth         // AuthClient
 client.jobs         // JobsClient
 ```
 
-Plus one method on the client itself: `client.info()` (`GET /info`, public) →
-`{ chainId, version, goVersion }`. Careful: that `chainId` is the service's
-CURRENT Vochain chain id, not necessarily the one a given process's votes sign
-against — always prefer the process's own `chainId` from the (public)
-`elections.get()` read.
+Plus two methods on the client itself:
+
+`client.info()` (`GET /info`, public) → `{ chainId, version, goVersion }`.
+Careful: that `chainId` is the service's CURRENT Vochain chain id, not
+necessarily the one a given process's votes sign against — always prefer the
+process's own `chainId` from the (public) `elections.get()` read.
+
+`client.setLang(lang)` changes the `lang` config field after construction, for
+the voter who switches locale mid-session. It takes the same shapes as the
+config field and applies from the next request on — no need to rebuild the
+client:
+
+```ts
+client.setLang('ca')       // subsequent OTPs arrive in Catalan
+client.setLang(undefined)  // stop sending the param; backend falls back
+```
+
+A getter (`lang: () => i18n.language`) covers the same ground without any
+imperative call, so reach for `setLang()` only when the locale does not live
+somewhere the client can read on demand.
 
 ---
 
@@ -65,6 +84,11 @@ version**.
 Ids to keep straight: `processId` is the process's **Mongo id** (what
 `elections.get` takes), and `electionId` in
 `sign()` is the **question's** on-chain Vochain id (`question.upstreamId`).
+
+`authStep0` and `resend` are the calls that make the backend send the OTP email
+or SMS, so they are the ones that care about the client's `lang` setting — set
+it (or `client.setLang(...)`) before step 0 or the voter gets their code in the
+backend's fallback language, whatever the UI around them is showing.
 
 Note the full process read (`client.elections.get`) is **public** for
 published processes (saas-backend#599; drafts 404 to non-managers, and

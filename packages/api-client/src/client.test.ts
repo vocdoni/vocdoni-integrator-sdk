@@ -175,6 +175,123 @@ describe('VocdoniApiClient', () => {
     })
   })
 
+  describe('lang query param', () => {
+    // The endpoint that motivates the whole feature: auth step 0 is what makes
+    // the backend render and send the OTP email/SMS.
+    const captureAuth0Query = () => {
+      const queries: Array<URLSearchParams> = []
+      server.use(
+        http.post(`${BASE_URL}/processes/:processId/auth/0`, ({ request }) => {
+          queries.push(new URL(request.url).searchParams)
+          return HttpResponse.json({ authToken: 'csp-token' })
+        }),
+      )
+      return queries
+    }
+
+    it('sends a statically configured lang on the OTP-triggering auth step 0', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].get('lang')).toBe('ca')
+    })
+
+    it('sends no lang param at all when none is configured', async () => {
+      const queries = captureAuth0Query()
+
+      await client.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].has('lang')).toBe(false)
+      expect(queries[0].toString()).toBe('')
+    })
+
+    it('applies a lang set after construction to the next request', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      // The voter switched locale mid-session: no re-instantiation, and the
+      // change must land on the very next request.
+      langClient.setLang('es')
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].get('lang')).toBe('ca')
+      expect(queries[1].get('lang')).toBe('es')
+    })
+
+    it('stops sending the param when lang is cleared with setLang(undefined)', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      langClient.setLang(undefined)
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].has('lang')).toBe(false)
+    })
+
+    it('does not mutate the caller\'s config object when lang changes', async () => {
+      const queries = captureAuth0Query()
+      const config = { apiUrl: BASE_URL, lang: 'ca' }
+
+      const langClient = new VocdoniApiClient(config)
+      langClient.setLang('es')
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      // The new lang is live on the wire, yet the object the caller still holds
+      // (and may reuse for a second client) is untouched.
+      expect(queries[0].get('lang')).toBe('es')
+      expect(config.lang).toBe('ca')
+    })
+
+    it('resolves a lang getter per request, sync and async alike', async () => {
+      const queries: Array<URLSearchParams> = []
+      server.use(
+        http.get(`${BASE_URL}/processes/:id`, ({ request, params }) => {
+          queries.push(new URL(request.url).searchParams)
+          return HttpResponse.json({ ...mockProcess, id: params.id as string })
+        }),
+      )
+
+      // A getter is the point of the union type: the app's locale lives in a
+      // store and the client reads it fresh on every call.
+      let locale = 'ca'
+      const syncClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: () => locale })
+      await syncClient.elections.get('abc123')
+      locale = 'es'
+      await syncClient.elections.get('abc123')
+
+      const asyncClient = new VocdoniApiClient({
+        apiUrl: BASE_URL,
+        lang: async () => 'eu',
+      })
+      await asyncClient.elections.get('abc123')
+
+      expect(queries[0].get('lang')).toBe('ca')
+      expect(queries[1].get('lang')).toBe('es')
+      expect(queries[2].get('lang')).toBe('eu')
+    })
+
+    it('rides alongside per-call params instead of clobbering them', async () => {
+      const queries: Array<URLSearchParams> = []
+      server.use(
+        http.get(`${BASE_URL}/processes`, ({ request }) => {
+          queries.push(new URL(request.url).searchParams)
+          return HttpResponse.json({ processes: [], pagination: { total: 0 } })
+        }),
+      )
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      await langClient.elections.list({ orgAddress: '0xabc', published: false })
+
+      expect(queries[0].get('lang')).toBe('ca')
+      expect(queries[0].get('orgAddress')).toBe('0xabc')
+      expect(queries[0].get('published')).toBe('false')
+    })
+  })
+
   describe('auth.login', () => {
     it('returns an AuthToken on successful email/password login', async () => {
       const token = await client.auth.login('user@example.com', 'secret')
