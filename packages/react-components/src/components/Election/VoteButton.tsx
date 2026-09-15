@@ -21,11 +21,9 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
 
   const isDisabled = !isAbleToVote || status !== 'ONGOING' || externalDisabled
 
-  // Why the SDK disables the button, so the voter isn't left guessing (a
-  // disabled button with no explanation reads as broken — integrator-sdk#53).
-  // The process state comes first: it is the reason that holds for everyone,
-  // whatever the voter's own session says. A consumer's own `disabled` carries
-  // no reason we can name, and an in-flight vote already shows as loading.
+  // Why the SDK disables the button — an unexplained disabled button reads as
+  // broken (integrator-sdk#53). Process state first: it holds for every voter,
+  // whatever their own session says.
   const reason = (): string | undefined => {
     switch (status as QuestionStatus | null) {
       case 'ONGOING':
@@ -62,6 +60,7 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     // Also disabled while the vote is in flight — closes the double-submit window.
     disabled: isDisabled || voting,
     loading: voting,
+    // None for a consumer's own `disabled` (reason unknown), none while loading.
     tooltip: isDisabled && !voting ? reason() : undefined,
     // Re-voting isn't supported by the SaaS process model (`isAbleToVote`
     // excludes voted users), so there is no "update your vote" label variant.

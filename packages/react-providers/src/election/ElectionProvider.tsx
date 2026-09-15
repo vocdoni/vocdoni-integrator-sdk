@@ -55,10 +55,9 @@ const MAX_VOTE_BATCH = 100
 export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'clear'> {
   election: VotingProcessResponse | null
   /**
-   * Derived process status from all question statuses, honouring the
-   * scheduled start: a live process whose `startDate` is still ahead reads as
-   * `UPCOMING` (the chain rejects votes until then) and flips to `ONGOING` by
-   * itself when the start passes — no refetch needed.
+   * Derived process status from all question statuses. A process whose
+   * `startDate` is still ahead reads as `UPCOMING` and flips to `ONGOING` by
+   * itself at the start, without a refetch.
    */
   status: QuestionStatus | null
   /** Vochain chain id the process's votes are signed against. */

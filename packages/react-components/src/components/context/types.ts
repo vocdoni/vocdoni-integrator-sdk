@@ -44,10 +44,9 @@ export type VoteButtonSlotProps = BaseProps<HTMLButtonElement> & {
   disabled?: boolean
   loading?: boolean
   /**
-   * Why the button is disabled, as a localized sentence (e.g. "Voting opens
-   * on Sep 29, 2026, 9:00 AM", "You have already voted"). Only set while
-   * `disabled` is true and the reason is known to the SDK; a consumer-passed
-   * `disabled` prop carries no reason. Render it as a tooltip or helper text.
+   * Why the button is disabled, localized (e.g. "Voting opens on Sep 29, 2026,
+   * 9:00 AM"). Only set when the SDK knows the reason — a consumer's own
+   * `disabled` carries none. Render as a tooltip or helper text.
    */
   tooltip?: string
   type?: 'button' | 'submit'

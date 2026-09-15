@@ -2,14 +2,9 @@
 type FailedQuestion = { questionId: string; error: unknown }
 
 /**
- * Shape of a `PartialVoteError` thrown by `useElection().vote()`, matched
- * structurally rather than with `instanceof`.
- *
- * `instanceof` would mean importing the class from `@vocdoni/react-providers`
- * for a value check, which breaks in two ways this package cannot control: a
- * consumer resolving two copies of the providers package gets two distinct
- * classes, and a test that mocks the module leaves the export undefined, where
- * `instanceof` throws. The `name` is part of the error's public contract.
+ * A `PartialVoteError` from `useElection().vote()`, matched by `name` rather
+ * than `instanceof`: two resolved copies of the providers package give two
+ * distinct classes, and a mocked module leaves the export undefined.
  */
 type PartialVoteErrorLike = Error & {
   succeeded?: Array<{ questionId: string }>
@@ -24,8 +19,7 @@ const messageOf = (error: unknown): string =>
 
 /**
  * Distinct per-question reasons, in order. A batch usually fails for one
- * reason (the process is not open, the census proof is stale), and repeating
- * it once per question would bury it.
+ * reason, and repeating it once per question would bury it.
  */
 const distinctReasons = (failed: FailedQuestion[]): string[] => {
   const seen = new Set<string>()
@@ -39,14 +33,9 @@ const distinctReasons = (failed: FailedQuestion[]): string[] => {
 export type VoteErrorTranslate = (key: string, substitutions?: Record<string, unknown>) => string
 
 /**
- * Turns a thrown `vote()` failure into the sentence the voter reads.
- *
- * The reason is always included when there is one. These messages originate at
- * the chain (relayed verbatim by the backend as each envelope's `error`) and
- * are the only account of why a vote did not count — dropping them for a
- * tidier sentence is what let votes fail silently (integrator-sdk#53). A
- * localized lead says what happened to the vote; the raw reason follows, for
- * the voter to act on or to report.
+ * Turns a thrown `vote()` failure into the sentence the voter reads: a
+ * localized lead plus the chain's own reason, relayed by the backend as each
+ * envelope's `error` and the only account of why the vote did not count.
  */
 export const describeVoteError = (error: unknown, t: VoteErrorTranslate): string => {
   if (isPartialVoteError(error)) {

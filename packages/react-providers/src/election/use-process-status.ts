@@ -6,14 +6,9 @@ import { useEffect, useState } from 'react'
 const MAX_TIMEOUT_MS = 2_147_483_647
 
 /**
- * Derives the process status from its questions, honouring the scheduled
- * start: a live (`READY`) question of a process whose `startDate` is still
- * ahead reads as `UPCOMING`, because the chain refuses votes until then even
- * though the wire status does not change at the start.
- *
- * Since nothing on the wire changes when the start passes, a refetch would
- * not flip the status — so the hook arms a timer for the start instant and
- * re-renders then, turning `UPCOMING` into `ONGOING` without a reload.
+ * Process status honouring the scheduled start: a live question reads as
+ * `UPCOMING` until `startDate` passes. Nothing on the wire changes then, so a
+ * refetch would never flip it — a timer re-renders at the start instant.
  */
 export function useProcessStatus(election: VotingProcessResponse | null | undefined): QuestionStatus | null {
   const startDate = election?.startDate
