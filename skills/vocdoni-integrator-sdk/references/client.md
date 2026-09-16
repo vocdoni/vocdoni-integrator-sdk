@@ -100,10 +100,9 @@ Ids to keep straight: `processId` is the process's **Mongo id** (what
 `elections.get` takes), and `electionId` in
 `sign()` is the **question's** on-chain Vochain id (`question.upstreamId`).
 
-`authStep0` and `resend` are the calls that make the backend send the OTP email
-or SMS, so they are the ones that care about the client's `lang` setting — set
-it (or `client.setLang(...)`) before step 0 or the voter gets their code in the
-backend's fallback language, whatever the UI around them is showing.
+`authStep0` and `resend` send the OTP email or SMS. Set `lang` (or call
+`client.setLang(...)`) before step 0 to override the language; otherwise, the
+voter receives the notification in the organization's default language.
 
 Note the full process read (`client.elections.get`) is **public** for
 published processes (saas-backend#599; drafts 404 to non-managers, and
