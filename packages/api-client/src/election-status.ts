@@ -31,23 +31,57 @@ export const normalizeVotingProcess = <T extends VotingProcessResponse>(process:
   ),
 })
 
+/** Options for {@link computeProcessStatus}. */
+export interface ComputeProcessStatusOptions {
+  /**
+   * The process's scheduled start. While it is ahead, live questions derive as
+   * `UPCOMING`: the chain rejects votes before the start, but the wire still
+   * says `READY`. Absent or unparseable disables the check.
+   */
+  startDate?: string | Date | null
+  /** The instant to compare `startDate` against. Defaults to now. */
+  now?: Date
+}
+
+const parseDate = (value: string | Date | null | undefined): Date | undefined => {
+  if (!value) return undefined
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? undefined : date
+}
+
 /**
- * Derive a single {@link QuestionStatus} for a process from its questions' statuses.
- *
- * Rules (applied in order):
+ * True when `startDate` is a parseable instant after `now`. Missing or
+ * unparseable counts as started, so this can never lock a votable process.
+ */
+export const isBeforeStart = (startDate: string | Date | null | undefined, now: Date = new Date()): boolean => {
+  const start = parseDate(startDate)
+  return start !== undefined && start.getTime() > now.getTime()
+}
+
+/**
+ * Derive a single {@link QuestionStatus} for a process, by precedence:
  * 1. Any question `ONGOING` → `ONGOING` (loudest running state wins)
- * 2. All questions share the same status → that status (e.g. all `RESULTS`, all `PAUSED`)
- * 3. All questions in `{ENDED, RESULTS}` → `ENDED` (mixed: some results still computing)
+ * 2. All questions share the same status → that status (all `RESULTS`, all `PAUSED`)
+ * 3. All questions in `{ENDED, RESULTS}` → `ENDED` (some results still computing)
  * 4. No questions or mixed state → `PROCESS_UNKNOWN`
  *
- * Statuses are normalized first (`READY` → `ONGOING`), so the derivation also
- * holds for raw wire data that didn't pass through the client (e.g. an SSR
- * payload handed to `<ElectionProvider election>`).
+ * Statuses are normalized first (`READY` → `ONGOING`), so raw wire data derives
+ * correctly too. A future `options.startDate` turns live questions into
+ * `UPCOMING` before the rules run; {@link isLive} / {@link isUpcoming} pass it.
  */
-export const computeProcessStatus = (questions: VotingProcessQuestion[]): QuestionStatus => {
+export const computeProcessStatus = (
+  questions: VotingProcessQuestion[],
+  options: ComputeProcessStatusOptions = {},
+): QuestionStatus => {
   if (questions.length === 0) return 'PROCESS_UNKNOWN'
 
-  const statuses = questions.map((q) => normalizeQuestionStatus(q.status))
+  const beforeStart = isBeforeStart(options.startDate, options.now)
+  const statuses = questions.map((q) => {
+    // normalizeQuestionStatus already folded the wire's READY into ONGOING, so
+    // this covers both names; `QuestionStatus` has no READY left to test for.
+    const status = normalizeQuestionStatus(q.status)
+    return beforeStart && status === 'ONGOING' ? 'UPCOMING' : status
+  })
 
   if (statuses.includes('ONGOING')) return 'ONGOING'
 
@@ -59,13 +93,20 @@ export const computeProcessStatus = (questions: VotingProcessQuestion[]): Questi
   return 'PROCESS_UNKNOWN'
 }
 
-/** True when the process is actively accepting votes (`ONGOING`). */
-export const isLive = (process: VotingProcessResponse): boolean =>
-  computeProcessStatus(process.questions) === 'ONGOING'
+/** Derives the process status honouring the process's own `startDate`. */
+const processStatus = (process: VotingProcessResponse, now?: Date): QuestionStatus =>
+  computeProcessStatus(process.questions, { startDate: process.startDate, now })
 
-/** True when the process is scheduled but not yet started (`UPCOMING`). */
-export const isUpcoming = (process: VotingProcessResponse): boolean =>
-  computeProcessStatus(process.questions) === 'UPCOMING'
+/** True when the process is accepting votes (`ONGOING`) as of `now`, default the current time. */
+export const isLive = (process: VotingProcessResponse, now?: Date): boolean =>
+  processStatus(process, now) === 'ONGOING'
+
+/**
+ * True when the process is scheduled but not open (`UPCOMING`): reported as
+ * such, or live on the wire with `startDate` still ahead of `now`.
+ */
+export const isUpcoming = (process: VotingProcessResponse, now?: Date): boolean =>
+  processStatus(process, now) === 'UPCOMING'
 
 /** True when all question results are final (`RESULTS`). */
 export const hasResults = (process: VotingProcessResponse): boolean =>

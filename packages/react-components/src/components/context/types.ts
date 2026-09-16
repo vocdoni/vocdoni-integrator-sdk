@@ -43,6 +43,12 @@ export type VoteButtonSlotProps = BaseProps<HTMLButtonElement> & {
   form?: string
   disabled?: boolean
   loading?: boolean
+  /**
+   * Why the button is disabled, localized (e.g. "Voting opens on Sep 29, 2026,
+   * 9:00 AM"). Only set when the SDK knows the reason — a consumer's own
+   * `disabled` carries none. Render as a tooltip or helper text.
+   */
+  tooltip?: string
   type?: 'button' | 'submit'
   onClick?: () => void | Promise<void>
 }

@@ -45,7 +45,10 @@ export const getElectionDate = (
   if (!election) return undefined
   const value = (election as any)[field]
   if (!value) return undefined
-  return value instanceof Date ? value : new Date(value)
+  const date = value instanceof Date ? value : new Date(value)
+  // An unparseable date yields a truthy Invalid Date that throws inside date-fns
+  // `format`. Report it as absent, which every caller already handles.
+  return Number.isNaN(date.getTime()) ? undefined : date
 }
 
 export const isInvalidElectionLike = (election: ElectionLike | null | undefined): boolean => {

@@ -212,7 +212,11 @@ export const defaultComponents: ComponentsDefinition = {
       )}
     </div>
   ),
-  VoteButton: ({ label, loading, ...props }) => <button {...props}>{loading ? '...' : label}</button>,
+  VoteButton: ({ label, loading, tooltip, ...props }) => (
+    <button {...props} title={tooltip ?? props.title}>
+      {loading ? '...' : label}
+    </button>
+  ),
   VoteWeight: ({ label, weight, ...props }) => (
     <div {...props}>
       {label}

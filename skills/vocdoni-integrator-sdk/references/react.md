@@ -224,7 +224,9 @@ wants one rank per option (see [voting.md](voting.md)). Passing an ordering to
 upside-down, so nothing fails and the loser wins. For every other type the two are
 identical.
 
-`status` is computed by `computeProcessStatus(election.questions)` from `@vocdoni/api-client`:
+`status` is computed by `computeProcessStatus(election.questions, { startDate: election.startDate })`
+from `@vocdoni/api-client`:
+- Live question (`ONGOING`) while `startDate` is still ahead → read as `UPCOMING`
 - Any question `ONGOING` → `ONGOING`
 - All same status → that status
 - All `ENDED` or `RESULTS` → `ENDED`
@@ -233,6 +235,15 @@ identical.
 The wire status `READY` (a live question) is normalized to `ONGOING` on every
 client read — and defensively inside `computeProcessStatus` too, so raw SSR
 data passed via `<ElectionProvider election>` derives correctly as well.
+
+The chain has no "upcoming" state: a published process with a future
+`startDate` reports its questions as `READY` before and after the start, but
+rejects every vote cast before it. The provider therefore reads a live
+question as `UPCOMING` until the start passes, and arms a timer so `status`
+flips to `ONGOING` at that instant without a refetch. Everything that gates on
+`status === 'ONGOING'` (`<VoteButton />`, the question fields, `<ActionPause />`)
+stays locked until then. A process that lacks `startDate` (published before
+the backend backfilled it) is treated as already started.
 
 ---
 
@@ -299,12 +310,32 @@ Key election components (all from `@vocdoni/react-components`):
 | `<ElectionHeader />` | Header image / media |
 | `<ElectionSchedule />` | Start/end dates |
 | `<ElectionStatusBadge />` | Status chip (ONGOING, PAUSED, ENDED…) |
-| `<ElectionQuestions />` | Full question + choices form (calls `vote()` on submit) |
-| `<VoteButton />` | Submit button; auto-disabled when `!isAbleToVote` |
+| `<ElectionQuestions />` | Full question + choices form (calls `vote()` on submit); renders a failed cast as a form-level `QuestionsError` |
+| `<VoteButton />` | Submit button; auto-disabled when `!isAbleToVote`, when `status !== 'ONGOING'`, or while a vote is in flight. Passes the slot a `tooltip` naming why it is disabled ("Voting opens on Sep 29, 2026, 9:00 AM", "Voting not open yet" without a start date, "Voting is paused", "Voting has ended", "Voting was canceled", "You have already voted", "Identify first to vote", "You are not eligible to vote in this process") — the default slot renders it as the button's `title`, which is a minimal reference only — a disabled button takes no keyboard focus and touch devices never reveal `title`, so a production slot should render the reason as visible helper text tied to the button with `aria-describedby`. A consumer-passed `disabled` carries no tooltip. Strings live under `vote.disabled.*` in the `react-components` i18n namespace; `vote.disabled.upcoming_date_format` is the date-fns pattern of the dated one. |
 | `<VoteWeight />` | Voter's census weight |
 | `<ElectionResults />` | Results histogram; respects `secretUntilTheEnd`; renders the abstain row only when it is meaningful |
 | `<Voted />` | The voter's vote ids — one line per voted question |
 | `<ElectionEnvelope />` | Vote envelope / nullifier display |
+
+**Failed votes are shown, not swallowed.** `<ElectionQuestions />` submits through
+react-hook-form, whose `handleSubmit` rejects when the handler throws — with nothing
+awaiting that promise, a rejected cast used to leave the page silent while the vote was
+discarded (integrator-sdk#53). The form now catches the failure, records it as the
+form-level error `root.vote`, and renders it through the `QuestionsError` slot with
+`variant='form'` (field validation uses `variant='field'`). React-hook-form clears `root`
+errors on the next submit, so a retry starts clean.
+
+The message keeps the chain's own reason, which the backend relays verbatim as each
+envelope's `error` — it is the only account of why a vote did not count. A whole-batch
+failure reads `errors.vote_failed` ("Your vote could not be cast: …"), a
+`PartialVoteError` reads `errors.vote_partial` (how many questions were recorded, the
+distinct reasons, and that submitting again retries the rest), and a failure with no
+message reads `errors.vote_failed_unknown`.
+
+Consequently `useQuestionsForm().vote(values)` resolves `false` on a failed cast rather
+than rejecting — same as when the voter cancels the confirmation, and the same contract
+the encode-error branch already used. `useElection().vote()` still throws, so a custom UI
+that drives the cast itself keeps full control of the error.
 
 **`<Voted />`** renders one entry per question the voter cast, in process order,
 each pairing the question's title with its vote id (rendered as a link). Its

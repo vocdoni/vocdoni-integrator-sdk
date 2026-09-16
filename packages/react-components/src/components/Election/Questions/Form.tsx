@@ -6,6 +6,7 @@ import { useConfirm } from '../../../confirm/useConfirm'
 import { useReactComponentsLocalize } from '../../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
 import { QuestionsConfirmation } from './Confirmation'
+import { describeVoteError } from './vote-error'
 
 export type QuestionsFormContextState = {
   fmethods: UseFormReturn<any>
@@ -103,7 +104,17 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       return typeof raw === 'string' && raw !== '' ? raw : undefined
     })
 
-    return memos.some((m) => m !== undefined) ? baseVote(encodedBallots, memos) : baseVote(encodedBallots)
+    // Report a failed cast where the voter can see it: an escaping rejection
+    // leaves `handleSubmit`'s promise rejected with nobody awaiting it, so the
+    // vote vanishes silently (integrator-sdk#53). Same shape as the encode branch.
+    try {
+      return memos.some((m) => m !== undefined)
+        ? await baseVote(encodedBallots, memos)
+        : await baseVote(encodedBallots)
+    } catch (error) {
+      fmethods.setError('root.vote', { type: 'vote', message: describeVoteError(error, t) })
+      return false
+    }
   }
 
   useEffect(() => {
