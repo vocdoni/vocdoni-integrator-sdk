@@ -1,5 +1,11 @@
 # @vocdoni/api-types
 
+## 2.1.0
+
+### Minor Changes
+
+- 7165b53: Add an optional `lang` field to `ApiClientConfig`. It takes the same shapes as `authToken` — a string, or a sync/async getter re-read on every request — and tells the SaaS API which language to render anything it produces on the caller's behalf, above all the 2FA OTP email/SMS. Purely additive; existing configs are unaffected.
+
 ## 2.0.0
 
 ### Major Changes
