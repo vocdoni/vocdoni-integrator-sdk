@@ -42,12 +42,21 @@ export class VocdoniApiClient {
     // config is theirs, not ours. The defaults callback below reads the copy on
     // every request, which is what makes a later `setLang()` take effect
     // without rebuilding the fetcher.
-    this.config = { ...config }
+    // Read fields explicitly so inherited and non-enumerable settings survive.
+    this.config = {
+      apiUrl: config.apiUrl,
+      authToken: config.authToken,
+      lang: config.lang,
+    }
 
     const fetcher = up(fetch, async () => {
       const [token, lang] = await Promise.all([
         resolveConfigValue(this.config.authToken),
-        resolveConfigValue(this.config.lang),
+        // A locale is cosmetic; a token is not. A throwing `lang` getter — an
+        // i18n instance read before it is initialised, say — must not take the
+        // vote path down with it, so it degrades to "no lang" (exactly what an
+        // unset value does) instead of rejecting the request.
+        resolveConfigValue(this.config.lang).catch(() => undefined),
       ])
       return {
         baseUrl: this.config.apiUrl,
@@ -93,10 +102,11 @@ export class VocdoniApiClient {
    * new locale mid-session and the next OTP should follow them there.
    *
    * Takes the same shapes as the `lang` config field (string, sync or async
-   * getter); pass `undefined` to stop sending the param and let the backend
-   * fall back on its own. Requests already in flight keep the old value.
+   * getter); call it with no argument (or `undefined`) to stop sending the
+   * param and let the backend fall back on its own. Requests already in flight
+   * keep the old value.
    */
-  setLang(lang: ApiClientConfig['lang']): void {
+  setLang(lang?: ApiClientConfig['lang']): void {
     this.config.lang = lang
   }
 }

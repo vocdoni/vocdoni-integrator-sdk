@@ -18,6 +18,30 @@ describe('VocdoniApiClient', () => {
     client = new VocdoniApiClient({ apiUrl: BASE_URL })
   })
 
+  it('reads configuration properties defined on a class prototype', async () => {
+    class ClientConfig {
+      get apiUrl() { return BASE_URL }
+      get authToken() { return 'prototype-token' }
+      get lang() { return 'ca' }
+    }
+
+    const requests: Array<{ auth: string | null; lang: string | null }> = []
+    server.use(
+      http.get(`${BASE_URL}/processes/:id`, ({ request }) => {
+        requests.push({
+          auth: request.headers.get('Authorization'),
+          lang: new URL(request.url).searchParams.get('lang'),
+        })
+        return HttpResponse.json(mockProcess)
+      }),
+    )
+
+    const configuredClient = new VocdoniApiClient(new ClientConfig())
+    await configuredClient.elections.get('abc123')
+
+    expect(requests).toEqual([{ auth: 'Bearer prototype-token', lang: 'ca' }])
+  })
+
   describe('elections.get', () => {
     it('returns process data for the given id', async () => {
       const process = await client.elections.get('abc123')
@@ -272,6 +296,34 @@ describe('VocdoniApiClient', () => {
       expect(queries[0].get('lang')).toBe('ca')
       expect(queries[1].get('lang')).toBe('es')
       expect(queries[2].get('lang')).toBe('eu')
+    })
+
+    it('survives a throwing lang getter instead of failing the request', async () => {
+      const queries = captureAuth0Query()
+
+      // The classic shape: `lang: () => i18n.language` evaluated before the
+      // i18n instance exists. A cosmetic preference must not break the vote
+      // path — the request goes out, simply without the param.
+      const langClient = new VocdoniApiClient({
+        apiUrl: BASE_URL,
+        lang: () => {
+          throw new TypeError('i18n is not initialised yet')
+        },
+      })
+      const res = await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(res.authToken).toBe('csp-token')
+      expect(queries[0].has('lang')).toBe(false)
+    })
+
+    it('clears the lang with a bare setLang()', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      langClient.setLang()
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].has('lang')).toBe(false)
     })
 
     it('rides alongside per-call params instead of clobbering them', async () => {

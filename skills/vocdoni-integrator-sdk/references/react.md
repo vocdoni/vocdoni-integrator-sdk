@@ -59,6 +59,27 @@ const { client, apiUrl } = useClient()
 // client — VocdoniApiClient (fully typed, all sub-clients available)
 ```
 
+`ClientProvider` takes no `lang` prop yet, so the client's language — the one
+that decides which language the 2FA OTP email/SMS arrives in — has to be set on
+the instance itself. Once i18n is initialized, synchronize it below
+`ClientProvider` and above request-starting descendants. Use a layout effect so
+it runs before descendant passive (`useEffect`) effects, including automatic
+OTP requests on mount, and updates again whenever the locale changes:
+
+```tsx
+import { useLayoutEffect } from 'react'
+
+const { client } = useClient()
+const { i18n } = useTranslation()
+useLayoutEffect(() => client.setLang(i18n.language), [client, i18n.language])
+```
+
+A parent `useEffect` is too late for a child's mount effect. This layout-effect
+pattern covers descendant passive effects and subsequent user interactions,
+not requests started during render, descendant layout effects, or SSR. If
+requests can start earlier, gate those descendants until language setup has
+completed; configure server-side clients with `lang` at construction.
+
 ---
 
 ## AuthProvider / useAuth
