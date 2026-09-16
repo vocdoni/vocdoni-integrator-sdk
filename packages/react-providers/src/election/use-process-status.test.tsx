@@ -74,6 +74,21 @@ describe('useProcessStatus', () => {
     expect(result.current).toBe('ONGOING')
   })
 
+  it('arms no timer for a process the wire itself reports UPCOMING', () => {
+    // Guards the obvious wrong fix for the render/commit race: keying the timer
+    // on the derived status alone re-renders this process forever, because its
+    // UPCOMING comes from the wire and no elapsing clock can clear it.
+    const election = {
+      ...mockProcess,
+      startDate: '2026-09-01T09:00:00Z',
+      questions: mockProcess.questions.map((q) => ({ ...q, status: 'UPCOMING' })),
+    } as unknown as VotingProcessResponse
+
+    const { result } = renderHook(() => useProcessStatus(election))
+    expect(result.current).toBe('UPCOMING')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('re-arms when the election (and its start date) changes', () => {
     const { result, rerender } = renderHook(({ e }) => useProcessStatus(e), {
       initialProps: { e: scheduled('2026-09-01T09:00:00Z') },

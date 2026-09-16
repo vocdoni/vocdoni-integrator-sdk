@@ -13,15 +13,19 @@ const MAX_TIMEOUT_MS = 2_147_483_647
 export function useProcessStatus(election: VotingProcessResponse | null | undefined): QuestionStatus | null {
   const startDate = election?.startDate
   const [tick, setTick] = useState(0)
+  // One clock read for both, so the gate and the status can never disagree and
+  // leave a process stranded on `UPCOMING` with no timer armed.
+  const now = new Date()
+  const beforeStart = isBeforeStart(startDate, now)
 
   useEffect(() => {
-    if (!isBeforeStart(startDate)) return
-    const remaining = new Date(startDate as string).getTime() - Date.now()
-    // Re-arm in chunks for starts beyond the timer ceiling: the re-render
-    // re-runs this effect, which measures the remaining delay afresh.
-    const timer = setTimeout(() => setTick((t) => t + 1), Math.min(remaining, MAX_TIMEOUT_MS))
+    if (!beforeStart || !startDate) return
+    const remaining = new Date(startDate).getTime() - Date.now()
+    // Clamped at 0 so a start that elapsed between render and commit settles at
+    // once; capped at the ceiling so a far-off start re-arms on the re-render.
+    const timer = setTimeout(() => setTick((t) => t + 1), Math.max(0, Math.min(remaining, MAX_TIMEOUT_MS)))
     return () => clearTimeout(timer)
-  }, [startDate, tick])
+  }, [beforeStart, startDate, tick])
 
-  return election ? computeProcessStatus(election.questions, { startDate }) : null
+  return election ? computeProcessStatus(election.questions, { startDate, now }) : null
 }

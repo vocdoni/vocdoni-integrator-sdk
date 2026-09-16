@@ -14,8 +14,10 @@ type PartialVoteErrorLike = Error & {
 const isPartialVoteError = (error: unknown): error is PartialVoteErrorLike =>
   error instanceof Error && error.name === 'PartialVoteError' && Array.isArray((error as PartialVoteErrorLike).failed)
 
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+const messageOf = (error: unknown): string => {
+  if (error instanceof Error) return error.message
+  return typeof error === 'string' ? error : ''
+}
 
 /**
  * Distinct per-question reasons, in order. A batch usually fails for one

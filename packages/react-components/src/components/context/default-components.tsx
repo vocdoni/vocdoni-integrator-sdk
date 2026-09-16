@@ -213,7 +213,7 @@ export const defaultComponents: ComponentsDefinition = {
     </div>
   ),
   VoteButton: ({ label, loading, tooltip, ...props }) => (
-    <button {...props} title={tooltip}>
+    <button {...props} title={tooltip ?? props.title}>
       {loading ? '...' : label}
     </button>
   ),

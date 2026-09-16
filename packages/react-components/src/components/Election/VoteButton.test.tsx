@@ -121,6 +121,21 @@ describe('VoteButton', () => {
       expect(screen.getByTestId('vote')).toHaveAttribute('title', 'Voting not open yet')
     })
 
+    it('falls back to "not open yet" when the start date is unparseable', () => {
+      // getElectionDate hands back an Invalid Date, which is truthy — passing it
+      // to date-fns `format` throws RangeError and takes the render down.
+      setVoter({ status: 'UPCOMING', isAbleToVote: true, election: makeProcess({ startDate: 'not a date' }) })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'Voting not open yet')
+    })
+
+    it('keeps a title the consumer passed when the SDK has no reason of its own', () => {
+      // Rendered through the default slot: it must not wipe the caller's title.
+      setVoter({ isAbleToVote: true })
+      renderWithComponents(<VoteButton disabled title='Complete the required fields first' />)
+      expect(screen.getByRole('button')).toHaveAttribute('title', 'Complete the required fields first')
+    })
+
     it.each([
       ['PAUSED', 'Voting is paused'],
       ['ENDED', 'Voting has ended'],
