@@ -18,6 +18,30 @@ describe('VocdoniApiClient', () => {
     client = new VocdoniApiClient({ apiUrl: BASE_URL })
   })
 
+  it('reads configuration properties defined on a class prototype', async () => {
+    class ClientConfig {
+      get apiUrl() { return BASE_URL }
+      get authToken() { return 'prototype-token' }
+      get lang() { return 'ca' }
+    }
+
+    const requests: Array<{ auth: string | null; lang: string | null }> = []
+    server.use(
+      http.get(`${BASE_URL}/processes/:id`, ({ request }) => {
+        requests.push({
+          auth: request.headers.get('Authorization'),
+          lang: new URL(request.url).searchParams.get('lang'),
+        })
+        return HttpResponse.json(mockProcess)
+      }),
+    )
+
+    const configuredClient = new VocdoniApiClient(new ClientConfig())
+    await configuredClient.elections.get('abc123')
+
+    expect(requests).toEqual([{ auth: 'Bearer prototype-token', lang: 'ca' }])
+  })
+
   describe('elections.get', () => {
     it('returns process data for the given id', async () => {
       const process = await client.elections.get('abc123')
@@ -172,6 +196,197 @@ describe('VocdoniApiClient', () => {
       await client.elections.get('abc123')
 
       expect(capturedAuth).toBeNull()
+    })
+  })
+
+  describe('setAuthToken', () => {
+    const captureAuthHeaders = () => {
+      const headers: Array<string | null> = []
+      server.use(
+        http.get(`${BASE_URL}/processes/:id`, ({ request }) => {
+          headers.push(request.headers.get('Authorization'))
+          return HttpResponse.json(mockProcess)
+        }),
+      )
+      return headers
+    }
+
+    it('updates subsequent requests without mutating the caller config', async () => {
+      const headers = captureAuthHeaders()
+      const config = Object.freeze({ apiUrl: BASE_URL, authToken: 'old-token' })
+      const authedClient = new VocdoniApiClient(config)
+      await authedClient.elections.get('abc123')
+
+      authedClient.setAuthToken('new-token')
+      await authedClient.elections.get('abc123')
+
+      expect(headers).toEqual(['Bearer old-token', 'Bearer new-token'])
+      expect(config.authToken).toBe('old-token')
+    })
+
+    it.each(['sync', 'async'] as const)('resolves a replacement %s getter on every request', async (kind) => {
+      const headers = captureAuthHeaders()
+      let token = 'first-token'
+      client.setAuthToken(kind === 'sync' ? () => token : async () => token)
+      await client.elections.get('abc123')
+      token = 'second-token'
+      await client.elections.get('abc123')
+
+      expect(headers).toEqual(['Bearer first-token', 'Bearer second-token'])
+    })
+
+    it.each(['omitted', 'undefined'] as const)('clears the header with an %s argument', async (kind) => {
+      const headers = captureAuthHeaders()
+      client.setAuthToken('token')
+      await client.elections.get('abc123')
+      if (kind === 'omitted') client.setAuthToken()
+      else client.setAuthToken(undefined)
+      await client.elections.get('abc123')
+
+      expect(headers).toEqual(['Bearer token', null])
+    })
+
+    it('rejects the request when the replacement token getter throws', async () => {
+      const headers = captureAuthHeaders()
+      client.setAuthToken(() => { throw new Error('token unavailable') })
+
+      await expect(client.elections.get('abc123')).rejects.toThrow('token unavailable')
+      expect(headers).toEqual([])
+    })
+  })
+
+  describe('lang query param', () => {
+    // Auth step 0 triggers the OTP email/SMS.
+    const captureAuth0Query = () => {
+      const queries: Array<URLSearchParams> = []
+      server.use(
+        http.post(`${BASE_URL}/processes/:processId/auth/0`, ({ request }) => {
+          queries.push(new URL(request.url).searchParams)
+          return HttpResponse.json({ authToken: 'csp-token' })
+        }),
+      )
+      return queries
+    }
+
+    it('sends a statically configured lang on the OTP-triggering auth step 0', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].get('lang')).toBe('ca')
+    })
+
+    it('sends no lang param at all when none is configured', async () => {
+      const queries = captureAuth0Query()
+
+      await client.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].has('lang')).toBe(false)
+      expect(queries[0].toString()).toBe('')
+    })
+
+    it('applies a lang set after construction to the next request', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      langClient.setLang('es')
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].get('lang')).toBe('ca')
+      expect(queries[1].get('lang')).toBe('es')
+    })
+
+    it('stops sending the param when lang is cleared with setLang(undefined)', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      langClient.setLang(undefined)
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].has('lang')).toBe(false)
+    })
+
+    it('does not mutate the caller\'s config object when lang changes', async () => {
+      const queries = captureAuth0Query()
+      const config = { apiUrl: BASE_URL, lang: 'ca' }
+
+      const langClient = new VocdoniApiClient(config)
+      langClient.setLang('es')
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].get('lang')).toBe('es')
+      expect(config.lang).toBe('ca')
+    })
+
+    it('resolves a lang getter per request, sync and async alike', async () => {
+      const queries: Array<URLSearchParams> = []
+      server.use(
+        http.get(`${BASE_URL}/processes/:id`, ({ request, params }) => {
+          queries.push(new URL(request.url).searchParams)
+          return HttpResponse.json({ ...mockProcess, id: params.id as string })
+        }),
+      )
+
+      let locale = 'ca'
+      const syncClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: () => locale })
+      await syncClient.elections.get('abc123')
+      locale = 'es'
+      await syncClient.elections.get('abc123')
+
+      const asyncClient = new VocdoniApiClient({
+        apiUrl: BASE_URL,
+        lang: async () => 'eu',
+      })
+      await asyncClient.elections.get('abc123')
+
+      expect(queries[0].get('lang')).toBe('ca')
+      expect(queries[1].get('lang')).toBe('es')
+      expect(queries[2].get('lang')).toBe('eu')
+    })
+
+    it('survives a throwing lang getter instead of failing the request', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({
+        apiUrl: BASE_URL,
+        lang: () => {
+          throw new TypeError('i18n is not initialised yet')
+        },
+      })
+      const res = await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(res.authToken).toBe('csp-token')
+      expect(queries[0].has('lang')).toBe(false)
+    })
+
+    it('clears the lang with a bare setLang()', async () => {
+      const queries = captureAuth0Query()
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      langClient.setLang()
+      await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
+
+      expect(queries[0].has('lang')).toBe(false)
+    })
+
+    it('rides alongside per-call params instead of clobbering them', async () => {
+      const queries: Array<URLSearchParams> = []
+      server.use(
+        http.get(`${BASE_URL}/processes`, ({ request }) => {
+          queries.push(new URL(request.url).searchParams)
+          return HttpResponse.json({ processes: [], pagination: { total: 0 } })
+        }),
+      )
+
+      const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
+      await langClient.elections.list({ orgAddress: '0xabc', published: false })
+
+      expect(queries[0].get('lang')).toBe('ca')
+      expect(queries[0].get('orgAddress')).toBe('0xabc')
+      expect(queries[0].get('published')).toBe('false')
     })
   })
 

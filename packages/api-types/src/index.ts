@@ -1498,4 +1498,10 @@ export interface InfoResponse {
 export interface ApiClientConfig {
   apiUrl: string
   authToken?: string | (() => string | null | undefined) | (() => Promise<string | null | undefined>)
+  /**
+   * Language for backend-rendered content, including OTP emails/SMS.
+   * Sent as ?lang= on each request; sync/async getters are resolved each time.
+   * Unset or empty values use the backend fallback.
+   */
+  lang?: string | (() => string | null | undefined) | (() => Promise<string | null | undefined>)
 }

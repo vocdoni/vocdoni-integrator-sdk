@@ -8,13 +8,14 @@ import { handleError } from './errors'
 import { JobsClient } from './jobs'
 import { OrganizationsClient } from './organizations'
 
-async function resolveToken(
-  authToken: ApiClientConfig['authToken'],
+/** Resolve a static value or sync/async getter on each request. */
+async function resolveConfigValue(
+  value: ApiClientConfig['authToken'] | ApiClientConfig['lang'],
 ): Promise<string | null | undefined> {
-  if (typeof authToken === 'function') {
-    return authToken()
+  if (typeof value === 'function') {
+    return value()
   }
-  return authToken
+  return value
 }
 
 export class VocdoniApiClient {
@@ -30,13 +31,28 @@ export class VocdoniApiClient {
   readonly auth: AuthClient
   readonly jobs: JobsClient
   private readonly fetch: UpFetch
+  private readonly config: ApiClientConfig
 
   constructor(config: ApiClientConfig) {
+    // Snapshot fields so setters don't mutate the caller's config.
+    // Explicit reads preserve inherited and non-enumerable settings.
+    this.config = {
+      apiUrl: config.apiUrl,
+      authToken: config.authToken,
+      lang: config.lang,
+    }
+
     const fetcher = up(fetch, async () => {
-      const token = await resolveToken(config.authToken)
+      const [token, lang] = await Promise.all([
+        resolveConfigValue(this.config.authToken),
+        // Locale lookup failures omit lang; token failures must reject the request.
+        resolveConfigValue(this.config.lang).catch(() => undefined),
+      ])
       return {
-        baseUrl: config.apiUrl,
+        baseUrl: this.config.apiUrl,
         headers: token ? { Authorization: `Bearer ${token}` } : {},
+        // Per-call params override this default; an empty lang sends nothing.
+        params: lang ? { lang } : undefined,
         parseResponse: async (res) => {
           if (res.status === 204) return undefined as never
           const text = await res.text()
@@ -68,5 +84,21 @@ export class VocdoniApiClient {
    */
   async info(): Promise<InfoResponse> {
     return this.fetch<InfoResponse>('/info').catch(handleError)
+  }
+
+  /**
+   * Set the Bearer token for subsequent requests (string or sync/async getter).
+   * Omit or pass undefined to clear it. Getter failures reject the request.
+   */
+  setAuthToken(authToken?: ApiClientConfig['authToken']): void {
+    this.config.authToken = authToken
+  }
+
+  /**
+   * Set lang for subsequent requests (string or sync/async getter).
+   * Omit or pass undefined to use the backend fallback; in-flight requests are unchanged.
+   */
+  setLang(lang?: ApiClientConfig['lang']): void {
+    this.config.lang = lang
   }
 }
