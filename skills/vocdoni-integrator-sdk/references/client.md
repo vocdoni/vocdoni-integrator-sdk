@@ -19,8 +19,7 @@ const client = new VocdoniApiClient({
   apiUrl: 'https://saas-api.vocdoni.net',
   // Optional — string or sync/async getter; resolved and attached as Bearer on every request
   authToken: () => myStore.getToken(),
-  // Optional — same shapes; sent as ?lang= on every request so backend-rendered
-  // OTP emails/SMS come out in the voter's language
+  // Optional — string or sync/async getter; ?lang= selects the OTP language
   lang: () => i18n.language,
 })
 ```
@@ -48,12 +47,28 @@ client.auth         // AuthClient
 client.jobs         // JobsClient
 ```
 
-Plus two methods on the client itself:
+Plus three methods on the client itself:
 
 `client.info()` (`GET /info`, public) → `{ chainId, version, goVersion }`.
 Careful: that `chainId` is the service's CURRENT Vochain chain id, not
 necessarily the one a given process's votes sign against — always prefer the
 process's own `chainId` from the (public) `elections.get()` read.
+
+`client.setAuthToken(authToken?)` replaces the default Bearer token for subsequent
+requests. Like the constructor option, it accepts a string or a sync/async
+getter (resolved on every request). Getter failures reject the request rather
+than silently sending it unauthenticated.
+
+```ts
+client.setAuthToken('new-token')
+client.setAuthToken(() => myStore.getToken())
+client.setAuthToken() // or setAuthToken(undefined): stop sending the default header
+```
+
+The client snapshots the supplied config fields at construction. Use setters
+or function-valued options for changes; mutating the original config object
+has no effect, and setters never mutate that object. This Bearer token is
+separate from the voter's CSP `authToken` passed in auth/check/sign payloads.
 
 `client.setLang(lang)` changes the `lang` config field after construction, for
 the voter who switches locale mid-session. It takes the same shapes as the

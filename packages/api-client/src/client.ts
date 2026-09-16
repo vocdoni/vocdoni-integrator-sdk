@@ -8,11 +8,7 @@ import { handleError } from './errors'
 import { JobsClient } from './jobs'
 import { OrganizationsClient } from './organizations'
 
-/**
- * Config fields double as getters (sync or async) so callers can keep a live
- * source of truth — a store, an i18n instance — instead of rebuilding the
- * client whenever the value changes. Resolved on every request.
- */
+/** Resolve a static value or sync/async getter on each request. */
 async function resolveConfigValue(
   value: ApiClientConfig['authToken'] | ApiClientConfig['lang'],
 ): Promise<string | null | undefined> {
@@ -38,11 +34,8 @@ export class VocdoniApiClient {
   private readonly config: ApiClientConfig
 
   constructor(config: ApiClientConfig) {
-    // Copied, not referenced: `setLang()` mutates this object, and the caller's
-    // config is theirs, not ours. The defaults callback below reads the copy on
-    // every request, which is what makes a later `setLang()` take effect
-    // without rebuilding the fetcher.
-    // Read fields explicitly so inherited and non-enumerable settings survive.
+    // Snapshot fields so setters don't mutate the caller's config.
+    // Explicit reads preserve inherited and non-enumerable settings.
     this.config = {
       apiUrl: config.apiUrl,
       authToken: config.authToken,
@@ -52,17 +45,13 @@ export class VocdoniApiClient {
     const fetcher = up(fetch, async () => {
       const [token, lang] = await Promise.all([
         resolveConfigValue(this.config.authToken),
-        // A locale is cosmetic; a token is not. A throwing `lang` getter — an
-        // i18n instance read before it is initialised, say — must not take the
-        // vote path down with it, so it degrades to "no lang" (exactly what an
-        // unset value does) instead of rejecting the request.
+        // Locale lookup failures omit lang; token failures must reject the request.
         resolveConfigValue(this.config.lang).catch(() => undefined),
       ])
       return {
         baseUrl: this.config.apiUrl,
         headers: token ? { Authorization: `Bearer ${token}` } : {},
-        // A default param, so per-call `params` still win on a key clash —
-        // and an unset lang adds nothing to the query string at all.
+        // Per-call params override this default; an empty lang sends nothing.
         params: lang ? { lang } : undefined,
         parseResponse: async (res) => {
           if (res.status === 204) return undefined as never
@@ -98,13 +87,16 @@ export class VocdoniApiClient {
   }
 
   /**
-   * Change the language sent with every subsequent request — the voter picked a
-   * new locale mid-session and the next OTP should follow them there.
-   *
-   * Takes the same shapes as the `lang` config field (string, sync or async
-   * getter); call it with no argument (or `undefined`) to stop sending the
-   * param and let the backend fall back on its own. Requests already in flight
-   * keep the old value.
+   * Set the Bearer token for subsequent requests (string or sync/async getter).
+   * Omit or pass undefined to clear it. Getter failures reject the request.
+   */
+  setAuthToken(authToken?: ApiClientConfig['authToken']): void {
+    this.config.authToken = authToken
+  }
+
+  /**
+   * Set lang for subsequent requests (string or sync/async getter).
+   * Omit or pass undefined to use the backend fallback; in-flight requests are unchanged.
    */
   setLang(lang?: ApiClientConfig['lang']): void {
     this.config.lang = lang

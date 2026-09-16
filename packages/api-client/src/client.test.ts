@@ -199,9 +199,64 @@ describe('VocdoniApiClient', () => {
     })
   })
 
+  describe('setAuthToken', () => {
+    const captureAuthHeaders = () => {
+      const headers: Array<string | null> = []
+      server.use(
+        http.get(`${BASE_URL}/processes/:id`, ({ request }) => {
+          headers.push(request.headers.get('Authorization'))
+          return HttpResponse.json(mockProcess)
+        }),
+      )
+      return headers
+    }
+
+    it('updates subsequent requests without mutating the caller config', async () => {
+      const headers = captureAuthHeaders()
+      const config = Object.freeze({ apiUrl: BASE_URL, authToken: 'old-token' })
+      const authedClient = new VocdoniApiClient(config)
+      await authedClient.elections.get('abc123')
+
+      authedClient.setAuthToken('new-token')
+      await authedClient.elections.get('abc123')
+
+      expect(headers).toEqual(['Bearer old-token', 'Bearer new-token'])
+      expect(config.authToken).toBe('old-token')
+    })
+
+    it.each(['sync', 'async'] as const)('resolves a replacement %s getter on every request', async (kind) => {
+      const headers = captureAuthHeaders()
+      let token = 'first-token'
+      client.setAuthToken(kind === 'sync' ? () => token : async () => token)
+      await client.elections.get('abc123')
+      token = 'second-token'
+      await client.elections.get('abc123')
+
+      expect(headers).toEqual(['Bearer first-token', 'Bearer second-token'])
+    })
+
+    it.each(['omitted', 'undefined'] as const)('clears the header with an %s argument', async (kind) => {
+      const headers = captureAuthHeaders()
+      client.setAuthToken('token')
+      await client.elections.get('abc123')
+      if (kind === 'omitted') client.setAuthToken()
+      else client.setAuthToken(undefined)
+      await client.elections.get('abc123')
+
+      expect(headers).toEqual(['Bearer token', null])
+    })
+
+    it('rejects the request when the replacement token getter throws', async () => {
+      const headers = captureAuthHeaders()
+      client.setAuthToken(() => { throw new Error('token unavailable') })
+
+      await expect(client.elections.get('abc123')).rejects.toThrow('token unavailable')
+      expect(headers).toEqual([])
+    })
+  })
+
   describe('lang query param', () => {
-    // The endpoint that motivates the whole feature: auth step 0 is what makes
-    // the backend render and send the OTP email/SMS.
+    // Auth step 0 triggers the OTP email/SMS.
     const captureAuth0Query = () => {
       const queries: Array<URLSearchParams> = []
       server.use(
@@ -237,8 +292,6 @@ describe('VocdoniApiClient', () => {
       const langClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: 'ca' })
       await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
 
-      // The voter switched locale mid-session: no re-instantiation, and the
-      // change must land on the very next request.
       langClient.setLang('es')
       await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
 
@@ -264,8 +317,6 @@ describe('VocdoniApiClient', () => {
       langClient.setLang('es')
       await langClient.elections.authStep0('abc123', { email: 'voter@example.com' })
 
-      // The new lang is live on the wire, yet the object the caller still holds
-      // (and may reuse for a second client) is untouched.
       expect(queries[0].get('lang')).toBe('es')
       expect(config.lang).toBe('ca')
     })
@@ -279,8 +330,6 @@ describe('VocdoniApiClient', () => {
         }),
       )
 
-      // A getter is the point of the union type: the app's locale lives in a
-      // store and the client reads it fresh on every call.
       let locale = 'ca'
       const syncClient = new VocdoniApiClient({ apiUrl: BASE_URL, lang: () => locale })
       await syncClient.elections.get('abc123')
@@ -301,9 +350,6 @@ describe('VocdoniApiClient', () => {
     it('survives a throwing lang getter instead of failing the request', async () => {
       const queries = captureAuth0Query()
 
-      // The classic shape: `lang: () => i18n.language` evaluated before the
-      // i18n instance exists. A cosmetic preference must not break the vote
-      // path — the request goes out, simply without the param.
       const langClient = new VocdoniApiClient({
         apiUrl: BASE_URL,
         lang: () => {
