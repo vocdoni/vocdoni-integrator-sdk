@@ -61,6 +61,7 @@
   "devDependencies": {
     "@tanstack/react-query": "^5.0.0",
     "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.3.0",
     "@vocdoni/api-client": "workspace:*",
     "@vocdoni/api-types": "workspace:*",
     "@vocdoni/api-voting": "workspace:*",
