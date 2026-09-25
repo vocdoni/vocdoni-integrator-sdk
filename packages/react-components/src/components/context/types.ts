@@ -56,6 +56,10 @@ export type VoteWeightSlotProps = BaseProps<HTMLDivElement> & { label: string; w
 
 export type ElectionResultChoice = {
   title: string
+  /**
+   * Empty (as is `percent`) when the question's results cannot be decoded because no
+   * ballot type can be inferred for it — render the choice without a tally.
+   */
   votes: string
   percent: string
   description?: string

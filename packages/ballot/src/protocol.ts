@@ -1,6 +1,6 @@
 import type { BallotProtocol, Choice, QuestionTypeSetup, VoteType } from '@vocdoni/api-types'
 import { BallotType } from './types'
-import { declaresRanked, inferQuestionBallotType, isPickSlotLayout } from './infer'
+import { declaresRanked, isPickSlotLayout, tryInferQuestionBallotType } from './infer'
 
 /** The part of a ballot protocol the satisfiability rule reads. */
 export type ProtocolBounds = Pick<BallotProtocol, 'maxCount' | 'maxValue' | 'uniqueValues'>
@@ -264,13 +264,9 @@ type QuestionLike = {
  * not police malformed input.
  */
 export function uncastableChoicesReason(question: QuestionLike): string | null {
-  let ballotType: BallotType
-  try {
-    ballotType = inferQuestionBallotType(question)
-  } catch {
-    // Neither a ballotProtocol nor a recognized type — nothing to judge against.
-    return null
-  }
+  const ballotType = tryInferQuestionBallotType(question)
+  // Neither a ballotProtocol nor a recognized type — nothing to judge against.
+  if (ballotType === undefined) return null
 
   const bp = question.ballotProtocol
   // Without a raw protocol the named singlechoice type derives maxValue from these

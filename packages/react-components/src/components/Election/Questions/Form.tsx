@@ -1,4 +1,4 @@
-import { encodeQuestionSelections, hasUncastableChoices } from '@vocdoni/ballot'
+import { encodeQuestionSelections, hasUncastableChoices, tryInferQuestionBallotType } from '@vocdoni/ballot'
 import { createContext, PropsWithChildren, useContext, useEffect } from 'react'
 import { FieldValues, FormProvider, useForm, UseFormReturn } from 'react-hook-form'
 import { EnsureConfirmProvider } from '../../../confirm/ConfirmProvider'
@@ -42,6 +42,20 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
   const vote = async (values: FieldValues) => {
     if (!election) {
       console.warn('vote attempt with no valid election defined')
+      return false
+    }
+
+    // A question with no derivable ballot type has no encoding, so no ballot including it
+    // can be built. The default field (UnsupportedQuestion) already fails validation, so
+    // this only fires for a custom slot that never mounted it. Refuse before asking the
+    // voter to confirm a vote that cannot be cast, not after.
+    const unsupported = election.questions.flatMap((question, index) =>
+      tryInferQuestionBallotType(question) === undefined ? [index] : []
+    )
+    if (unsupported.length) {
+      for (const index of unsupported) {
+        fmethods.setError(index.toString(), { type: 'unsupported', message: t('errors.question_unsupported') })
+      }
       return false
     }
 

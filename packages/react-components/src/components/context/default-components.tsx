@@ -231,7 +231,9 @@ export const defaultComponents: ComponentsDefinition = {
           <h3>{question.title}</h3>
           {question.choices.map((choice) => (
             <div key={choice.title}>
-              <strong>{choice.title}</strong> {choice.votes} ({choice.percent})
+              <strong>{choice.title}</strong>
+              {/* Empty for a question whose results could not be decoded. */}
+              {choice.votes ? ` ${choice.votes} (${choice.percent})` : null}
               <TrustedHtml html={choice.description} />
               {choice.image ? <img src={linkifyIpfs(choice.image)} alt={choice.title} /> : null}
             </div>

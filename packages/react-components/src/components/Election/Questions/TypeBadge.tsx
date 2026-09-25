@@ -1,5 +1,5 @@
 import type { VotingProcessQuestion } from '@vocdoni/api-types'
-import { BallotType, inferQuestionBallotType, questionSelectionRange } from '@vocdoni/ballot'
+import { BallotType, questionSelectionRange, tryInferQuestionBallotType } from '@vocdoni/ballot'
 import { ComponentPropsWithoutRef } from 'react'
 import { useComponents } from '../../context/useComponents'
 import { useReactComponentsLocalize } from '../../../i18n/localize'
@@ -22,6 +22,11 @@ export const QuestionsTypeBadge = ({ question: questionProp, ...props }: Questio
     return null
   }
 
+  // No derivable type (e.g. a legacy election projected without one): nothing to label.
+  // Checked before questionSelectionRange, which infers the type too and would throw.
+  const ballotType = tryInferQuestionBallotType(question)
+  if (ballotType === undefined) return null
+
   // The pick bound, not ballotProtocol.maxCount — on the dense layout maxCount is
   // the number of choices, and the bound lives in maxTotalCost.
   const maxCount = questionSelectionRange(question).max
@@ -30,7 +35,7 @@ export const QuestionsTypeBadge = ({ question: questionProp, ...props }: Questio
   let title = ''
   let tooltip = ''
 
-  switch (inferQuestionBallotType(question)) {
+  switch (ballotType) {
     case BallotType.SingleChoice:
       title = t('question_types.singlechoice_title', { weighted })
       break

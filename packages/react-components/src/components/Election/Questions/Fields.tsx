@@ -1,5 +1,5 @@
 import type { Choice, VotingProcessQuestion } from '@vocdoni/api-types'
-import { BallotType, inferQuestionBallotType, questionSelectionRange } from '@vocdoni/ballot'
+import { BallotType, questionSelectionRange, tryInferQuestionBallotType } from '@vocdoni/ballot'
 import { Controller, useFormContext } from 'react-hook-form'
 import { QuestionChoicePresentation, QuestionLayout, QuestionSelectionMode } from '../../context/types'
 import { useComponents } from '../../context/useComponents'
@@ -37,6 +37,23 @@ const hasChoiceImage = (choice: Choice): boolean => Boolean(getQuestionChoiceMet
 const getQuestionLayout = (question: VotingProcessQuestion): QuestionLayout =>
   question.choices.some(hasChoiceImage) ? 'grid' : 'list'
 
+/**
+ * The styling hooks every choice card carries. `idBase` and `fieldName` are only set by
+ * the field types that expose them, so the attribute set stays exactly what each emitted.
+ */
+const choiceDataAttrs = (
+  layout: QuestionLayout,
+  { idBase, fieldName }: { idBase?: string; fieldName?: string } = {}
+): Record<string, string> => ({
+  'data-choice-card': '',
+  'data-choice-control': '',
+  'data-choice-body': '',
+  'data-choice-media': '',
+  'data-layout': layout,
+  ...(idBase !== undefined ? { 'data-choice-id-base': idBase } : {}),
+  ...(fieldName !== undefined ? { 'data-choice-field-name': fieldName } : {}),
+})
+
 export const ElectionQuestion = ({ question, index }: QuestionProps) => {
   const { election } = useElection()
   const { ElectionQuestion: Slot } = useComponents()
@@ -45,9 +62,13 @@ export const ElectionQuestion = ({ question, index }: QuestionProps) => {
   } = useFormContext()
   const layout = getQuestionLayout(question)
   const hasExtendedChoices = question.choices.some(hasExtendedChoiceMeta)
-  const selectionMode = selectionModeForType(inferQuestionBallotType(question))
+  // Undefined when nothing in the question names or shapes a ballot type (e.g. a legacy
+  // election projected without one) — rendered read-only below, never as a guessed type.
+  const ballotType = tryInferQuestionBallotType(question)
+  const selectionMode = ballotType === undefined ? 'single' : selectionModeForType(ballotType)
   const invalid = Boolean((errors as Record<string, unknown>)[index])
   const description = resolveTitle((question as any).description)
+  const fieldProps = { question, index, layout, presentation: getQuestionPresentation(question) }
 
   return (
     <Slot
@@ -60,23 +81,25 @@ export const ElectionQuestion = ({ question, index }: QuestionProps) => {
       title={resolveTitle(question.title)}
       description={description || undefined}
       fields={
-        <FieldSwitcher
-          question={question}
-          index={index}
-          layout={layout}
-          presentation={getQuestionPresentation(question)}
-        />
+        ballotType === undefined ? (
+          <UnsupportedQuestion {...fieldProps} />
+        ) : (
+          <FieldSwitcher {...fieldProps} ballotType={ballotType} />
+        )
       }
       tip={<QuestionTip question={question} index={index} />}
     />
   )
 }
 
-const FieldSwitcher = (props: QuestionProps & { layout: QuestionLayout; presentation: QuestionChoicePresentation }) => {
+const FieldSwitcher = ({
+  ballotType,
+  ...props
+}: QuestionProps & { ballotType: BallotType; layout: QuestionLayout; presentation: QuestionChoicePresentation }) => {
   const { election } = useElection()
   if (!election) return null
 
-  switch (inferQuestionBallotType(props.question)) {
+  switch (ballotType) {
     case BallotType.MultiChoice:
       return <MultiChoice {...props} />
     case BallotType.Approval:
@@ -86,6 +109,52 @@ const FieldSwitcher = (props: QuestionProps & { layout: QuestionLayout; presenta
     default:
       return <SingleChoice {...props} />
   }
+}
+
+/**
+ * A question no ballot type can be inferred for: its choices, disabled, and why. There is
+ * no encoding to cast a selection with, so the field is registered with a rule that always
+ * fails: react-hook-form then refuses every submit through its own validation (and
+ * `onInvalid`), flagging the question invalid, before the vote handler or its
+ * confirmation dialog run. `QuestionsFormProvider` re-checks in the vote handler for
+ * custom slots that never mount this field.
+ */
+const UnsupportedQuestion = ({
+  index,
+  question,
+  layout,
+  presentation,
+}: QuestionProps & { layout: QuestionLayout; presentation: QuestionChoicePresentation }) => {
+  const { control } = useFormContext()
+  const { QuestionsError } = useComponents()
+  const t = useReactComponentsLocalize()
+  const message = t('errors.question_unsupported')
+
+  return (
+    <>
+      {/* Registers the field only; the message below is shown whether or not it fired. */}
+      <Controller control={control} name={index} rules={{ validate: () => message }} render={() => <></>} />
+      {question.choices.map((choice: Choice) => {
+        const value = choice.value.toString()
+        return (
+          <QuestionChoice
+            key={value}
+            choice={choice}
+            value={value}
+            controlType='radio'
+            selectionMode='single'
+            presentation={presentation}
+            compact={!hasChoiceImage(choice) && layout === 'list'}
+            dataAttrs={choiceDataAttrs(layout, { idBase: `question-${index}-choice-${value}` })}
+            selected={false}
+            disabled
+            onSelect={() => {}}
+          />
+        )
+      })}
+      <QuestionsError error={message} variant='field' />
+    </>
+  )
 }
 
 /**
@@ -171,15 +240,10 @@ const RankedChoice = ({
                   value={value}
                   compact={!hasChoiceImage(choice) && layout === 'list'}
                   presentation={presentation}
-                  dataAttrs={{
-                    'data-choice-card': '',
-                    'data-choice-control': '',
-                    'data-choice-body': '',
-                    'data-choice-media': '',
-                    'data-layout': layout,
-                    'data-choice-id-base': `question-${index}-choice-${value}`,
-                    'data-choice-field-name': field.name,
-                  }}
+                  dataAttrs={choiceDataAttrs(layout, {
+                    idBase: `question-${index}-choice-${value}`,
+                    fieldName: field.name,
+                  })}
                   position={at >= 0 ? at + 1 : null}
                   options={positionLabels.map((label, i) => ({
                     position: i + 1,
@@ -253,15 +317,10 @@ const MultiChoice = ({
                   selectionMode='multiple'
                   presentation={presentation}
                   compact={!hasChoiceImage(choice) && layout === 'list'}
-                  dataAttrs={{
-                    'data-choice-card': '',
-                    'data-choice-control': '',
-                    'data-choice-body': '',
-                    'data-choice-media': '',
-                    'data-layout': layout,
-                    'data-choice-id-base': `question-${index}-choice-${value}`,
-                    'data-choice-field-name': field.name,
-                  }}
+                  dataAttrs={choiceDataAttrs(layout, {
+                    idBase: `question-${index}-choice-${value}`,
+                    fieldName: field.name,
+                  })}
                   selected={currentValues.includes(value)}
                   disabled={disabled || maxSelected}
                   onSelect={(checked) => {
@@ -322,15 +381,10 @@ const ApprovalChoice = ({
                   selectionMode='multiple'
                   presentation={presentation}
                   compact={!hasChoiceImage(choice) && layout === 'list'}
-                  dataAttrs={{
-                    'data-choice-card': '',
-                    'data-choice-control': '',
-                    'data-choice-body': '',
-                    'data-choice-media': '',
-                    'data-layout': layout,
-                    'data-choice-id-base': `question-${index}-choice-${value}`,
-                    'data-choice-field-name': field.name,
-                  }}
+                  dataAttrs={choiceDataAttrs(layout, {
+                    idBase: `question-${index}-choice-${value}`,
+                    fieldName: field.name,
+                  })}
                   selected={currentValues.includes(value)}
                   disabled={disabled}
                   onSelect={(checked) => {
@@ -381,13 +435,7 @@ const SingleChoice = ({
               selectionMode='single'
               presentation={presentation}
               compact={!hasChoiceImage(choice) && layout === 'list'}
-              dataAttrs={{
-                'data-choice-card': '',
-                'data-choice-control': '',
-                'data-choice-body': '',
-                'data-choice-media': '',
-                'data-layout': layout,
-              }}
+              dataAttrs={choiceDataAttrs(layout)}
               selected={field.value === choice.value.toString()}
               disabled={disabled}
               onSelect={(checked) => {

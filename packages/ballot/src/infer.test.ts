@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { inferBallotType, inferQuestionBallotType } from './infer'
+import { inferBallotType, inferQuestionBallotType, tryInferQuestionBallotType } from './infer'
 import { BallotType } from './types'
+import { questionReservesAbstain, questionSelectionRange } from './abstain'
+import { decodeQuestionResults } from './decode'
+import { encodeQuestionSelections } from './encode'
 import type { Election } from '@vocdoni/api-types'
 
 describe('inferBallotType', () => {
@@ -171,6 +174,16 @@ describe('inferBallotType', () => {
       }
     })
 
+    it('does not read an inherited object key as a type name', () => {
+      // Same lookup tables as the per-question path: 'constructor' used to resolve to
+      // Object itself and short-circuit the shape rules with a non-BallotType.
+      const shaped = createElection({ maxCount: 3, maxValue: 4 })
+      for (const name of ['constructor', 'toString', '__proto__']) {
+        expect(inferBallotType({ ...shaped, type: name })).toBe(BallotType.MultiChoice)
+        expect(inferBallotType({ ...shaped, meta: { type: { name } } })).toBe(BallotType.MultiChoice)
+      }
+    })
+
     it('ignores an unrecognized, empty or absent name', () => {
       // An unknown spelling must not hijack the tree, and an empty string is the stored
       // form for raw-protocol questions, so it must read as "no name". (`ranked` used to
@@ -322,5 +335,60 @@ describe('inferQuestionBallotType', () => {
     expect(() => inferQuestionBallotType({})).toThrow(/cannot infer ballot type/)
     expect(() => inferQuestionBallotType({ type: 'singleChoice' })).toThrow(/cannot infer/)
     expect(() => inferQuestionBallotType({ type: 'approval' })).toThrow(/cannot infer/)
+  })
+})
+
+describe('tryInferQuestionBallotType', () => {
+  // A legacy vochain election as GET /processes projects it (saas-backend #698): no type,
+  // no protocol, no metadata. Process 690e1e8b2035563c86664907 on LTS.
+  const legacyProjection = {
+    type: '',
+    typeSetup: { minChoices: 0, maxChoices: 0, uniqueChoices: false, budget: 0, costExponent: 0 },
+    choices: [
+      { title: { default: 'Teular el garatge' }, value: 0 },
+      { title: { default: 'Teular la casa sencera' }, value: 1 },
+      { title: { default: 'Pagar la hipoteca' }, value: 2 },
+    ],
+  }
+
+  it('returns undefined where inferQuestionBallotType throws', () => {
+    expect(() => inferQuestionBallotType(legacyProjection)).toThrow(/cannot infer ballot type/)
+    expect(tryInferQuestionBallotType(legacyProjection)).toBeUndefined()
+  })
+
+  it('is the only per-question helper that does not throw on it', () => {
+    // Render code must check tryInferQuestionBallotType first: these still refuse.
+    expect(() => questionSelectionRange(legacyProjection)).toThrow(/cannot infer ballot type/)
+    expect(() => questionReservesAbstain(legacyProjection)).toThrow(/cannot infer ballot type/)
+    expect(() => decodeQuestionResults(legacyProjection, [['0', '0', '0']])).toThrow(/cannot infer ballot type/)
+    expect(() => encodeQuestionSelections(legacyProjection, [0])).toThrow(/cannot infer ballot type/)
+  })
+
+  it('does not read an inherited object key as a type name', () => {
+    // `type` and `metadata.type.name` are creator-controlled; on a plain lookup table
+    // 'constructor' resolved to Object itself, a truthy non-BallotType.
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      expect(tryInferQuestionBallotType({ type: name })).toBeUndefined()
+      expect(tryInferQuestionBallotType({ metadata: { type: { name } } })).toBeUndefined()
+      expect(() => inferQuestionBallotType({ type: name })).toThrow(/cannot infer ballot type/)
+    }
+  })
+
+  it('agrees with inferQuestionBallotType whenever that one answers', () => {
+    const cases = [
+      { type: 'singlechoice' },
+      { type: 'multichoice' },
+      { type: 'ranked' },
+      { metadata: { type: { name: 'multiple-choice' } } },
+      {
+        ballotProtocol: {
+          maxCount: 3, maxValue: 1, maxVoteOverwrites: 0, maxTotalCost: 0,
+          costExponent: 1, uniqueValues: false, costFromWeight: false,
+        },
+      },
+    ]
+    for (const question of cases) {
+      expect(tryInferQuestionBallotType(question)).toBe(inferQuestionBallotType(question))
+    }
   })
 })

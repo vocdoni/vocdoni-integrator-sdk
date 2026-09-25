@@ -338,6 +338,23 @@ Key election components (all from `@vocdoni/react-components`):
 | `<Voted />` | The voter's vote ids — one line per voted question |
 | `<ElectionEnvelope />` | Vote envelope / nullifier display |
 
+**A question with no inferable ballot type degrades instead of crashing.** Legacy
+elections projected by `GET /processes` can carry questions with an empty `type`, no
+`ballotProtocol` and no `metadata`. None of the components infer a type for them by
+throwing — they use `tryInferQuestionBallotType` from `@vocdoni/ballot` and:
+
+- `<QuestionsTypeBadge />` and `<QuestionTip />` render nothing;
+- `<ElectionQuestions />` renders the question's choices disabled plus a `QuestionsError`
+  (`variant='field'`, key `errors.question_unsupported`), and registers the question as a
+  field that always fails validation, so every submit is refused before the confirmation
+  dialog (reaching `onInvalid`, with the question flagged invalid) — no vote is cast for
+  any question of that process;
+- `<ElectionResults />` lists the choices with `votes` and `percent` set to `''` (the
+  default slot then omits the tally), while the process's other questions decode normally.
+
+Custom slots receiving `ElectionResultChoice` should handle the empty `votes`/`percent`.
+Code of your own that runs at render time should use `tryInferQuestionBallotType` too.
+
 **Failed votes are shown, not swallowed.** `<ElectionQuestions />` submits through
 react-hook-form, whose `handleSubmit` rejects when the handler throws — with nothing
 awaiting that promise, a rejected cast used to leave the page silent while the vote was

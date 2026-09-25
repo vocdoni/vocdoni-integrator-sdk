@@ -2,6 +2,16 @@ import type { BallotProtocol, Election } from '@vocdoni/api-types'
 import { BallotType } from './types'
 
 /**
+ * A name → type lookup table with no prototype. The names it is indexed with are
+ * creator-controlled (`type`, `metadata.type.name`), and on a plain object literal an
+ * inherited key such as `constructor` or `toString` would resolve to a function — a
+ * truthy non-{@link BallotType} that short-circuits every inference below.
+ */
+function nameTable(entries: Record<string, BallotType>): Readonly<Record<string, BallotType | undefined>> {
+  return Object.freeze(Object.assign(Object.create(null) as Record<string, BallotType>, entries))
+}
+
+/**
  * Legacy vochain type names — the `ElectionResultsTypeNames` enum of `@vocdoni/sdk`,
  * as stored under `type.name` in an election's (or, in the SaaS model, a question's)
  * open-ended metadata bag.
@@ -17,13 +27,13 @@ import { BallotType } from './types'
  * No `ranked` entry: the legacy enum has no such member. `ranked` is this SDK's own
  * name — see {@link SDK_TYPE_NAMES}.
  */
-const LEGACY_TYPE_NAMES: Record<string, BallotType> = {
+const LEGACY_TYPE_NAMES = nameTable({
   'single-choice-multiquestion': BallotType.SingleChoice,
   'multiple-choice': BallotType.MultiChoice,
   approval: BallotType.Approval,
   'budget-based': BallotType.Budget,
   quadratic: BallotType.Quadratic,
-}
+})
 
 /**
  * SaaS question type names (`VotingProcessQuestion.type`, i.e.
@@ -31,10 +41,10 @@ const LEGACY_TYPE_NAMES: Record<string, BallotType> = {
  * raw-`ballotProtocol` questions, which is why an empty string must read as "no name".
  * See {@link LEGACY_TYPE_NAMES} for why the two tables are not merged.
  */
-const SAAS_TYPE_NAMES: Record<string, BallotType> = {
+const SAAS_TYPE_NAMES = nameTable({
   singlechoice: BallotType.SingleChoice,
   multichoice: BallotType.MultiChoice,
-}
+})
 
 /**
  * Names this SDK defines itself (`ranked`, issue #22), recognized in **both** name
@@ -46,9 +56,9 @@ const SAAS_TYPE_NAMES: Record<string, BallotType> = {
  * verbatim — but `type` is still resolved here for callers keeping their own record.
  * See packages/ballot/README.md for the full model.
  */
-const SDK_TYPE_NAMES: Record<string, BallotType> = {
+const SDK_TYPE_NAMES = nameTable({
   ranked: BallotType.Ranked,
-}
+})
 
 /**
  * True when a question's legacy metadata bag declares `multiple-choice` — the *pick-slot*
@@ -73,12 +83,8 @@ export function declaresLegacyPickSlot(question: { metadata?: Record<string, unk
  * of the same form, so disagreement is a form that cannot be submitted.
  */
 export function declaresRanked(question: { type?: string; metadata?: Record<string, unknown> }): boolean {
-  try {
-    return inferQuestionBallotType(question) === BallotType.Ranked
-  } catch {
-    // Neither a recognized name nor a protocol: nothing declares anything.
-    return false
-  }
+  // Neither a recognized name nor a protocol reads as undefined: nothing declares anything.
+  return tryInferQuestionBallotType(question) === BallotType.Ranked
 }
 
 /**
@@ -222,27 +228,47 @@ export function inferBallotType(
  * An unrecognized or empty name (the stored form for raw-`ballotProtocol` questions) falls
  * through to the shape rules.
  *
- * Backend reads always carry a `ballotProtocol`, so the no-protocol path only applies to
- * partial shapes (e.g. `PublicQuestionResponse`); with neither a recognized name nor a
- * protocol there is nothing to infer from, so it throws rather than silently assuming
- * single-choice.
+ * A read may omit the `ballotProtocol`: partial shapes (e.g. `PublicQuestionResponse`) and
+ * legacy vochain elections projected by `GET /processes`, which can also carry no `type`
+ * and no `metadata`. With neither a recognized name nor a protocol there is nothing to
+ * infer from, so it throws rather than silently assuming single-choice — render code
+ * should use {@link tryInferQuestionBallotType} instead.
  */
 export function inferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
 }): BallotType {
+  const ballotType = tryInferQuestionBallotType(question)
+  if (ballotType === undefined) {
+    throw new Error(
+      'cannot infer ballot type: question has neither a ballotProtocol nor a supported type'
+    )
+  }
+  return ballotType
+}
+
+/**
+ * Non-throwing {@link inferQuestionBallotType}: the same answer, or `undefined` when the
+ * question has neither a recognized type name nor a `ballotProtocol` to infer from.
+ *
+ * For render paths and other callers that must degrade rather than fail on such a
+ * question — e.g. legacy vochain elections the SaaS API projects without a type, a
+ * protocol or metadata. `undefined` means "unknown", never "single-choice": callers
+ * must not let a voter cast a ballot for it, nor decode its results.
+ */
+export function tryInferQuestionBallotType(question: {
+  ballotProtocol?: BallotProtocol
+  type?: string
+  metadata?: Record<string, unknown>
+}): BallotType | undefined {
   const declared =
     (question.type ? (SAAS_TYPE_NAMES[question.type] ?? SDK_TYPE_NAMES[question.type]) : undefined) ??
     legacyTypeFromMeta(question.metadata)
   if (declared) return declared
 
   const bp = question.ballotProtocol
-  if (!bp) {
-    throw new Error(
-      'cannot infer ballot type: question has neither a ballotProtocol nor a supported type'
-    )
-  }
+  if (!bp) return undefined
   if (bp.maxValue === 0) {
     return bp.costExponent === 2 ? BallotType.Quadratic : BallotType.Budget
   }
