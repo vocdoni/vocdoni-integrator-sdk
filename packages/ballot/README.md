@@ -14,8 +14,9 @@ export const BallotType: {
   SingleChoice: 'single-choice'
   MultiChoice: 'multichoice'
   Approval: 'approval'
-  // Only ever selected by a declared `ranked` name — never inferred from shape, because
-  // a ranked protocol is byte-identical to a full-slate pick-slot multichoice.
+  // Needs both a declared `ranked` name and a protocol that admits a ranking (unique
+  // values, maxValue >= maxCount - 1): a ranked protocol is byte-identical to a
+  // full-slate pick-slot multichoice, so the shape alone never selects it.
   Ranked: 'ranked'
   Budget: 'budget'
   Quadratic: 'quadratic'
@@ -26,14 +27,16 @@ export type BallotType = (typeof BallotType)[keyof typeof BallotType]
 // on top of the election config: `type` (the explicit name) and `meta` (the legacy
 // metadata bag, read as `meta.type.name`). See "Declared type names" below.
 
-// Infer the ballot type from the declared type name, falling back to election config
+// Infer the ballot type from the election config; a declared name only breaks ties
+// the config can't resolve (see "Declared type names" below)
 export function inferBallotType(
   input: Pick<Election, 'questions' | 'voteType'> & { type?: string; meta?: Record<string, unknown> }
 ): BallotType
 
-// Per-question counterpart of inferBallotType: declared `type`, then legacy
-// `metadata.type.name`, then the question's `ballotProtocol`. Throws when the question
-// carries none of them (e.g. a legacy election projected by GET /processes).
+// Per-question counterpart of inferBallotType: the question's `ballotProtocol` decides,
+// and a declared `type` or legacy `metadata.type.name` only picks among the layouts that
+// protocol admits. With no protocol the name is the only source. Throws when the question
+// carries neither (e.g. a legacy election projected by GET /processes).
 export function inferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
@@ -86,10 +89,11 @@ export function unsatisfiableQuestionReason(question: {
 export function isUnsatisfiableProtocol(bp: ProtocolBounds): boolean
 export function isUnsatisfiableQuestion(question: { /* as above */ }): boolean
 
-// Why a RANKED question's protocol can never produce a ranking, or null. The one case
-// is `maxValue: 0` — "unbounded" for every other type, but it puts the chain in discrete
-// aggregation, and the Borda decode then scores every option zero. Folded into
-// `unsatisfiableQuestionReason` and refused by both encoders; exported for read-side checks.
+// Why a question DECLARED ranked has a protocol that can never produce a ranking, or
+// null. The one case is `maxValue: 0` — the chain's discrete aggregation, which the SDK
+// reads as budget (the ranked name is ignored there). Folded into
+// `unsatisfiableQuestionReason` and refused by both encoders, so the creator hears about
+// the mismatch instead of silently publishing a budget ballot.
 export function unrankableProtocolReason(numChoices: number, maxValue: number): string | null
 
 // The part of a ballot protocol the satisfiability rule reads.
@@ -118,10 +122,11 @@ export function declaresLegacyPickSlot(question: {
   metadata?: Record<string, unknown>
 }): boolean
 
-// True when a question declares itself `ranked`, in either name channel. The same
-// question `inferQuestionBallotType` asks, minus the shape fallback and minus its throw,
+// True when the question is inferred ranked: a `ranked` name in either channel that its
+// protocol (when present) admits. Agrees with `inferQuestionBallotType` minus its throw,
 // so it is safe on a partial read that carries neither a protocol nor a type.
 export function declaresRanked(question: {
+  ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
 }): boolean
@@ -170,7 +175,24 @@ picks and no abstain allowance generates `{ maxCount: 2, maxValue: 1, uniqueChoi
 — byte-identical to a two-option `ApprovalElection`. Nothing in the protocol separates them,
 so reading the results by shape alone silently reports the wrong tally.
 
-If the type is known, it is used. Two sources are consulted, in order, before shape:
+**The protocol decides; a name only breaks ties.** Each shape admits a small set of
+layouts, with a default for when nothing else is known:
+
+| shape | admitted (default first) |
+| --- | --- |
+| `maxValue: 0` | budget if `costExponent` is 1, quadratic otherwise — nothing else |
+| `maxCount: 1` | single-choice — nothing else |
+| `maxValue: 1`, repeatable values | approval (dense), multichoice (pick-slot `multiple-choice` only when `maxCount` is 2) |
+| unique values, `maxValue >= maxCount - 1` | multichoice, ranked |
+| anything else | multichoice |
+
+A declared name picks among the admitted layouts; a name outside that set is ignored, so a
+stale or mislabelled name can no longer misread a protocol that says otherwise. (An
+approval ballot over three options labelled `single-choice-multiquestion` decodes as
+approval.) With no protocol at all, the name is the only source. At election level the same
+rule applies to `voteType`, and more than one question is always single-choice.
+
+Two sources are consulted, in order:
 
 ```typescript
 // 1. the explicit field — SaaS `question.type`, or an election-level override
@@ -199,13 +221,14 @@ The legacy bag is read per question as well as per election, because in the SaaS
 question *is* its own vochain process — a question mapped from a legacy election carries
 that election's `metadata.type`.
 
-An absent, empty or unrecognized name falls through to the shape rules unchanged.
+An absent, empty, unrecognized or inadmissible name falls through to the shape default.
 
 `ranked` is the exception to the follows-the-field rule, because it belongs to neither
 upstream vocabulary — it is this SDK's own name, so no layout is ambiguous between the two
 tables and both consult it. It is also the **only** way to reach `BallotType.Ranked`: no
-shape rule produces it, since a ranked protocol is byte-identical to a pick-slot multichoice
-whose voters fill every slot. In practice the writable channel is the metadata bag — the
+shape default produces it, since a ranked protocol is byte-identical to a pick-slot
+multichoice whose voters fill every slot — but the name counts only on a shape that admits a
+ranking (unique values, `maxValue >= maxCount - 1`). In practice the writable channel is the metadata bag — the
 backend's `type` vocabulary is `['singlechoice', 'multichoice']` and it rejects anything
 else, while storing and echoing `metadata` verbatim:
 
@@ -297,10 +320,10 @@ methods need the ballots. Two consequences for the decoded shape:
 - There is **no `abstain` bucket**. The sentinel columns the multichoice branch unifies are a
   pick-slot device for unfilled slots; a ranking has none, since every option is a field.
 
-Ranked is also the only type for which `maxValue: 0` is fatal rather than lax — it puts the
-chain in the discrete aggregation described above, so the index-weighted sum reads column 0
-and scores every option zero. `unrankableProtocolReason` reports it, and both encoders and
-`validateSelections` refuse such a question outright.
+A question declared `ranked` with `maxValue: 0` is not a ranking at all — that shape puts
+the chain in the discrete aggregation described above, so it decodes as budget and the name
+is ignored. Because that is almost certainly a creator mistake, `unrankableProtocolReason`
+reports it, and both encoders and `validateSelections` refuse such a question outright.
 
 ```typescript
 // 3 voters all rank C2 > C0 > C1 → raw [['0','3','0'], ['3','0','0'], ['0','0','3']]

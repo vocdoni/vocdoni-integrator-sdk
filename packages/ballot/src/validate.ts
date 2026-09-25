@@ -1,6 +1,6 @@
 import type { Election, Question, VoteType } from '@vocdoni/api-types'
 import { BallotType, type BallotSelections } from './types'
-import { inferBallotType } from './infer'
+import { electionNamesRanked, inferBallotType } from './infer'
 import { normalizeSelections } from './selections'
 import {
   duplicateRankedValuesReason,
@@ -63,13 +63,16 @@ export function validateSelections(
   }
   // Ranked's question-level defects, refused in the same order as encodeBallot so the
   // two agree on verdict and diagnosis; neither shows on any individual selection.
-  if (ballotType === BallotType.Ranked) {
-    const choices = questions[0]?.choices ?? []
-    const unrankable = unrankableProtocolReason(choices.length, voteType.maxValue)
+  // Keyed on the declared name for the same reason as there: a maxValue 0 shape infers
+  // budget whatever the name says.
+  if (electionNamesRanked(input)) {
+    const unrankable = unrankableProtocolReason(questions[0]?.choices.length ?? 0, voteType.maxValue)
     if (unrankable) {
       throw new Error(`Question 0: ${unrankable}`)
     }
-    const ambiguous = duplicateRankedValuesReason(choices)
+  }
+  if (ballotType === BallotType.Ranked) {
+    const ambiguous = duplicateRankedValuesReason(questions[0]?.choices ?? [])
     if (ambiguous) {
       throw new Error(`Question 0: ${ambiguous}`)
     }

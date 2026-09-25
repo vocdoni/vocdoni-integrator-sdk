@@ -1,6 +1,6 @@
 import type { BallotProtocol, Choice, Election, QuestionTypeSetup, VoteType } from '@vocdoni/api-types'
 import { BallotType } from './types'
-import { declaresRanked, inferBallotType, inferQuestionBallotType, isDenseBallotProtocol } from './infer'
+import { inferBallotType, inferQuestionBallotType, isPickSlotLayout, tryInferQuestionBallotType } from './infer'
 
 /**
  * Lowest `maxValue` a multichoice election must reserve so that a partial selection
@@ -57,19 +57,24 @@ export function questionSelectionRange(question: {
   typeSetup?: QuestionTypeSetup
   choices: Choice[]
 }): { min: number; max: number } {
+  // Read off the inferred type and layout, the same answer encode and decode act on —
+  // not off the shape or the name alone, either of which can disagree with them.
+  const ballotType = tryInferQuestionBallotType(question)
   // Ranked is a full slate: a partial ranking repeats a rank and the chain drops the
   // whole ballot at tally, so minChoices/maxChoices do not apply.
-  if (declaresRanked(question)) {
+  if (ballotType === BallotType.Ranked) {
     const n = question.choices.length
     return { min: n, max: n }
   }
   const bp = question.ballotProtocol
-  // Dense layout (named multichoice, protocol optionally omitted on public
-  // reads): maxCount is the number of choices, not the pick bound — picks are
-  // bounded by maxTotalCost (maxChoices at creation), and a partial selection
-  // is always encodable (unpicked choices are just 0 fields, no sentinel
-  // reservation involved).
-  if ((bp && isDenseBallotProtocol(bp)) || (!bp && question.type === 'multichoice')) {
+  // Dense layout (approval, or named multichoice with its protocol optionally omitted
+  // on public reads): maxCount is the number of choices, not the pick bound — picks are
+  // bounded by maxTotalCost (maxChoices at creation), and a partial selection is always
+  // encodable (unpicked choices are just 0 fields, no sentinel reservation involved).
+  if (
+    ballotType === BallotType.Approval ||
+    (ballotType === BallotType.MultiChoice && !isPickSlotLayout(question))
+  ) {
     const max = bp?.maxTotalCost || question.typeSetup?.maxChoices || question.choices.length
     const min = Math.min(max, Math.max(1, question.typeSetup?.minChoices ?? 1))
     return { min, max }

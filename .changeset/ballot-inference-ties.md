@@ -1,0 +1,6 @@
+---
+'@vocdoni/ballot': patch
+'@vocdoni/api-client': patch
+---
+
+Infer the ballot type from the protocol first and use a declared type name (SaaS `type`, legacy `metadata.type.name` / `meta.type.name`) only to break ties the protocol can't resolve. A name picks among the layouts the shape admits; a name the shape rules out is now ignored instead of overriding it — e.g. an approval ballot over three options labelled `single-choice-multiquestion` decodes as approval, and a `ranked` name on `maxCount: 1` is single-choice. Questions with no `ballotProtocol` are still typed by name alone. The same rule applies at election level against `voteType`. `declaresRanked`, `isPickSlotLayout`, `questionSelectionRange` and the creation-time checks in `@vocdoni/api-client` follow the same answer. A question declared `ranked` with `maxValue: 0` is still refused at creation and encode time, but now decodes as budget.

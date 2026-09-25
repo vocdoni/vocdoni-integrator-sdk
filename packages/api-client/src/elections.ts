@@ -110,11 +110,11 @@ function validateQuestionBallotConfig(question: VotingProcessQuestionRequest, in
     // keeps rising. Confirmed live in integration/value-skew.itest.ts. After publish
     // there is no fix but a new election, so refuse here.
     // `metadata` is load-bearing, not decoration: `inferQuestionBallotType` reads
-    // `metadata.type.name` as its second type source, ahead of every shape rule, and
+    // `metadata.type.name` to break the ties the protocol cannot resolve, and
     // `declaresLegacyPickSlot` reads it to tell the pick-slot layout from the dense one
     // (both present as {maxValue: 1, maxCount > 1, uniqueValues: false}). Omitting it
-    // here would judge the question by shape while `encodeQuestionBallot` — which does
-    // read it — judges it by name, so creation would accept a question the codec then
+    // here would judge the question by shape alone while `encodeQuestionBallot` — which
+    // does read it — breaks the tie by name, so creation would accept a question the codec then
     // refuses: the created-but-unvotable election this guard exists to prevent. It
     // matters most on exactly this branch, since `type` is stored empty for raw
     // `ballotProtocol` questions, leaving the metadata bag as the only name.

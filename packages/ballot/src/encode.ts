@@ -1,6 +1,6 @@
 import type { BallotProtocol, Choice, Election, Question, QuestionTypeSetup, VoteType } from '@vocdoni/api-types'
 import { BallotType, type BallotSelections } from './types'
-import { declaresRanked, inferBallotType, inferQuestionBallotType, isPickSlotLayout } from './infer'
+import { declaresRanked, electionNamesRanked, inferBallotType, inferQuestionBallotType, isPickSlotLayout } from './infer'
 import { normalizeSelections } from './selections'
 import { requiredAbstainMaxValue } from './abstain'
 import {
@@ -81,12 +81,16 @@ export function encodeBallot(
   }
   // Ranked's question-level defects have no per-ballot backstop (at maxValue 0
   // assertEncodedBallot treats the bound as absent, and duplicated choice values leave
-  // every ballot well-formed), so refuse them up front, for every voter.
-  if (ballotType === BallotType.Ranked) {
+  // every ballot well-formed), so refuse them up front, for every voter. The maxValue 0
+  // one is keyed on the declared name: inference reads that shape as budget, ignoring
+  // the name, so the inferred type can never be Ranked there.
+  if (electionNamesRanked(input)) {
     const unrankable = unrankableProtocolReason(questions[0]?.choices.length ?? 0, voteType.maxValue)
     if (unrankable) {
       throw new Error(`cannot encode a ballot for question 0: ${unrankable}`)
     }
+  }
+  if (ballotType === BallotType.Ranked) {
     const ambiguous = duplicateRankedValuesReason(questions[0]?.choices ?? [])
     if (ambiguous) {
       throw new Error(`cannot encode a ballot for question 0: ${ambiguous}`)
