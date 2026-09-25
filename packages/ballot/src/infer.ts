@@ -173,18 +173,19 @@ function electionNames(input: { type?: string; meta?: Record<string, unknown> })
 }
 
 /**
- * The ballot types a protocol shape admits, default first. Only two ties exist (approval vs
- * multichoice, multichoice vs ranked); everywhere else a declared name has nothing to decide.
+ * The ballot types a protocol shape admits, default first. Ranked needs room for one distinct
+ * rank per field; `uniqueValues` isn't required, as creation never demanded it for ranked.
  */
 function admittedTypes(shape: ProtocolShape): readonly BallotType[] {
   if (shape.maxValue === 0) {
     return [shape.costExponent === 2 ? BallotType.Quadratic : BallotType.Budget]
   }
   if (shape.maxCount === 1) return [BallotType.SingleChoice]
-  if (shape.maxValue === 1 && !shape.uniqueValues) return [BallotType.Approval, BallotType.MultiChoice]
-  return shape.uniqueValues && shape.maxValue >= shape.maxCount - 1
-    ? [BallotType.MultiChoice, BallotType.Ranked]
-    : [BallotType.MultiChoice]
+  const base =
+    shape.maxValue === 1 && !shape.uniqueValues
+      ? [BallotType.Approval, BallotType.MultiChoice]
+      : [BallotType.MultiChoice]
+  return shape.maxValue >= shape.maxCount - 1 ? [...base, BallotType.Ranked] : base
 }
 
 /**

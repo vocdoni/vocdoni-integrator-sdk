@@ -14,9 +14,9 @@ export const BallotType: {
   SingleChoice: 'single-choice'
   MultiChoice: 'multichoice'
   Approval: 'approval'
-  // Needs both a declared `ranked` name and a protocol that admits a ranking (unique
-  // values, maxValue >= maxCount - 1): a ranked protocol is byte-identical to a
-  // full-slate pick-slot multichoice, so the shape alone never selects it.
+  // Needs a declared `ranked` name and a full-slate protocol (maxValue >= maxCount - 1):
+  // a ranked protocol is byte-identical to a full-slate pick-slot multichoice, so the
+  // shape alone never selects it.
   Ranked: 'ranked'
   Budget: 'budget'
   Quadratic: 'quadratic'
@@ -182,8 +182,11 @@ layouts, with a default for when nothing else is known:
 | `maxValue: 0` | quadratic if `costExponent` is 2, budget otherwise — nothing else |
 | `maxCount: 1` | single-choice — nothing else |
 | `maxValue: 1`, repeatable values | approval (dense), multichoice (pick-slot `multiple-choice` only when `maxCount` is 2 or there are at most two options) |
-| unique values, `maxValue >= maxCount - 1` | multichoice, ranked |
 | anything else | multichoice |
+
+Any shape above `maxCount: 1` with `maxValue >= maxCount - 1` also admits ranked, as long as
+`maxCount` equals the option count when the options are known. Unique values aren't required:
+ranked questions were never created with them.
 
 A declared name picks among the admitted layouts; a name outside that set is ignored, so a
 stale or mislabelled name can no longer misread a protocol that says otherwise. (An
@@ -227,7 +230,7 @@ upstream vocabulary — it is this SDK's own name, so no layout is ambiguous bet
 tables and both consult it. It is also the **only** way to reach `BallotType.Ranked`: no
 shape default produces it, since a ranked protocol is byte-identical to a pick-slot
 multichoice whose voters fill every slot — but the name counts only on a shape that admits a
-ranking (unique values, `maxValue >= maxCount - 1`). In practice the writable channel is the metadata bag — the
+ranking (`maxValue >= maxCount - 1`, one field per option). In practice the writable channel is the metadata bag — the
 backend's `type` vocabulary is `['singlechoice', 'multichoice']` and it rejects anything
 else, while storing and echoing `metadata` verbatim:
 

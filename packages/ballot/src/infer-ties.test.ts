@@ -91,8 +91,9 @@ describe('inferQuestionBallotType: a name only breaks a tie the protocol cannot'
         [legacy('approval'), BallotType.Approval],
         [saas('multichoice'), BallotType.MultiChoice],
         [legacy('multiple-choice'), BallotType.MultiChoice],
+        [legacy('ranked'), BallotType.Ranked],
       ],
-      contradicting: [legacy('single-choice-multiquestion'), saas('singlechoice'), legacy('ranked')],
+      contradicting: [legacy('single-choice-multiquestion'), saas('singlechoice')],
     },
     {
       shape: 'maxValue 1, maxCount 2, uniqueValues (2-option index list or ranking)',
@@ -123,8 +124,18 @@ describe('inferQuestionBallotType: a name only breaks a tie the protocol cannot'
       contradicting: [legacy('approval'), legacy('budget-based')],
     },
     {
-      shape: 'pick-slot with repeats (no ranking without uniqueValues)',
+      shape: 'full slate with repeats (ranking or pick-slot)',
       protocol: bp({ maxCount: 3, maxValue: 2 }),
+      fallback: BallotType.MultiChoice,
+      admitted: [
+        [legacy('multiple-choice'), BallotType.MultiChoice],
+        [legacy('ranked'), BallotType.Ranked],
+      ],
+      contradicting: [legacy('approval'), legacy('single-choice-multiquestion')],
+    },
+    {
+      shape: 'pick-slot with repeats, too few values to rank',
+      protocol: bp({ maxCount: 4, maxValue: 2 }),
       fallback: BallotType.MultiChoice,
       admitted: [[legacy('multiple-choice'), BallotType.MultiChoice]],
       contradicting: [legacy('ranked'), legacy('approval'), legacy('single-choice-multiquestion')],
@@ -345,5 +356,24 @@ describe('ranked needs one field per option', () => {
     }
     expect(inferQuestionBallotType(question)).toBe(BallotType.MultiChoice)
     expect(declaresRanked(question)).toBe(false)
+  })
+})
+
+describe('ranked without uniqueValues', () => {
+  it('stays ranked on a full-slate protocol, as before #58', () => {
+    // Creation never required uniqueValues for ranked, so such elections exist; re-reading
+    // them as pick-slot would change their tally.
+    const question = {
+      ballotProtocol: bp({ maxCount: 3, maxValue: 2 }),
+      ...legacy('ranked'),
+      choices: choices(3),
+    }
+    expect(inferQuestionBallotType(question)).toBe(BallotType.Ranked)
+    expect(declaresRanked(question)).toBe(true)
+    expect(questionSelectionRange(question)).toEqual({ min: 3, max: 3 })
+    expect(encodeQuestionSelections(question, [2, 0, 1])).toEqual([1, 0, 2])
+    expect(
+      decodeQuestionResults(question, [['0', '1', '0'], ['1', '0', '0'], ['0', '0', '1']]).map((r) => r.votes)
+    ).toEqual([1, 0, 2])
   })
 })

@@ -115,8 +115,10 @@ The encoding pattern depends on the question's `ballotProtocol`:
 > | `maxValue: 0` | quadratic (`costExponent` 2), else budget — nothing else |
 > | `maxCount: 1` | single-choice — nothing else |
 > | `maxValue: 1`, repeatable | approval (dense); pick-slot `multiple-choice` only at `maxCount: 2` or over at most two options |
-> | unique, `maxValue >= maxCount - 1` | multichoice, ranked |
 > | anything else | multichoice |
+>
+> Any shape above `maxCount: 1` with `maxValue >= maxCount - 1` also admits ranked, when
+> `maxCount` equals the option count (if known). Unique values aren't required.
 >
 > Two sources are consulted, and **the vocabulary follows the field, not the
 > function** — each vocabulary names the opposite wire layout:
@@ -145,8 +147,8 @@ The encoding pattern depends on the question's `ballotProtocol`:
 > `ranked` is the odd one out: it is this SDK's own name, in neither upstream
 > vocabulary, and it is the **only** way to reach `BallotType.Ranked` — no shape
 > default produces it, because a ranking is byte-identical to a full-slate pick-slot
-> multichoice — and it counts only on a shape that admits a ranking (unique values,
-> `maxValue >= maxCount - 1`). The backend's `type` vocabulary is fixed at
+> multichoice — and it counts only on a shape that admits a ranking
+> (`maxValue >= maxCount - 1`, one field per option). The backend's `type` vocabulary is fixed at
 > `singlechoice`/`multichoice`, so create a ranked question with a raw
 > `ballotProtocol` plus the metadata bag; `type: 'ranked'` is still *read* for callers
 > keeping their own record of it. See the ranked section below.
@@ -336,7 +338,7 @@ number for every option (this was
 backend's own `type` vocabulary is `['singlechoice', 'multichoice']` and rejects
 anything else, so the metadata bag — which it stores and echoes back verbatim — is
 the channel. The declaration is necessary but not sufficient: it only counts on a
-unique-values protocol with `maxValue >= maxCount - 1`, and elsewhere it is ignored.
+protocol with `maxValue >= maxCount - 1` and one field per option, and elsewhere it is ignored.
 `declaresRanked(question)` reports whether a question is inferred ranked.
 
 ```ts
