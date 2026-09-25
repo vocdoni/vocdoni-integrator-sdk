@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { inferBallotType, inferQuestionBallotType } from './infer'
+import { inferBallotType, inferQuestionBallotType, tryInferQuestionBallotType } from './infer'
 import { BallotType } from './types'
+import { questionReservesAbstain, questionSelectionRange } from './abstain'
+import { decodeQuestionResults } from './decode'
+import { encodeQuestionSelections } from './encode'
 import type { Election } from '@vocdoni/api-types'
 
 describe('inferBallotType', () => {
@@ -322,5 +325,50 @@ describe('inferQuestionBallotType', () => {
     expect(() => inferQuestionBallotType({})).toThrow(/cannot infer ballot type/)
     expect(() => inferQuestionBallotType({ type: 'singleChoice' })).toThrow(/cannot infer/)
     expect(() => inferQuestionBallotType({ type: 'approval' })).toThrow(/cannot infer/)
+  })
+})
+
+describe('tryInferQuestionBallotType', () => {
+  // A legacy vochain election as GET /processes projects it (saas-backend #698): no type,
+  // no protocol, no metadata. Process 690e1e8b2035563c86664907 on LTS.
+  const legacyProjection = {
+    type: '',
+    typeSetup: { minChoices: 0, maxChoices: 0, uniqueChoices: false, budget: 0, costExponent: 0 },
+    choices: [
+      { title: { default: 'Teular el garatge' }, value: 0 },
+      { title: { default: 'Teular la casa sencera' }, value: 1 },
+      { title: { default: 'Pagar la hipoteca' }, value: 2 },
+    ],
+  }
+
+  it('returns undefined where inferQuestionBallotType throws', () => {
+    expect(() => inferQuestionBallotType(legacyProjection)).toThrow(/cannot infer ballot type/)
+    expect(tryInferQuestionBallotType(legacyProjection)).toBeUndefined()
+  })
+
+  it('is the only per-question helper that does not throw on it', () => {
+    // Render code must check tryInferQuestionBallotType first: these still refuse.
+    expect(() => questionSelectionRange(legacyProjection)).toThrow(/cannot infer ballot type/)
+    expect(() => questionReservesAbstain(legacyProjection)).toThrow(/cannot infer ballot type/)
+    expect(() => decodeQuestionResults(legacyProjection, [['0', '0', '0']])).toThrow(/cannot infer ballot type/)
+    expect(() => encodeQuestionSelections(legacyProjection, [0])).toThrow(/cannot infer ballot type/)
+  })
+
+  it('agrees with inferQuestionBallotType whenever that one answers', () => {
+    const cases = [
+      { type: 'singlechoice' },
+      { type: 'multichoice' },
+      { type: 'ranked' },
+      { metadata: { type: { name: 'multiple-choice' } } },
+      {
+        ballotProtocol: {
+          maxCount: 3, maxValue: 1, maxVoteOverwrites: 0, maxTotalCost: 0,
+          costExponent: 1, uniqueValues: false, costFromWeight: false,
+        },
+      },
+    ]
+    for (const question of cases) {
+      expect(tryInferQuestionBallotType(question)).toBe(inferQuestionBallotType(question))
+    }
   })
 })

@@ -26,6 +26,7 @@
   "empty": "Apparently this process has no questions 🤔",
   "errors": {
     "not_voted_in_ended_election": "You did not vote in this election and it's already finished",
+    "question_unsupported": "This question's ballot type isn't supported here, so it can't accept votes.",
     "question_not_votable": "This question can't accept votes: one of its options was set up in a way the ledger can't record. Your vote has not been cast. Please contact the organizer.",
     "unauthorized": "Not authorized to vote",
     "vote_failed": "Your vote could not be cast: {{ detail }}",

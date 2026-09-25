@@ -1,5 +1,5 @@
 import type { VotingProcessResponse } from '@vocdoni/api-types'
-import { BallotType, inferQuestionBallotType } from '@vocdoni/ballot'
+import { BallotType, tryInferQuestionBallotType } from '@vocdoni/ballot'
 import { FieldValues } from 'react-hook-form'
 import { useComponents } from '../../context/useComponents'
 import { useConfirm } from '../../../confirm/useConfirm'
@@ -18,7 +18,9 @@ export const QuestionsConfirmation = ({ answers, election }: QuestionsConfirmati
 
   const answersView = election.questions.map((question, index) => {
     const raw = answers[index.toString()]
-    const isSingleChoice = inferQuestionBallotType(question) === BallotType.SingleChoice
+    // Non-throwing: the form refuses to submit an uninferable question before confirming,
+    // but this dialog must not be the thing that crashes if it is ever reached anyway.
+    const isSingleChoice = tryInferQuestionBallotType(question) === BallotType.SingleChoice
 
     // Resolve each selected choice VALUE to its title.
     const titleForValue = (value: number) => {

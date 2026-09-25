@@ -16,6 +16,7 @@ export {
   declaresRanked,
   inferBallotType,
   inferQuestionBallotType,
+  tryInferQuestionBallotType,
   isDenseBallotProtocol,
   isPickSlotLayout,
 } from './infer'

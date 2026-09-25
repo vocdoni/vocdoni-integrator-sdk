@@ -73,12 +73,8 @@ export function declaresLegacyPickSlot(question: { metadata?: Record<string, unk
  * of the same form, so disagreement is a form that cannot be submitted.
  */
 export function declaresRanked(question: { type?: string; metadata?: Record<string, unknown> }): boolean {
-  try {
-    return inferQuestionBallotType(question) === BallotType.Ranked
-  } catch {
-    // Neither a recognized name nor a protocol: nothing declares anything.
-    return false
-  }
+  // Neither a recognized name nor a protocol reads as undefined: nothing declares anything.
+  return tryInferQuestionBallotType(question) === BallotType.Ranked
 }
 
 /**
@@ -195,6 +191,27 @@ export function inferBallotType(
 
   // Rule 3c: Otherwise → multichoice
   return BallotType.MultiChoice
+}
+
+/**
+ * Non-throwing {@link inferQuestionBallotType}: the same answer, or `undefined` when the
+ * question has neither a recognized type name nor a `ballotProtocol` to infer from.
+ *
+ * For render paths and other callers that must degrade rather than fail on such a
+ * question — e.g. legacy vochain elections the SaaS API projects without a type, a
+ * protocol or metadata. `undefined` means "unknown", never "single-choice": callers
+ * must not let a voter cast a ballot for it, nor decode its results.
+ */
+export function tryInferQuestionBallotType(question: {
+  ballotProtocol?: BallotProtocol
+  type?: string
+  metadata?: Record<string, unknown>
+}): BallotType | undefined {
+  try {
+    return inferQuestionBallotType(question)
+  } catch {
+    return undefined
+  }
 }
 
 /**

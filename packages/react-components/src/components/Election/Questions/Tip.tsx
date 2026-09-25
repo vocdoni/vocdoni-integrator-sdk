@@ -1,5 +1,5 @@
 import type { VotingProcessQuestion } from '@vocdoni/api-types'
-import { BallotType, inferQuestionBallotType, questionSelectionRange } from '@vocdoni/ballot'
+import { BallotType, questionSelectionRange, tryInferQuestionBallotType } from '@vocdoni/ballot'
 import { useWatch } from 'react-hook-form'
 import { useComponents } from '../../context/useComponents'
 import { useReactComponentsLocalize } from '../../../i18n/localize'
@@ -17,7 +17,8 @@ export const QuestionTip = ({ question, index = '0' }: { question?: VotingProces
 
   if (!question) return null
 
-  const ballotType = inferQuestionBallotType(question)
+  // An uninferable question (undefined) gets no tip, like any non-multichoice one.
+  const ballotType = tryInferQuestionBallotType(question)
   if (ballotType !== BallotType.MultiChoice && ballotType !== BallotType.Ranked) return null
 
   const ranked = ballotType === BallotType.Ranked

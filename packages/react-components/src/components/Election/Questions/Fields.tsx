@@ -1,5 +1,5 @@
 import type { Choice, VotingProcessQuestion } from '@vocdoni/api-types'
-import { BallotType, inferQuestionBallotType, questionSelectionRange } from '@vocdoni/ballot'
+import { BallotType, questionSelectionRange, tryInferQuestionBallotType } from '@vocdoni/ballot'
 import { Controller, useFormContext } from 'react-hook-form'
 import { QuestionChoicePresentation, QuestionLayout, QuestionSelectionMode } from '../../context/types'
 import { useComponents } from '../../context/useComponents'
@@ -45,7 +45,10 @@ export const ElectionQuestion = ({ question, index }: QuestionProps) => {
   } = useFormContext()
   const layout = getQuestionLayout(question)
   const hasExtendedChoices = question.choices.some(hasExtendedChoiceMeta)
-  const selectionMode = selectionModeForType(inferQuestionBallotType(question))
+  // Undefined when nothing in the question names or shapes a ballot type (e.g. a legacy
+  // election projected without one) — rendered read-only below, never as a guessed type.
+  const ballotType = tryInferQuestionBallotType(question)
+  const selectionMode = ballotType === undefined ? 'single' : selectionModeForType(ballotType)
   const invalid = Boolean((errors as Record<string, unknown>)[index])
   const description = resolveTitle((question as any).description)
 
@@ -60,23 +63,36 @@ export const ElectionQuestion = ({ question, index }: QuestionProps) => {
       title={resolveTitle(question.title)}
       description={description || undefined}
       fields={
-        <FieldSwitcher
-          question={question}
-          index={index}
-          layout={layout}
-          presentation={getQuestionPresentation(question)}
-        />
+        ballotType === undefined ? (
+          <UnsupportedQuestion
+            question={question}
+            index={index}
+            layout={layout}
+            presentation={getQuestionPresentation(question)}
+          />
+        ) : (
+          <FieldSwitcher
+            question={question}
+            index={index}
+            ballotType={ballotType}
+            layout={layout}
+            presentation={getQuestionPresentation(question)}
+          />
+        )
       }
       tip={<QuestionTip question={question} index={index} />}
     />
   )
 }
 
-const FieldSwitcher = (props: QuestionProps & { layout: QuestionLayout; presentation: QuestionChoicePresentation }) => {
+const FieldSwitcher = ({
+  ballotType,
+  ...props
+}: QuestionProps & { ballotType: BallotType; layout: QuestionLayout; presentation: QuestionChoicePresentation }) => {
   const { election } = useElection()
   if (!election) return null
 
-  switch (inferQuestionBallotType(props.question)) {
+  switch (ballotType) {
     case BallotType.MultiChoice:
       return <MultiChoice {...props} />
     case BallotType.Approval:
@@ -86,6 +102,52 @@ const FieldSwitcher = (props: QuestionProps & { layout: QuestionLayout; presenta
     default:
       return <SingleChoice {...props} />
   }
+}
+
+/**
+ * A question no ballot type can be inferred for: its choices, disabled, and why. Not a
+ * form field — there is no encoding to validate a selection against — so the form's
+ * vote handler refuses the ballot as a whole instead (see `QuestionsFormProvider`).
+ */
+const UnsupportedQuestion = ({
+  index,
+  question,
+  layout,
+  presentation,
+}: QuestionProps & { layout: QuestionLayout; presentation: QuestionChoicePresentation }) => {
+  const { QuestionsError } = useComponents()
+  const t = useReactComponentsLocalize()
+
+  return (
+    <>
+      {question.choices.map((choice: Choice) => {
+        const value = choice.value.toString()
+        return (
+          <QuestionChoice
+            key={value}
+            choice={choice}
+            value={value}
+            controlType='radio'
+            selectionMode='single'
+            presentation={presentation}
+            compact={!hasChoiceImage(choice) && layout === 'list'}
+            dataAttrs={{
+              'data-choice-card': '',
+              'data-choice-control': '',
+              'data-choice-body': '',
+              'data-choice-media': '',
+              'data-layout': layout,
+              'data-choice-id-base': `question-${index}-choice-${value}`,
+            }}
+            selected={false}
+            disabled
+            onSelect={() => {}}
+          />
+        )
+      })}
+      <QuestionsError error={t('errors.question_unsupported')} variant='field' />
+    </>
+  )
 }
 
 /**

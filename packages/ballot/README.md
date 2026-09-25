@@ -31,6 +31,25 @@ export function inferBallotType(
   input: Pick<Election, 'questions' | 'voteType'> & { type?: string; meta?: Record<string, unknown> }
 ): BallotType
 
+// Per-question counterpart of inferBallotType: declared `type`, then legacy
+// `metadata.type.name`, then the question's `ballotProtocol`. Throws when the question
+// carries none of them (e.g. a legacy election projected by GET /processes).
+export function inferQuestionBallotType(question: {
+  ballotProtocol?: BallotProtocol
+  type?: string
+  metadata?: Record<string, unknown>
+}): BallotType
+
+// Non-throwing inferQuestionBallotType: `undefined` where that one throws. Use it in
+// render code; `undefined` means "unknown" — do not cast a ballot for it or decode its
+// results (the encoders, decodeQuestionResults, questionSelectionRange and
+// questionReservesAbstain all still throw on such a question).
+export function tryInferQuestionBallotType(question: {
+  ballotProtocol?: BallotProtocol
+  type?: string
+  metadata?: Record<string, unknown>
+}): BallotType | undefined
+
 // Encode high-level selections into the on-chain ballot array
 export function encodeBallot(
   input: Pick<Election, 'questions' | 'voteType'> & { type?: string; meta?: Record<string, unknown> },
