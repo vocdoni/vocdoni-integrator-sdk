@@ -1,5 +1,12 @@
 # @vocdoni/api-client
 
+## 2.2.1
+
+### Patch Changes
+
+- Updated dependencies [8781d04]
+  - @vocdoni/ballot@1.3.0
+
 ## 2.2.0
 
 ### Minor Changes
