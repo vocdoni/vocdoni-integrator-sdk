@@ -120,12 +120,15 @@ describe('ElectionQuestions (Fields + Form)', () => {
   it('refuses to submit a ballot for it: no confirmation, no vote', async () => {
     state.status = 'ONGOING'
     state.isAbleToVote = true
-    const { container } = renderWithComponents(<ElectionQuestions />)
+    const onInvalid = vi.fn()
+    const { container } = renderWithComponents(<ElectionQuestions onInvalid={onInvalid} />)
 
     fireEvent.submit(container.querySelector('form')!)
 
-    // The field error lands on the question (index 0) and flags it invalid.
+    // The field error lands on the question (index 0) and flags it invalid — through
+    // validation, so onInvalid hears about it on the very first submit.
     await waitFor(() => expect(container.querySelector('[aria-invalid="true"], [data-invalid]')).not.toBeNull())
+    expect(onInvalid).toHaveBeenCalledTimes(1)
     expect(state.confirm).not.toHaveBeenCalled()
     expect(state.vote).not.toHaveBeenCalled()
   })

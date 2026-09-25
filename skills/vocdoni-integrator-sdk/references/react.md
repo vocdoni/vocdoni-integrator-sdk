@@ -345,9 +345,10 @@ throwing — they use `tryInferQuestionBallotType` from `@vocdoni/ballot` and:
 
 - `<QuestionsTypeBadge />` and `<QuestionTip />` render nothing;
 - `<ElectionQuestions />` renders the question's choices disabled plus a `QuestionsError`
-  (`variant='field'`, key `errors.question_unsupported`), and its submit handler refuses
-  the ballot before the confirmation dialog, flagging the question invalid — no vote is
-  cast for any question of that process;
+  (`variant='field'`, key `errors.question_unsupported`), and registers the question as a
+  field that always fails validation, so every submit is refused before the confirmation
+  dialog (reaching `onInvalid`, with the question flagged invalid) — no vote is cast for
+  any question of that process;
 - `<ElectionResults />` lists the choices with `votes` and `percent` set to `''` (the
   default slot then omits the tally), while the process's other questions decode normally.
 

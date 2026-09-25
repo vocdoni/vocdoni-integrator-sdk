@@ -45,9 +45,10 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       return false
     }
 
-    // A question with no derivable ballot type renders read-only (see ElectionQuestion)
-    // and has no encoding, so no ballot including it can be built. Refuse before asking
-    // the voter to confirm a vote that cannot be cast, not after.
+    // A question with no derivable ballot type has no encoding, so no ballot including it
+    // can be built. The default field (UnsupportedQuestion) already fails validation, so
+    // this only fires for a custom slot that never mounted it. Refuse before asking the
+    // voter to confirm a vote that cannot be cast, not after.
     const unsupported = election.questions.flatMap((question, index) =>
       tryInferQuestionBallotType(question) === undefined ? [index] : []
     )

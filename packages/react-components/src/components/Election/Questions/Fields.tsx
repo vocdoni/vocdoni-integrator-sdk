@@ -68,6 +68,7 @@ export const ElectionQuestion = ({ question, index }: QuestionProps) => {
   const selectionMode = ballotType === undefined ? 'single' : selectionModeForType(ballotType)
   const invalid = Boolean((errors as Record<string, unknown>)[index])
   const description = resolveTitle((question as any).description)
+  const fieldProps = { question, index, layout, presentation: getQuestionPresentation(question) }
 
   return (
     <Slot
@@ -81,20 +82,9 @@ export const ElectionQuestion = ({ question, index }: QuestionProps) => {
       description={description || undefined}
       fields={
         ballotType === undefined ? (
-          <UnsupportedQuestion
-            question={question}
-            index={index}
-            layout={layout}
-            presentation={getQuestionPresentation(question)}
-          />
+          <UnsupportedQuestion {...fieldProps} />
         ) : (
-          <FieldSwitcher
-            question={question}
-            index={index}
-            ballotType={ballotType}
-            layout={layout}
-            presentation={getQuestionPresentation(question)}
-          />
+          <FieldSwitcher {...fieldProps} ballotType={ballotType} />
         )
       }
       tip={<QuestionTip question={question} index={index} />}
@@ -122,9 +112,12 @@ const FieldSwitcher = ({
 }
 
 /**
- * A question no ballot type can be inferred for: its choices, disabled, and why. Not a
- * form field — there is no encoding to validate a selection against — so the form's
- * vote handler refuses the ballot as a whole instead (see `QuestionsFormProvider`).
+ * A question no ballot type can be inferred for: its choices, disabled, and why. There is
+ * no encoding to cast a selection with, so the field is registered with a rule that always
+ * fails: react-hook-form then refuses every submit through its own validation (and
+ * `onInvalid`), flagging the question invalid, before the vote handler or its
+ * confirmation dialog run. `QuestionsFormProvider` re-checks in the vote handler for
+ * custom slots that never mount this field.
  */
 const UnsupportedQuestion = ({
   index,
@@ -132,11 +125,15 @@ const UnsupportedQuestion = ({
   layout,
   presentation,
 }: QuestionProps & { layout: QuestionLayout; presentation: QuestionChoicePresentation }) => {
+  const { control } = useFormContext()
   const { QuestionsError } = useComponents()
   const t = useReactComponentsLocalize()
+  const message = t('errors.question_unsupported')
 
   return (
     <>
+      {/* Registers the field only; the message below is shown whether or not it fired. */}
+      <Controller control={control} name={index} rules={{ validate: () => message }} render={() => <></>} />
       {question.choices.map((choice: Choice) => {
         const value = choice.value.toString()
         return (
@@ -155,7 +152,7 @@ const UnsupportedQuestion = ({
           />
         )
       })}
-      <QuestionsError error={t('errors.question_unsupported')} variant='field' />
+      <QuestionsError error={message} variant='field' />
     </>
   )
 }
