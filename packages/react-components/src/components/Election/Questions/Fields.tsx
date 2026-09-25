@@ -37,6 +37,23 @@ const hasChoiceImage = (choice: Choice): boolean => Boolean(getQuestionChoiceMet
 const getQuestionLayout = (question: VotingProcessQuestion): QuestionLayout =>
   question.choices.some(hasChoiceImage) ? 'grid' : 'list'
 
+/**
+ * The styling hooks every choice card carries. `idBase` and `fieldName` are only set by
+ * the field types that expose them, so the attribute set stays exactly what each emitted.
+ */
+const choiceDataAttrs = (
+  layout: QuestionLayout,
+  { idBase, fieldName }: { idBase?: string; fieldName?: string } = {}
+): Record<string, string> => ({
+  'data-choice-card': '',
+  'data-choice-control': '',
+  'data-choice-body': '',
+  'data-choice-media': '',
+  'data-layout': layout,
+  ...(idBase !== undefined ? { 'data-choice-id-base': idBase } : {}),
+  ...(fieldName !== undefined ? { 'data-choice-field-name': fieldName } : {}),
+})
+
 export const ElectionQuestion = ({ question, index }: QuestionProps) => {
   const { election } = useElection()
   const { ElectionQuestion: Slot } = useComponents()
@@ -131,14 +148,7 @@ const UnsupportedQuestion = ({
             selectionMode='single'
             presentation={presentation}
             compact={!hasChoiceImage(choice) && layout === 'list'}
-            dataAttrs={{
-              'data-choice-card': '',
-              'data-choice-control': '',
-              'data-choice-body': '',
-              'data-choice-media': '',
-              'data-layout': layout,
-              'data-choice-id-base': `question-${index}-choice-${value}`,
-            }}
+            dataAttrs={choiceDataAttrs(layout, { idBase: `question-${index}-choice-${value}` })}
             selected={false}
             disabled
             onSelect={() => {}}
@@ -233,15 +243,10 @@ const RankedChoice = ({
                   value={value}
                   compact={!hasChoiceImage(choice) && layout === 'list'}
                   presentation={presentation}
-                  dataAttrs={{
-                    'data-choice-card': '',
-                    'data-choice-control': '',
-                    'data-choice-body': '',
-                    'data-choice-media': '',
-                    'data-layout': layout,
-                    'data-choice-id-base': `question-${index}-choice-${value}`,
-                    'data-choice-field-name': field.name,
-                  }}
+                  dataAttrs={choiceDataAttrs(layout, {
+                    idBase: `question-${index}-choice-${value}`,
+                    fieldName: field.name,
+                  })}
                   position={at >= 0 ? at + 1 : null}
                   options={positionLabels.map((label, i) => ({
                     position: i + 1,
@@ -315,15 +320,10 @@ const MultiChoice = ({
                   selectionMode='multiple'
                   presentation={presentation}
                   compact={!hasChoiceImage(choice) && layout === 'list'}
-                  dataAttrs={{
-                    'data-choice-card': '',
-                    'data-choice-control': '',
-                    'data-choice-body': '',
-                    'data-choice-media': '',
-                    'data-layout': layout,
-                    'data-choice-id-base': `question-${index}-choice-${value}`,
-                    'data-choice-field-name': field.name,
-                  }}
+                  dataAttrs={choiceDataAttrs(layout, {
+                    idBase: `question-${index}-choice-${value}`,
+                    fieldName: field.name,
+                  })}
                   selected={currentValues.includes(value)}
                   disabled={disabled || maxSelected}
                   onSelect={(checked) => {
@@ -384,15 +384,10 @@ const ApprovalChoice = ({
                   selectionMode='multiple'
                   presentation={presentation}
                   compact={!hasChoiceImage(choice) && layout === 'list'}
-                  dataAttrs={{
-                    'data-choice-card': '',
-                    'data-choice-control': '',
-                    'data-choice-body': '',
-                    'data-choice-media': '',
-                    'data-layout': layout,
-                    'data-choice-id-base': `question-${index}-choice-${value}`,
-                    'data-choice-field-name': field.name,
-                  }}
+                  dataAttrs={choiceDataAttrs(layout, {
+                    idBase: `question-${index}-choice-${value}`,
+                    fieldName: field.name,
+                  })}
                   selected={currentValues.includes(value)}
                   disabled={disabled}
                   onSelect={(checked) => {
@@ -443,13 +438,7 @@ const SingleChoice = ({
               selectionMode='single'
               presentation={presentation}
               compact={!hasChoiceImage(choice) && layout === 'list'}
-              dataAttrs={{
-                'data-choice-card': '',
-                'data-choice-control': '',
-                'data-choice-body': '',
-                'data-choice-media': '',
-                'data-layout': layout,
-              }}
+              dataAttrs={choiceDataAttrs(layout)}
               selected={field.value === choice.value.toString()}
               disabled={disabled}
               onSelect={(checked) => {
