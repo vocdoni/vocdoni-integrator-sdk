@@ -312,4 +312,38 @@ describe('isPickSlotLayout agrees with inference', () => {
       max: 2,
     })
   })
+
+  it('honours it over two options with more (repeatable) slots than options', () => {
+    // Legacy MultiChoiceElection, canRepeatChoices, 2 options, maxNumberOfChoices 3, no
+    // abstain: {maxCount: 3, maxValue: 1, uniqueChoices: false}. Two options can't fill
+    // three dense fields, so this is pick-slot, not approval.
+    const question = {
+      ballotProtocol: bp({ maxCount: 3, maxValue: 1 }),
+      ...legacy('multiple-choice'),
+      choices: choices(2),
+    }
+    expect(inferQuestionBallotType(question)).toBe(BallotType.MultiChoice)
+    expect(isPickSlotLayout(question)).toBe(true)
+    expect(
+      inferBallotType({
+        type: 'multiple-choice',
+        voteType: { maxCount: 3, maxValue: 1, maxVoteOverwrites: 0, costExponent: 1, uniqueChoices: false, costFromWeight: false },
+        questions: [{ title: { default: 'Q0' }, choices: choices(2) }],
+      })
+    ).toBe(BallotType.MultiChoice)
+  })
+})
+
+describe('ranked needs one field per option', () => {
+  it('ignores a ranked name when maxCount does not match the choices', () => {
+    // A 2-slot pick list over 5 options has room for 2 ranks, not 5: reading it ranked
+    // would demand a full slate the protocol can't hold.
+    const question = {
+      ballotProtocol: bp({ maxCount: 2, maxValue: 4, uniqueValues: true }),
+      ...legacy('ranked'),
+      choices: choices(5),
+    }
+    expect(inferQuestionBallotType(question)).toBe(BallotType.MultiChoice)
+    expect(declaresRanked(question)).toBe(false)
+  })
 })

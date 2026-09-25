@@ -1,4 +1,4 @@
-import type { BallotProtocol, Election } from '@vocdoni/api-types'
+import type { BallotProtocol, Choice, Election } from '@vocdoni/api-types'
 import { BallotType } from './types'
 
 /**
@@ -82,6 +82,7 @@ export function declaresRanked(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): boolean {
   // Neither a recognized name nor a protocol reads as undefined: nothing declares anything.
   return tryInferQuestionBallotType(question) === BallotType.Ranked
@@ -128,12 +129,24 @@ interface DeclaredName {
   pickSlot: boolean
 }
 
-/** The protocol fields inference reads — common to a question's protocol and an election's voteType. */
+/**
+ * The protocol fields inference reads — common to a question's protocol and an election's
+ * voteType — plus the option count when the caller has the choices.
+ */
 interface ProtocolShape {
   maxCount: number
   maxValue: number
   uniqueValues: boolean
   costExponent: number
+  numChoices?: number
+}
+
+/**
+ * Whether a legacy pick-slot list fits `{maxValue: 1, !uniqueValues}`: two slots, or at most
+ * two options (a repeatable list may have more slots than options; only the choices tell).
+ */
+function pickSlotFitsBinaryValues(maxCount: number, numChoices: number | undefined): boolean {
+  return maxCount === 2 || (numChoices !== undefined && numChoices <= 2)
 }
 
 /** The names a question declares, in precedence order: SaaS `type`, then `metadata.type.name`. */
@@ -175,12 +188,18 @@ function admittedTypes(shape: ProtocolShape): readonly BallotType[] {
 }
 
 /**
- * Whether `shape` admits the layout `name` declares. At `maxValue == 1` a pick-slot list
- * only has values for two options, so the legacy pick-slot name also needs `maxCount == 2`.
+ * Whether `shape` (admitting `admitted`) admits the layout `name` declares. At `maxValue == 1`
+ * a pick-slot list only has values for two options ({@link pickSlotFitsBinaryValues}), and a
+ * ranking needs one field per option, so with the choices known `maxCount` must match them.
  */
-function admits(shape: ProtocolShape, name: DeclaredName): boolean {
-  if (!admittedTypes(shape).includes(name.type)) return false
-  if (name.pickSlot && shape.maxValue === 1 && !shape.uniqueValues) return shape.maxCount === 2
+function admits(shape: ProtocolShape, admitted: readonly BallotType[], name: DeclaredName): boolean {
+  if (!admitted.includes(name.type)) return false
+  if (name.pickSlot && shape.maxValue === 1 && !shape.uniqueValues) {
+    return pickSlotFitsBinaryValues(shape.maxCount, shape.numChoices)
+  }
+  if (name.type === BallotType.Ranked && shape.numChoices !== undefined) {
+    return shape.maxCount === shape.numChoices
+  }
   return true
 }
 
@@ -189,7 +208,8 @@ function admits(shape: ProtocolShape, name: DeclaredName): boolean {
  * protocol rules out is ignored.
  */
 function resolveType(shape: ProtocolShape, names: DeclaredName[]): BallotType {
-  return names.find((name) => admits(shape, name))?.type ?? admittedTypes(shape)[0]
+  const admitted = admittedTypes(shape)
+  return names.find((name) => admits(shape, admitted, name))?.type ?? admitted[0]
 }
 
 /**
@@ -230,6 +250,7 @@ export function inferBallotType(
       maxValue: voteType.maxValue,
       uniqueValues: voteType.uniqueChoices,
       costExponent: voteType.costExponent,
+      numChoices: questions[0]?.choices.length,
     },
     electionNames(input)
   )
@@ -244,6 +265,7 @@ export function inferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): BallotType {
   const ballotType = tryInferQuestionBallotType(question)
   if (ballotType === undefined) {
@@ -267,11 +289,12 @@ export function tryInferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): BallotType | undefined {
   const names = questionNames(question)
   const bp = question.ballotProtocol
   if (!bp) return names[0]?.type
-  return resolveType(bp, names)
+  return resolveType({ ...bp, numChoices: question.choices?.length }, names)
 }
 
 /**
@@ -294,15 +317,17 @@ export function isDenseBallotProtocol(
 
 /**
  * For a MultiChoice question: pick-slot index list (`true`) or dense 0/1 vector (`false`).
- * The one rule encode, decode and validation share. No protocol reads as dense; the legacy
- * `multiple-choice` name only picks pick-slot on the 2-option dense-looking shape.
+ * The one rule encode, decode and validation share. No protocol reads as dense; on the
+ * dense-looking shape the legacy `multiple-choice` name picks pick-slot only where a
+ * two-value list fits ({@link pickSlotFitsBinaryValues}), as inference admits it.
  */
 export function isPickSlotLayout(question: {
   ballotProtocol?: BallotProtocol
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): boolean {
   const bp = question.ballotProtocol
   if (!bp) return declaresLegacyPickSlot(question)
   if (!isDenseBallotProtocol(bp)) return true
-  return bp.maxCount === 2 && declaresLegacyPickSlot(question)
+  return pickSlotFitsBinaryValues(bp.maxCount, question.choices?.length) && declaresLegacyPickSlot(question)
 }
