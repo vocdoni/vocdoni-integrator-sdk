@@ -1,4 +1,4 @@
-import type { BallotProtocol, Election } from '@vocdoni/api-types'
+import type { BallotProtocol, Choice, Election } from '@vocdoni/api-types'
 import { BallotType } from './types'
 
 /**
@@ -75,16 +75,30 @@ export function declaresLegacyPickSlot(question: { metadata?: Record<string, unk
 }
 
 /**
- * True when a question declares itself `ranked`, in either name channel.
- *
- * Delegates to {@link inferQuestionBallotType} (minus its throw) so the two can never
- * disagree — including in the negative: a recognized SaaS `type` shadows a `ranked`
- * metadata name here exactly as it does there. The two answers feed different halves
- * of the same form, so disagreement is a form that cannot be submitted.
+ * True when a question declares `ranked` and its protocol (if any) can hold a ranking.
+ * Delegates to {@link inferQuestionBallotType} so the two never disagree.
  */
-export function declaresRanked(question: { type?: string; metadata?: Record<string, unknown> }): boolean {
+export function declaresRanked(question: {
+  ballotProtocol?: BallotProtocol
+  type?: string
+  metadata?: Record<string, unknown>
+  choices?: Choice[]
+}): boolean {
   // Neither a recognized name nor a protocol reads as undefined: nothing declares anything.
   return tryInferQuestionBallotType(question) === BallotType.Ranked
+}
+
+/**
+ * True when a question *names* itself `ranked`, whatever its protocol says. Only for the
+ * guards that refuse a ranked name the protocol can't honour; never a decode input. Internal.
+ */
+export function namesRanked(question: { type?: string; metadata?: Record<string, unknown> }): boolean {
+  return questionNames(question)[0]?.type === BallotType.Ranked
+}
+
+/** Election-level {@link namesRanked}: the raw `type` / `meta.type.name` declaration. */
+export function electionNamesRanked(input: { type?: string; meta?: Record<string, unknown> }): boolean {
+  return electionNames(input)[0]?.type === BallotType.Ranked
 }
 
 /**
@@ -107,36 +121,102 @@ function legacyTypeFromMeta(meta: Record<string, unknown> | undefined): BallotTy
 }
 
 /**
- * Infer the ballot type from election configuration (declared type, questions, voteType).
- *
- * Decision tree (precedence matters):
- * 0. If `type`, or failing that `meta.type.name`, names a recognized legacy election
- *    type → that type, full stop.
- * 1. If questions.length > 1 → single-choice (multi-question elections are always single-choice)
- * 2. Else if voteType.maxValue === 0 → budget (costExponent === 1) | quadratic (costExponent === 2)
- * 3. Else (single question):
- *    - If voteType.maxCount === 1 → single-choice (pick one of N)
- *    - If voteType.maxValue === 1 → approval (dense 0/1 per option) when !uniqueChoices,
- *      else multichoice (a 2-option index-list, the only satisfiable maxValue===1 &&
- *      uniqueChoices shape)
- *    - Otherwise → multichoice (maxValue = numChoices-1, list of picks)
- *
- * Rule 0 exists because shape is a *reconstruction* of intent, and at `maxValue === 1` the
- * reconstruction is lossy. A legacy `MultiChoiceElection` over 2 choices with repeatable
- * picks and no abstain allowance generates `{maxCount: 2, maxValue: 1, uniqueChoices: false}`
- * — byte-identical to a 2-option `ApprovalElection`. `uniqueChoices` splits the *other*
- * maxValue===1 pair but not this one, and nothing else in the protocol can. The declared
- * name is the only signal, which is why the legacy SDK dispatches on `resultsType.name`
- * (`calculateChoiceResults`, `checkVote`) and never on shape.
- *
- * An absent, empty or unrecognized name falls through to the shape rules unchanged, so
- * callers with nothing to declare lose nothing. {@link BallotType.Ranked} is reachable
- * **only** by name — no shape rule below can produce it.
- *
- * Assumptions (shape path only):
- * - Approval/multichoice/budget/quadratic are single-question (questions.length === 1)
- * - Multi-question implies single-choice-per-question
- * - At maxValue === 1, uniqueChoices disambiguates dense approval from a 2-option index-list
+ * A declared name resolved against its channel's table. `pickSlot` marks the legacy
+ * `multiple-choice` name, the only one meaning the pick-slot index list.
+ */
+interface DeclaredName {
+  type: BallotType
+  pickSlot: boolean
+}
+
+/**
+ * The protocol fields inference reads — common to a question's protocol and an election's
+ * voteType — plus the option count when the caller has the choices.
+ */
+interface ProtocolShape {
+  maxCount: number
+  maxValue: number
+  uniqueValues: boolean
+  costExponent: number
+  numChoices?: number
+}
+
+/**
+ * Whether a legacy pick-slot list fits `{maxValue: 1, !uniqueValues}`: two slots, or at most
+ * two options (a repeatable list may have more slots than options; only the choices tell).
+ */
+function pickSlotFitsBinaryValues(maxCount: number, numChoices: number | undefined): boolean {
+  return maxCount === 2 || (numChoices !== undefined && numChoices <= 2)
+}
+
+/** The names a question declares, in precedence order: SaaS `type`, then `metadata.type.name`. */
+function questionNames(question: { type?: string; metadata?: Record<string, unknown> }): DeclaredName[] {
+  const names: DeclaredName[] = []
+  const fromType = question.type ? (SAAS_TYPE_NAMES[question.type] ?? SDK_TYPE_NAMES[question.type]) : undefined
+  if (fromType) names.push({ type: fromType, pickSlot: false })
+  const fromMeta = legacyTypeFromMeta(question.metadata)
+  if (fromMeta) names.push({ type: fromMeta, pickSlot: fromMeta === BallotType.MultiChoice })
+  return names
+}
+
+/**
+ * The names an election declares, in precedence order: `type`, then `meta.type.name`.
+ * Both read the legacy vocabulary, whose `multiple-choice` is pick-slot.
+ */
+function electionNames(input: { type?: string; meta?: Record<string, unknown> }): DeclaredName[] {
+  const names: DeclaredName[] = []
+  const fromType = input.type ? (LEGACY_TYPE_NAMES[input.type] ?? SDK_TYPE_NAMES[input.type]) : undefined
+  if (fromType) names.push({ type: fromType, pickSlot: fromType === BallotType.MultiChoice })
+  const fromMeta = legacyTypeFromMeta(input.meta)
+  if (fromMeta) names.push({ type: fromMeta, pickSlot: fromMeta === BallotType.MultiChoice })
+  return names
+}
+
+/**
+ * The ballot types a protocol shape admits, default first. Ranked needs room for one distinct
+ * rank per field; `uniqueValues` isn't required, as creation never demanded it for ranked.
+ */
+function admittedTypes(shape: ProtocolShape): readonly BallotType[] {
+  if (shape.maxValue === 0) {
+    return [shape.costExponent === 2 ? BallotType.Quadratic : BallotType.Budget]
+  }
+  if (shape.maxCount === 1) return [BallotType.SingleChoice]
+  const base =
+    shape.maxValue === 1 && !shape.uniqueValues
+      ? [BallotType.Approval, BallotType.MultiChoice]
+      : [BallotType.MultiChoice]
+  return shape.maxValue >= shape.maxCount - 1 ? [...base, BallotType.Ranked] : base
+}
+
+/**
+ * Whether `shape` (admitting `admitted`) admits the layout `name` declares. At `maxValue == 1`
+ * a pick-slot list only has values for two options ({@link pickSlotFitsBinaryValues}), and a
+ * ranking needs one field per option, so with the choices known `maxCount` must match them.
+ */
+function admits(shape: ProtocolShape, admitted: readonly BallotType[], name: DeclaredName): boolean {
+  if (!admitted.includes(name.type)) return false
+  if (name.pickSlot && shape.maxValue === 1 && !shape.uniqueValues) {
+    return pickSlotFitsBinaryValues(shape.maxCount, shape.numChoices)
+  }
+  if (name.type === BallotType.Ranked && shape.numChoices !== undefined) {
+    return shape.maxCount === shape.numChoices
+  }
+  return true
+}
+
+/**
+ * The first declared name the shape admits, else the shape's default: a name the
+ * protocol rules out is ignored.
+ */
+function resolveType(shape: ProtocolShape, names: DeclaredName[]): BallotType {
+  const admitted = admittedTypes(shape)
+  return names.find((name) => admits(shape, admitted, name))?.type ?? admitted[0]
+}
+
+/**
+ * Infer the ballot type from election config. Multi-question is always single-choice;
+ * otherwise `voteType` decides and `type` / `meta.type.name` only break its ties
+ * ({@link admittedTypes}). Names aren't trusted beyond that: the SaaS API mislabels ballots.
  *
  * @param input - Election config with questions and voteType, optionally carrying the
  *   declared `type` and/or the legacy metadata bag (`meta.type.name`)
@@ -152,16 +232,9 @@ export function inferBallotType(
 ): BallotType {
   const { questions, voteType } = input
 
-  // Rule 0: a declared type is intent, not a reconstruction of it — prefer it. The
-  // explicit field wins over the legacy bag, so a caller can override a stale metadata
-  // name without editing the bag.
-  const declared =
-    (input.type ? (LEGACY_TYPE_NAMES[input.type] ?? SDK_TYPE_NAMES[input.type]) : undefined) ??
-    legacyTypeFromMeta(input.meta)
-  // A multi-question ranked election describes no layout: a ranking is one field per
-  // *option* of one question, multi-question is one field per *question*, and either
-  // reading tallies garbage silently. Refuse like every other uncountable config.
-  if (declared === BallotType.Ranked && questions.length > 1) {
+  // A ranking is one field per option, multi-question one field per question: there is
+  // no telling which the creator meant, so refuse loudly rather than pick one.
+  if (electionNamesRanked(input) && questions.length > 1) {
     throw new Error(
       `a ranked election must have exactly one question (got ${questions.length}): a ranking ` +
         'lays out one ballot field per option, which leaves no room for a second question. ' +
@@ -169,75 +242,31 @@ export function inferBallotType(
         'decodeQuestionResults'
     )
   }
-  if (declared) return declared
 
-  // Rule 1: Multiple questions → single-choice per question (highest precedence)
-  if (questions.length > 1) {
-    return BallotType.SingleChoice
-  }
+  if (questions.length > 1) return BallotType.SingleChoice
 
-  // Rule 2: maxValue === 0 means budget or quadratic (costExponent distinguishes)
-  if (voteType.maxValue === 0) {
-    return voteType.costExponent === 2 ? BallotType.Quadratic : BallotType.Budget
-  }
-
-  // Single question - more specific rules
-  // Rule 3a: maxCount === 1 means pick exactly one (single-choice)
-  if (voteType.maxCount === 1) {
-    return BallotType.SingleChoice
-  }
-
-  // Rule 3b: maxValue === 1 splits dense approval from a 2-option index-list on uniqueChoices.
-  // !uniqueChoices → the dense 0/1 wire layout (approval): one field per choice, each 0/1.
-  // uniqueChoices here can only be a 2-option index-list multichoice — it is the sole
-  // satisfiable maxValue===1 && uniqueChoices shape (maxCount===2, pigeonhole; anything denser
-  // is unsatisfiable and rejected at creation — see unsatisfiableProtocolReason). Its decode is
-  // the pick-slot column sum, so it needs the MultiChoice label.
-  // Load-bearing: the election-level decodeResults path has no dense remap, so its decode
-  // routing depends entirely on this label.
-  if (voteType.maxValue === 1) {
-    return voteType.uniqueChoices ? BallotType.MultiChoice : BallotType.Approval
-  }
-
-  // Rule 3c: Otherwise → multichoice
-  return BallotType.MultiChoice
+  return resolveType(
+    {
+      maxCount: voteType.maxCount,
+      maxValue: voteType.maxValue,
+      uniqueValues: voteType.uniqueChoices,
+      costExponent: voteType.costExponent,
+      numChoices: questions[0]?.choices.length,
+    },
+    electionNames(input)
+  )
 }
 
 /**
- * Infer the ballot type for a single question from its declared `type`, falling back to
- * its `ballotProtocol`. Mirrors the {@link inferBallotType} precedence for the
- * per-question model: declared intent first, reconstructed shape second.
- *
- * The named type is authoritative because the backend *derives* the protocol from it at
- * creation — so when the two appear to disagree, the name is the input and the shape is
- * the output. A `multichoice` question is dense whatever its `maxCount` says, and the
- * MultiChoice label is semantic only: the dense wire layout is selected by the codec via
- * {@link isDenseBallotProtocol}, not by the label (see `decodeQuestionResults`).
- *
- * Two name sources, each resolved against its own vocabulary — the table follows the
- * field, not the function (see {@link LEGACY_TYPE_NAMES}):
- *
- * 1. `type`, the SaaS field → {@link SAAS_TYPE_NAMES} (`singlechoice` / `multichoice`).
- * 2. `metadata.type.name`, the legacy bag → {@link LEGACY_TYPE_NAMES}. Reachable per
- *    question because in the SaaS model each question *is* its own vochain process, so a
- *    question mapped from a legacy election carries that election's `metadata.type`.
- *
- * Both also consult {@link SDK_TYPE_NAMES} (`ranked`) — the only route to
- * {@link BallotType.Ranked}, since no shape rule can produce it.
- *
- * An unrecognized or empty name (the stored form for raw-`ballotProtocol` questions) falls
- * through to the shape rules.
- *
- * A read may omit the `ballotProtocol`: partial shapes (e.g. `PublicQuestionResponse`) and
- * legacy vochain elections projected by `GET /processes`, which can also carry no `type`
- * and no `metadata`. With neither a recognized name nor a protocol there is nothing to
- * infer from, so it throws rather than silently assuming single-choice — render code
- * should use {@link tryInferQuestionBallotType} instead.
+ * Per-question {@link inferBallotType}: `ballotProtocol` decides, and `type` then
+ * `metadata.type.name` only break its ties. With no protocol the name is taken as is; with
+ * neither it throws — render code should use {@link tryInferQuestionBallotType}.
  */
 export function inferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): BallotType {
   const ballotType = tryInferQuestionBallotType(question)
   if (ballotType === undefined) {
@@ -261,28 +290,12 @@ export function tryInferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): BallotType | undefined {
-  const declared =
-    (question.type ? (SAAS_TYPE_NAMES[question.type] ?? SDK_TYPE_NAMES[question.type]) : undefined) ??
-    legacyTypeFromMeta(question.metadata)
-  if (declared) return declared
-
+  const names = questionNames(question)
   const bp = question.ballotProtocol
-  if (!bp) return undefined
-  if (bp.maxValue === 0) {
-    return bp.costExponent === 2 ? BallotType.Quadratic : BallotType.Budget
-  }
-  if (bp.maxCount === 1) return BallotType.SingleChoice
-  if (bp.maxValue === 1) {
-    // uniqueValues → a 2-option index-list (the only satisfiable maxValue===1 &&
-    // uniqueValues shape is maxCount===2 — see isDenseBallotProtocol); it takes the
-    // MultiChoice label even without a named type, since the backend empties the type
-    // label for shapes it cannot name. Otherwise the dense layout applies, which with no
-    // name to say otherwise is approval.
-    if (bp.uniqueValues) return BallotType.MultiChoice
-    return BallotType.Approval
-  }
-  return BallotType.MultiChoice
+  if (!bp) return names[0]?.type
+  return resolveType({ ...bp, numChoices: question.choices?.length }, names)
 }
 
 /**
@@ -304,28 +317,18 @@ export function isDenseBallotProtocol(
 }
 
 /**
- * Which of the two wire layouts a MultiChoice question uses: the pick-slot index list
- * (`true`) or the dense 0/1 vector (`false`).
- *
- * Only meaningful once {@link inferQuestionBallotType} has said MultiChoice — the label
- * covers both layouts, and nothing else in the question distinguishes them. Callers that
- * already resolved a different type must not consult this.
- *
- * The single home for a rule that used to be written out at three call sites — encode,
- * decode and the uncastable-choices check — one of them as its own de Morgan'd negation.
- * They have to agree exactly: encode picking dense while validation judges pick-slot
- * waves through a question the codec then refuses, and decode disagreeing with encode
- * reads the tally off the wrong axis. Commit 0a6ee28 exists because one copy drifted.
- *
- * A missing protocol reads as dense: public reads of a named-type question may omit it,
- * and the named type always derives the dense layout. The legacy `multiple-choice`
- * metadata name overrides the shape test, because at two options a pick-slot protocol
- * also satisfies {@link isDenseBallotProtocol}.
+ * For a MultiChoice question: pick-slot index list (`true`) or dense 0/1 vector (`false`).
+ * The one rule encode, decode and validation share. No protocol reads as dense; on the
+ * dense-looking shape the legacy `multiple-choice` name picks pick-slot only where a
+ * two-value list fits ({@link pickSlotFitsBinaryValues}), as inference admits it.
  */
 export function isPickSlotLayout(question: {
   ballotProtocol?: BallotProtocol
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): boolean {
-  if (declaresLegacyPickSlot(question)) return true
-  return !!question.ballotProtocol && !isDenseBallotProtocol(question.ballotProtocol)
+  const bp = question.ballotProtocol
+  if (!bp) return declaresLegacyPickSlot(question)
+  if (!isDenseBallotProtocol(bp)) return true
+  return pickSlotFitsBinaryValues(bp.maxCount, question.choices?.length) && declaresLegacyPickSlot(question)
 }

@@ -1,6 +1,6 @@
 import type { BallotProtocol, Choice, QuestionTypeSetup, VoteType } from '@vocdoni/api-types'
 import { BallotType } from './types'
-import { declaresRanked, isPickSlotLayout, tryInferQuestionBallotType } from './infer'
+import { isPickSlotLayout, namesRanked, tryInferQuestionBallotType } from './infer'
 
 /** The part of a ballot protocol the satisfiability rule reads. */
 export type ProtocolBounds = Pick<BallotProtocol, 'maxCount' | 'maxValue' | 'uniqueValues'>
@@ -72,16 +72,9 @@ export function unsatisfiableProtocolReason(bp: ProtocolBounds): string | null {
 }
 
 /**
- * Explain why a *ranked* question's protocol can never produce a ranking, or `null`.
- *
- * Separate from {@link unsatisfiableProtocolReason} because that one mirrors the
- * backend's `ValidateBallotProtocol` exactly, and the backend has no ranked concept.
- * The single case is `maxValue === 0`: "unbounded" for every other type, but on chain
- * it switches the scrutinizer to discrete aggregation (one-cell rows), so the Borda
- * decode scores every option 0 and the tally is indistinguishable from "nobody
- * voted" — it must be caught before anyone votes. `maxValue < numChoices - 1` is
- * deliberately not checked here: it already fails loudly per ballot in
- * {@link assertEncodedBallot}. Returns `null` for shapes it cannot judge.
+ * Why a question declared ranked can never produce a ranking, or `null`. The one case is
+ * `maxValue === 0`: discrete aggregation, which inference reads as budget, so the name and
+ * protocol contradict each other. Kept apart from the backend-mirroring rule, which has no ranked.
  */
 export function unrankableProtocolReason(numChoices: number, maxValue: number): string | null {
   if (!Number.isInteger(numChoices) || numChoices < 2) return null
@@ -91,11 +84,11 @@ export function unrankableProtocolReason(numChoices: number, maxValue: number): 
   return (
     'this question is declared ranked, but its protocol has maxValue 0. That means "no upper ' +
     'bound" everywhere else, and on chain it switches the scrutinizer to discrete aggregation: ' +
-    'the ranks are accumulated into a single column instead of bucketed into a histogram. The ' +
-    'Borda decode is an index-weighted sum over that histogram, so every option would score 0 ' +
-    'no matter how anyone votes, and the result is indistinguishable from an election nobody ' +
-    `voted in. Set maxValue to ${numChoices - 1} (one distinct rank per option), or drop the ` +
-    'ranked declaration if this is really a budget/quadratic ballot'
+    'values are accumulated into a single column instead of bucketed into a histogram. That is ' +
+    'the budget/quadratic shape, and it is read as one — the ranked declaration is ignored, since ' +
+    'a Borda read of that column would score every option 0 — so no ranking is ever recorded. ' +
+    `Set maxValue to ${numChoices - 1} (one distinct rank per option), or drop the ranked ` +
+    'declaration if this is really a budget/quadratic ballot'
   )
 }
 
@@ -174,10 +167,10 @@ export function unsatisfiableQuestionReason(question: {
 }): string | null {
   const bp = question.ballotProtocol
 
-  // Ranked first: `maxValue: 0` is the one shape the general rule correctly waves
-  // through that a ranking can never survive. Only with a protocol actually read —
-  // public reads may omit it, and absent is not zero.
-  if (bp && declaresRanked(question)) {
+  // Ranked first: `maxValue: 0` passes the general rule but can never hold a ranking.
+  // Keyed on the raw name, since inference reads that shape as budget; and only with a
+  // protocol actually read, as public reads may omit it.
+  if (bp && namesRanked(question)) {
     const unrankable = unrankableProtocolReason(question.choices?.length ?? 0, bp.maxValue)
     if (unrankable) return unrankable
   }

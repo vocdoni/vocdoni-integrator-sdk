@@ -102,8 +102,24 @@ The encoding pattern depends on the question's `ballotProtocol`:
 > byte-identical to a two-option approval ballot. Nothing in the protocol separates
 > them, so inferring by shape alone silently reports the wrong tally.
 >
-> Every `@vocdoni/ballot` entry point prefers a recognized declared type name over
-> shape, and falls through to shape when the name is absent, empty or unrecognized.
+> Every `@vocdoni/ballot` entry point infers from the protocol first and uses a
+> recognized declared type name **only to break a tie the protocol can't resolve**:
+> the name picks among the layouts the shape admits, and a name outside that set is
+> ignored (an approval ballot over three options labelled
+> `single-choice-multiquestion` still decodes as approval; a `ranked` name on
+> `maxCount: 1` is single-choice). With no `ballotProtocol` at all the name is the
+> only source. What each shape admits, default first:
+>
+> | shape | admitted |
+> |---|---|
+> | `maxValue: 0` | quadratic (`costExponent` 2), else budget — nothing else |
+> | `maxCount: 1` | single-choice — nothing else |
+> | `maxValue: 1`, repeatable | approval (dense); pick-slot `multiple-choice` only at `maxCount: 2` or over at most two options |
+> | anything else | multichoice |
+>
+> Any shape above `maxCount: 1` with `maxValue >= maxCount - 1` also admits ranked, when
+> `maxCount` equals the option count (if known). Unique values aren't required.
+>
 > Two sources are consulted, and **the vocabulary follows the field, not the
 > function** — each vocabulary names the opposite wire layout:
 >
@@ -129,9 +145,10 @@ The encoding pattern depends on the question's `ballotProtocol`:
 > name the tally reads off the wrong axis.
 >
 > `ranked` is the odd one out: it is this SDK's own name, in neither upstream
-> vocabulary, and it is the **only** way to reach `BallotType.Ranked` — no shape rule
-> produces it, because a ranking is byte-identical to a full-slate pick-slot
-> multichoice. The backend's `type` vocabulary is fixed at
+> vocabulary, and it is the **only** way to reach `BallotType.Ranked` — no shape
+> default produces it, because a ranking is byte-identical to a full-slate pick-slot
+> multichoice — and it counts only on a shape that admits a ranking
+> (`maxValue >= maxCount - 1`, one field per option). The backend's `type` vocabulary is fixed at
 > `singlechoice`/`multichoice`, so create a ranked question with a raw
 > `ballotProtocol` plus the metadata bag; `type: 'ranked'` is still *read* for callers
 > keeping their own record of it. See the ranked section below.
@@ -320,7 +337,9 @@ number for every option (this was
 [integrator-sdk#22](https://github.com/vocdoni/vocdoni-integrator-sdk/issues/22)). The
 backend's own `type` vocabulary is `['singlechoice', 'multichoice']` and rejects
 anything else, so the metadata bag — which it stores and echoes back verbatim — is
-the channel. `declaresRanked(question)` reports whether a question carries it.
+the channel. The declaration is necessary but not sufficient: it only counts on a
+protocol with `maxValue >= maxCount - 1` and one field per option, and elsewhere it is ignored.
+`declaresRanked(question)` reports whether a question is inferred ranked.
 
 ```ts
 await client.elections.create({

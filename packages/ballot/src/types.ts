@@ -9,9 +9,8 @@ export const BallotType = {
   MultiChoice: 'multichoice',
   Approval: 'approval',
   /**
-   * A ranking: one rank per option, in choice order, no two the same, **highest =
-   * best**. Never inferred from shape (byte-identical to a full-slate pick-slot
-   * multichoice) — it must be declared by name; see {@link inferQuestionBallotType}.
+   * A ranking: one rank per option, in choice order, no two the same, **highest = best**.
+   * Needs a declared `ranked` name on a protocol that admits it; see {@link inferQuestionBallotType}.
    */
   Ranked: 'ranked',
   Budget: 'budget',
