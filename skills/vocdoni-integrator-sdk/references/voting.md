@@ -112,9 +112,9 @@ The encoding pattern depends on the question's `ballotProtocol`:
 >
 > | shape | admitted |
 > |---|---|
-> | `maxValue: 0` | budget (`costExponent` 1) or quadratic — nothing else |
+> | `maxValue: 0` | quadratic (`costExponent` 2), else budget — nothing else |
 > | `maxCount: 1` | single-choice — nothing else |
-> | `maxValue: 1`, repeatable | approval (dense); pick-slot `multiple-choice` only at `maxCount: 2` |
+> | `maxValue: 1`, repeatable | approval (dense); pick-slot `multiple-choice` only at `maxCount: 2` or over at most two options |
 > | unique, `maxValue >= maxCount - 1` | multichoice, ranked |
 > | anything else | multichoice |
 >

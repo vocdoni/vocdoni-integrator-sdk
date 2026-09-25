@@ -98,8 +98,8 @@ describe('ranked: the declared name is the only signal', () => {
   it('declaresRanked answers for a question with neither a protocol nor a type', () => {
     // inferQuestionBallotType throws on that input; the predicate must not, so a UI
     // can ask "is this a ranking?" of a partial read without handling an exception.
-    // `as never` on both: neither signature declares `choices` (neither function reads
-    // it), and a bare `{}` would not say what this input is meant to be.
+    // `as never` on both: the signatures take `choices` only alongside a protocol or a
+    // name, and a bare `{}` would not say what this input is meant to be.
     expect(() => inferQuestionBallotType({ choices: choices(3) } as never)).toThrow()
     expect(declaresRanked({ choices: choices(3) } as never)).toBe(false)
   })

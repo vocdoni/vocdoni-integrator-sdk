@@ -33,13 +33,14 @@ export function inferBallotType(
   input: Pick<Election, 'questions' | 'voteType'> & { type?: string; meta?: Record<string, unknown> }
 ): BallotType
 
-// Per-question inferBallotType: `ballotProtocol` decides, and `type` / `metadata.type.name`
-// only break its ties. With no protocol the name is the only source; with neither it
-// throws (e.g. a legacy election projected by GET /processes).
+// Per-question inferBallotType: `ballotProtocol` decides, `type` / `metadata.type.name` break
+// its ties; with neither it throws. Pass `choices` when you have them: the codecs do, and some
+// ties (`ranked`, legacy `multiple-choice`) depend on the option count.
 export function inferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): BallotType
 
 // Non-throwing inferQuestionBallotType: `undefined` where that one throws. Use it in
@@ -50,6 +51,7 @@ export function tryInferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): BallotType | undefined
 
 // Encode high-level selections into the on-chain ballot array
@@ -104,9 +106,8 @@ export function voteTypeBounds(
 // True for the dense 0/1 wire layout (one field per choice) — what the backend
 // derives for the named multichoice type.
 //
-// ⚠️ Not sufficient on its own to route a decode. A legacy two-option pick-slot
-// multichoice has the same params, so this answers `true` for it too; pair it with
-// `declaresLegacyPickSlot` (below), which is what the built-in codecs do.
+// ⚠️ Not sufficient on its own to route a decode: a legacy two-option pick-slot multichoice
+// has the same params. Route with `isPickSlotLayout(question)`, as the built-in codecs do.
 export function isDenseBallotProtocol(
   bp: Pick<BallotProtocol, 'maxCount' | 'maxValue' | 'uniqueValues'>
 ): boolean
@@ -126,6 +127,7 @@ export function declaresRanked(question: {
   ballotProtocol?: BallotProtocol
   type?: string
   metadata?: Record<string, unknown>
+  choices?: Choice[]
 }): boolean
 
 // Turn a voter's ranking — the choice VALUES they ordered, best first — into the wire
@@ -177,9 +179,9 @@ layouts, with a default for when nothing else is known:
 
 | shape | admitted (default first) |
 | --- | --- |
-| `maxValue: 0` | budget if `costExponent` is 1, quadratic otherwise — nothing else |
+| `maxValue: 0` | quadratic if `costExponent` is 2, budget otherwise — nothing else |
 | `maxCount: 1` | single-choice — nothing else |
-| `maxValue: 1`, repeatable values | approval (dense), multichoice (pick-slot `multiple-choice` only when `maxCount` is 2) |
+| `maxValue: 1`, repeatable values | approval (dense), multichoice (pick-slot `multiple-choice` only when `maxCount` is 2 or there are at most two options) |
 | unique values, `maxValue >= maxCount - 1` | multichoice, ranked |
 | anything else | multichoice |
 
