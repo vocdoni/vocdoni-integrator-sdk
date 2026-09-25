@@ -354,6 +354,16 @@ describe('tryInferQuestionBallotType', () => {
     expect(() => encodeQuestionSelections(legacyProjection, [0])).toThrow(/cannot infer ballot type/)
   })
 
+  it('does not read an inherited object key as a type name', () => {
+    // `type` and `metadata.type.name` are creator-controlled; on a plain lookup table
+    // 'constructor' resolved to Object itself, a truthy non-BallotType.
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      expect(tryInferQuestionBallotType({ type: name })).toBeUndefined()
+      expect(tryInferQuestionBallotType({ metadata: { type: { name } } })).toBeUndefined()
+      expect(() => inferQuestionBallotType({ type: name })).toThrow(/cannot infer ballot type/)
+    }
+  })
+
   it('agrees with inferQuestionBallotType whenever that one answers', () => {
     const cases = [
       { type: 'singlechoice' },
