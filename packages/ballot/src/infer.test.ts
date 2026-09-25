@@ -174,6 +174,16 @@ describe('inferBallotType', () => {
       }
     })
 
+    it('does not read an inherited object key as a type name', () => {
+      // Same lookup tables as the per-question path: 'constructor' used to resolve to
+      // Object itself and short-circuit the shape rules with a non-BallotType.
+      const shaped = createElection({ maxCount: 3, maxValue: 4 })
+      for (const name of ['constructor', 'toString', '__proto__']) {
+        expect(inferBallotType({ ...shaped, type: name })).toBe(BallotType.MultiChoice)
+        expect(inferBallotType({ ...shaped, meta: { type: { name } } })).toBe(BallotType.MultiChoice)
+      }
+    })
+
     it('ignores an unrecognized, empty or absent name', () => {
       // An unknown spelling must not hijack the tree, and an empty string is the stored
       // form for raw-protocol questions, so it must read as "no name". (`ranked` used to
