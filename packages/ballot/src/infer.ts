@@ -228,10 +228,11 @@ export function inferBallotType(
  * An unrecognized or empty name (the stored form for raw-`ballotProtocol` questions) falls
  * through to the shape rules.
  *
- * Backend reads always carry a `ballotProtocol`, so the no-protocol path only applies to
- * partial shapes (e.g. `PublicQuestionResponse`); with neither a recognized name nor a
- * protocol there is nothing to infer from, so it throws rather than silently assuming
- * single-choice.
+ * A read may omit the `ballotProtocol`: partial shapes (e.g. `PublicQuestionResponse`) and
+ * legacy vochain elections projected by `GET /processes`, which can also carry no `type`
+ * and no `metadata`. With neither a recognized name nor a protocol there is nothing to
+ * infer from, so it throws rather than silently assuming single-choice — render code
+ * should use {@link tryInferQuestionBallotType} instead.
  */
 export function inferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
