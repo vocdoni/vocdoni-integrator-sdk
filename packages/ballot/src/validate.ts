@@ -61,10 +61,8 @@ export function validateSelections(
       throw new Error(`Question 0: ${collision}`)
     }
   }
-  // Ranked's question-level defects, refused in the same order as encodeBallot so the
-  // two agree on verdict and diagnosis; neither shows on any individual selection.
-  // Keyed on the declared name for the same reason as there: a maxValue 0 shape infers
-  // budget whatever the name says.
+  // Ranked's question-level defects, in encodeBallot's order so both give the same
+  // diagnosis. The maxValue 0 check keys on the declared name, as there.
   if (electionNamesRanked(input)) {
     const unrankable = unrankableProtocolReason(questions[0]?.choices.length ?? 0, voteType.maxValue)
     if (unrankable) {

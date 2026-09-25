@@ -8,10 +8,8 @@ import { encodeQuestionBallot, encodeQuestionSelections } from './encode'
 import { hasUncastableChoices, unsatisfiableQuestionReason } from './protocol'
 
 /**
- * Issue #58: the protocol decides the ballot type, and a declared name only breaks a tie
- * the protocol cannot. Names are not always honest — the SaaS API stamps
- * `single-choice-multiquestion` on every election it writes — so a name naming a layout
- * the shape rules out must be ignored, never trusted into a wrong-axis decode.
+ * Issue #58: the protocol decides the ballot type, and a declared name only breaks its
+ * ties. A name the shape rules out is ignored — names are not always honest.
  */
 
 const bp = (shape: Partial<BallotProtocol>): BallotProtocol => ({
@@ -163,10 +161,8 @@ describe('inferQuestionBallotType: a name only breaks a tie the protocol cannot'
 })
 
 describe('the explorer case: an approval ballot stamped single-choice-multiquestion', () => {
-  // Sampled from the vochain gateway: an approval ballot over three options whose
-  // metadata names it single-choice. Read as single-choice, only the first matrix row is
-  // decoded — each option's [notSelected, selected] histogram is ignored and the third
-  // option disappears.
+  // Sampled from the vochain gateway: an approval ballot over three options whose metadata
+  // names it single-choice. Read as single-choice, only the first matrix row is decoded.
   const question = {
     ballotProtocol: bp({ maxCount: 3, maxValue: 1, maxTotalCost: 3 }),
     metadata: { type: { name: 'single-choice-multiquestion' } },
@@ -269,7 +265,7 @@ describe('ranked: only where the protocol can hold a ranking', () => {
   const rankedName = legacy('ranked')
 
   it('reads a ranked name over a single field as single-choice, everywhere', () => {
-    // The issue's own example: today this was ranked, and the form demanded a full slate
+    // The issue's own example: before #58 this was ranked, and the form demanded a full slate
     // of three ranks for a protocol with room for one value.
     const question = { ballotProtocol: bp({ maxCount: 1, maxValue: 2 }), ...rankedName, choices: choices(3) }
     expect(inferQuestionBallotType(question)).toBe(BallotType.SingleChoice)

@@ -72,19 +72,9 @@ export function unsatisfiableProtocolReason(bp: ProtocolBounds): string | null {
 }
 
 /**
- * Explain why a *ranked* question's protocol can never produce a ranking, or `null`.
- *
- * Separate from {@link unsatisfiableProtocolReason} because that one mirrors the
- * backend's `ValidateBallotProtocol` exactly, and the backend has no ranked concept.
- * The single case is `maxValue === 0`: "unbounded" for every other type, and on chain
- * it switches the scrutinizer to discrete aggregation (one-cell rows) — the budget /
- * quadratic shape. The `ranked` name cannot outrank that: inference reads such a
- * question as budget (see {@link inferQuestionBallotType}), since a Borda read of
- * one-cell rows would score every option 0. So the declaration and the protocol
- * contradict each other, nobody gets the ranking they were asked for, and it must be
- * caught before anyone votes. `maxValue < numChoices - 1` is
- * deliberately not checked here: it already fails loudly per ballot in
- * {@link assertEncodedBallot}. Returns `null` for shapes it cannot judge.
+ * Why a question declared ranked can never produce a ranking, or `null`. The one case is
+ * `maxValue === 0`: discrete aggregation, which inference reads as budget, so the name and
+ * protocol contradict each other. Kept apart from the backend-mirroring rule, which has no ranked.
  */
 export function unrankableProtocolReason(numChoices: number, maxValue: number): string | null {
   if (!Number.isInteger(numChoices) || numChoices < 2) return null
@@ -177,11 +167,9 @@ export function unsatisfiableQuestionReason(question: {
 }): string | null {
   const bp = question.ballotProtocol
 
-  // Ranked first: `maxValue: 0` is the one shape the general rule correctly waves
-  // through that a ranking can never survive. Only with a protocol actually read —
-  // public reads may omit it, and absent is not zero. Keyed on the raw name, not the
-  // inferred type: inference reads this shape as budget and ignores the name, which is
-  // right for decoding and exactly the contradiction a creator needs to hear about.
+  // Ranked first: `maxValue: 0` passes the general rule but can never hold a ranking.
+  // Keyed on the raw name, since inference reads that shape as budget; and only with a
+  // protocol actually read, as public reads may omit it.
   if (bp && namesRanked(question)) {
     const unrankable = unrankableProtocolReason(question.choices?.length ?? 0, bp.maxValue)
     if (unrankable) return unrankable

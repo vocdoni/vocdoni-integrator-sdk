@@ -79,11 +79,8 @@ export function encodeBallot(
       throw new Error(`cannot encode a ballot for question 0: ${collision}`)
     }
   }
-  // Ranked's question-level defects have no per-ballot backstop (at maxValue 0
-  // assertEncodedBallot treats the bound as absent, and duplicated choice values leave
-  // every ballot well-formed), so refuse them up front, for every voter. The maxValue 0
-  // one is keyed on the declared name: inference reads that shape as budget, ignoring
-  // the name, so the inferred type can never be Ranked there.
+  // Ranked's question-level defects have no per-ballot backstop, so refuse them up front.
+  // The maxValue 0 check keys on the declared name: inference reads that shape as budget.
   if (electionNamesRanked(input)) {
     const unrankable = unrankableProtocolReason(questions[0]?.choices.length ?? 0, voteType.maxValue)
     if (unrankable) {

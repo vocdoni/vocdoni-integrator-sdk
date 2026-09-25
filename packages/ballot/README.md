@@ -33,10 +33,9 @@ export function inferBallotType(
   input: Pick<Election, 'questions' | 'voteType'> & { type?: string; meta?: Record<string, unknown> }
 ): BallotType
 
-// Per-question counterpart of inferBallotType: the question's `ballotProtocol` decides,
-// and a declared `type` or legacy `metadata.type.name` only picks among the layouts that
-// protocol admits. With no protocol the name is the only source. Throws when the question
-// carries neither (e.g. a legacy election projected by GET /processes).
+// Per-question inferBallotType: `ballotProtocol` decides, and `type` / `metadata.type.name`
+// only break its ties. With no protocol the name is the only source; with neither it
+// throws (e.g. a legacy election projected by GET /processes).
 export function inferQuestionBallotType(question: {
   ballotProtocol?: BallotProtocol
   type?: string
@@ -89,11 +88,9 @@ export function unsatisfiableQuestionReason(question: {
 export function isUnsatisfiableProtocol(bp: ProtocolBounds): boolean
 export function isUnsatisfiableQuestion(question: { /* as above */ }): boolean
 
-// Why a question DECLARED ranked has a protocol that can never produce a ranking, or
-// null. The one case is `maxValue: 0` — the chain's discrete aggregation, which the SDK
-// reads as budget (the ranked name is ignored there). Folded into
-// `unsatisfiableQuestionReason` and refused by both encoders, so the creator hears about
-// the mismatch instead of silently publishing a budget ballot.
+// Why a question declared ranked can never produce a ranking, or null. The one case is
+// `maxValue: 0`, which is read as budget. Folded into `unsatisfiableQuestionReason` and
+// refused by both encoders, so the creator hears about the mismatch.
 export function unrankableProtocolReason(numChoices: number, maxValue: number): string | null
 
 // The part of a ballot protocol the satisfiability rule reads.

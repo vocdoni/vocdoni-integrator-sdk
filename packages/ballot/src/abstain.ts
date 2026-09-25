@@ -57,8 +57,7 @@ export function questionSelectionRange(question: {
   typeSetup?: QuestionTypeSetup
   choices: Choice[]
 }): { min: number; max: number } {
-  // Read off the inferred type and layout, the same answer encode and decode act on —
-  // not off the shape or the name alone, either of which can disagree with them.
+  // Read off the inferred type and layout, the same answer encode and decode act on.
   const ballotType = tryInferQuestionBallotType(question)
   // Ranked is a full slate: a partial ranking repeats a rank and the chain drops the
   // whole ballot at tally, so minChoices/maxChoices do not apply.
@@ -67,10 +66,9 @@ export function questionSelectionRange(question: {
     return { min: n, max: n }
   }
   const bp = question.ballotProtocol
-  // Dense layout (approval, or named multichoice with its protocol optionally omitted
-  // on public reads): maxCount is the number of choices, not the pick bound — picks are
-  // bounded by maxTotalCost (maxChoices at creation), and a partial selection is always
-  // encodable (unpicked choices are just 0 fields, no sentinel reservation involved).
+  // Dense layout (approval, or dense multichoice): maxCount is the number of choices, so
+  // picks are bounded by maxTotalCost (maxChoices at creation). A partial selection is
+  // always encodable: unpicked choices are just 0 fields.
   if (
     ballotType === BallotType.Approval ||
     (ballotType === BallotType.MultiChoice && !isPickSlotLayout(question))

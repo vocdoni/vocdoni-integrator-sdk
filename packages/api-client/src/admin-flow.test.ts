@@ -355,12 +355,9 @@ describe('admin / integrator client methods', () => {
       })
 
       it('ignores a legacy metadata name the shape rules out', async () => {
-        // Three fields cannot be a single-choice ballot, whatever the
-        // `single-choice-multiquestion` name says (the SaaS API stamps that name on every
-        // election it writes, including ones it does not describe). By shape this is a
-        // pick-slot list, whose values must be exactly 0..3, so the gap at 3 collides
-        // with the abstain sentinels. The codec reads it by shape, so creation must too,
-        // or it publishes an election its own codec cannot vote.
+        // Three fields can't be single-choice whatever the name says. By shape it's a
+        // pick-slot list, whose values must be exactly 0..3, so the gap at 3 collides with
+        // the abstain sentinels — creation must refuse what the codec can't vote.
         await expect(
           client.elections.create({
             orgAddress: ORG,

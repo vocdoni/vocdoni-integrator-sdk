@@ -301,13 +301,9 @@ describe('rankedOrderToScores', () => {
 })
 
 describe('ranked: a protocol that can never produce a ranking', () => {
-  // maxValue 0 means "no upper bound" everywhere else in this module, and on chain it
-  // switches the scrutinizer to discrete aggregation — one column per option instead of
-  // a histogram. The Borda decode is an index-weighted sum over that histogram, so it
-  // would read 0 for every option however anyone votes — which is why inference ignores
-  // the `ranked` name here and reads the shape as budget. The declaration and the
-  // protocol still contradict each other, so the guards below refuse the question
-  // rather than let voters cast amounts in a ballot they were told ranks.
+  // maxValue 0 is discrete aggregation (one column per option), where a Borda read scores
+  // 0 for everyone, so inference reads it as budget. The ranked name still contradicts the
+  // protocol, so the guards refuse the question.
   const zeroMaxValue = {
     ballotProtocol: {
       maxCount: 3,
@@ -336,10 +332,7 @@ describe('ranked: a protocol that can never produce a ranking', () => {
   }
 
   it('is decoded as what the protocol says, not as a ranking', () => {
-    // maxValue 0 admits budget/quadratic only, so the `ranked` name is ignored: the
-    // discrete one-cell rows are read as amounts. Read as a ranking, the Borda
-    // index-weighted sum would score every option 0. The guards below still refuse the
-    // contradiction: whoever declared it ranked gets no ranking out of this protocol.
+    // maxValue 0 admits budget/quadratic only: the one-cell rows are read as amounts.
     expect(decodeQuestionResults(zeroMaxValue, [['18'], ['10'], ['2']]).map((r) => r.votes)).toEqual([
       18, 10, 2,
     ])
