@@ -46,12 +46,14 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
   }
 
   const questions = election.questions.map((question) => {
+    const title = localize('results.title', { title: resolveTitle(question.title) })
+
     // No derivable ballot type (e.g. a legacy election projected without one): the
     // results matrix cannot be read without knowing its layout, so list the choices
     // with no tally rather than guess one — or throw and take down every other question.
     if (tryInferQuestionBallotType(question) === undefined) {
       return {
-        title: localize('results.title', { title: resolveTitle(question.title) }),
+        title,
         choices: question.choices.map((choice) => ({
           title: resolveTitle(choice.title),
           votes: '',
@@ -80,7 +82,7 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
     const reservesAbstain = questionReservesAbstain(question)
 
     return {
-      title: localize('results.title', { title: resolveTitle(question.title) }),
+      title,
       choices: decoded
         .filter((row) => row.choice !== 'abstain' || reservesAbstain || row.votes > 0)
         .map((row) => {
