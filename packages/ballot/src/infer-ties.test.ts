@@ -377,3 +377,41 @@ describe('ranked without uniqueValues', () => {
     ).toEqual([1, 0, 2])
   })
 })
+
+describe('multichoice over a single option', () => {
+  // SaaS multichoice with one option: {maxCount 1, maxValue 1, maxTotalCost 1}. One field
+  // is a single-choice layout, so there's no abstain row and value 1 is encodable.
+  const question = {
+    ballotProtocol: bp({ maxCount: 1, maxValue: 1, maxTotalCost: 1 }),
+    ...saas('multichoice'),
+    choices: choices(1),
+  }
+
+  it('reads as single-choice, everywhere', () => {
+    expect(inferQuestionBallotType(question)).toBe(BallotType.SingleChoice)
+    expect(questionSelectionRange(question)).toEqual({ min: 1, max: 1 })
+    expect(encodeQuestionSelections(question, [0])).toEqual([0])
+    expect(encodeQuestionSelections({ ...question, choices: choices(1, [1]) }, [1])).toEqual([1])
+    expect(decodeQuestionResults(question, [['3', '5']]).map((row) => row.votes)).toEqual([3])
+  })
+})
+
+describe('election level: ranked without uniqueChoices', () => {
+  it('stays ranked on a full-slate protocol', () => {
+    expect(
+      inferBallotType({
+        type: 'ranked',
+        voteType: { maxCount: 3, maxValue: 2, maxVoteOverwrites: 0, costExponent: 1, uniqueChoices: false, costFromWeight: false },
+        questions: [{ title: { default: 'Q0' }, choices: choices(3) }],
+      })
+    ).toBe(BallotType.Ranked)
+  })
+})
+
+describe('an unrecognised name', () => {
+  it('leaves the protocol to decide', () => {
+    // e.g. the backend's `cumulative` type, which the SDK has no name mapping for.
+    const question = { ballotProtocol: bp({ maxCount: 3, maxValue: 0 }), ...saas('cumulative'), choices: choices(3) }
+    expect(inferQuestionBallotType(question)).toBe(BallotType.Budget)
+  })
+})
