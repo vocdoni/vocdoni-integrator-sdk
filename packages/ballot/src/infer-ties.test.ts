@@ -415,3 +415,42 @@ describe('an unrecognised name', () => {
     expect(inferQuestionBallotType(question)).toBe(BallotType.Budget)
   })
 })
+
+describe('legacy multiple-choice with a single pick', () => {
+  // VocdoniSDK MultiChoiceElection, maxNumberOfChoices 1 over 3 options: maxValue 2, plus
+  // one abstain value (3) when canAbstain. Only the abstain value makes it a pick-slot list.
+  const question = (maxValue: number) => ({
+    ballotProtocol: bp({ maxCount: 1, maxValue, uniqueValues: true }),
+    ...legacy('multiple-choice'),
+    choices: choices(3),
+  })
+  const results = [['1', '2', '3', '4']]
+
+  it('stays pick-slot with abstain, keeping abstentions', () => {
+    const withAbstain = question(3)
+    expect(inferQuestionBallotType(withAbstain)).toBe(BallotType.MultiChoice)
+    expect(isPickSlotLayout(withAbstain)).toBe(true)
+    expect(encodeQuestionSelections(withAbstain, [])).toEqual([3])
+    expect(decodeQuestionResults(withAbstain, results).map((row) => row.votes)).toEqual([1, 2, 3, 4])
+    expect(
+      inferBallotType({
+        meta: withAbstain.metadata,
+        voteType: { maxCount: 1, maxValue: 3, maxVoteOverwrites: 0, costExponent: 1, uniqueChoices: true, costFromWeight: false },
+        questions: [{ title: { default: 'Q0' }, choices: choices(3) }],
+      })
+    ).toBe(BallotType.MultiChoice)
+  })
+
+  it('is single-choice without abstain: same counts, no always-empty abstain row', () => {
+    const plain = question(2)
+    expect(inferQuestionBallotType(plain)).toBe(BallotType.SingleChoice)
+    expect(questionSelectionRange(plain)).toEqual({ min: 1, max: 1 })
+    expect(decodeQuestionResults(plain, [['1', '2', '3']]).map((row) => row.votes)).toEqual([1, 2, 3])
+  })
+
+  it('does not extend to the SaaS multichoice name', () => {
+    // SaaS multichoice never reserves abstain values: one field is single-choice.
+    const saasQuestion = { ...question(3), metadata: undefined, ...saas('multichoice') }
+    expect(inferQuestionBallotType(saasQuestion)).toBe(BallotType.SingleChoice)
+  })
+})

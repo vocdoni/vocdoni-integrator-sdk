@@ -180,7 +180,7 @@ function admittedTypes(shape: ProtocolShape): readonly BallotType[] {
   if (shape.maxValue === 0) {
     return [shape.costExponent === 2 ? BallotType.Quadratic : BallotType.Budget]
   }
-  if (shape.maxCount === 1) return [BallotType.SingleChoice]
+  if (shape.maxCount === 1) return [BallotType.SingleChoice, BallotType.MultiChoice]
   const base =
     shape.maxValue === 1 && !shape.uniqueValues
       ? [BallotType.Approval, BallotType.MultiChoice]
@@ -195,6 +195,11 @@ function admittedTypes(shape: ProtocolShape): readonly BallotType[] {
  */
 function admits(shape: ProtocolShape, admitted: readonly BallotType[], name: DeclaredName): boolean {
   if (!admitted.includes(name.type)) return false
+  // One field is single-choice, unless a legacy pick-slot list reserved an abstain value
+  // above the options: reading that as single-choice would drop the abstentions.
+  if (shape.maxCount === 1 && name.type === BallotType.MultiChoice) {
+    return name.pickSlot && shape.numChoices !== undefined && shape.maxValue >= shape.numChoices
+  }
   if (name.pickSlot && shape.maxValue === 1 && !shape.uniqueValues) {
     return pickSlotFitsBinaryValues(shape.maxCount, shape.numChoices)
   }

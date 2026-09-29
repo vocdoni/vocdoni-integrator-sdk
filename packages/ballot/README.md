@@ -180,7 +180,7 @@ layouts, with a default for when nothing else is known:
 | shape | admitted (default first) |
 | --- | --- |
 | `maxValue: 0` | quadratic if `costExponent` is 2, budget otherwise — nothing else |
-| `maxCount: 1` | single-choice — nothing else |
+| `maxCount: 1` | single-choice; pick-slot `multiple-choice` only when `maxValue` reserves an abstain value above the options |
 | `maxValue: 1`, repeatable values | approval (dense), multichoice (pick-slot `multiple-choice` only when `maxCount` is 2 or there are at most two options) |
 | anything else | multichoice |
 
