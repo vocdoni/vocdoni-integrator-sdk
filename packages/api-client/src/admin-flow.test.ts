@@ -617,6 +617,54 @@ describe('admin / integrator client methods', () => {
     })
   })
 
+  describe('elections.setQuestionStatus', () => {
+    it('PUTs { status } to /processes/{id}/questions/{questionId}/status and returns the job', async () => {
+      let body: unknown
+      server.use(
+        http.put(`${BASE_URL}/processes/p1/questions/q1/status`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ jobId: 'qjob-1' })
+        }),
+      )
+
+      const res = await client.elections.setQuestionStatus('p1', 'q1', 'ended')
+      expect(res.jobId).toBe('qjob-1')
+      expect(body).toEqual({ status: 'ended' })
+    })
+  })
+
+  describe('elections.bulkSetQuestionStatus', () => {
+    it('PUTs { status, questions } to /processes/{id}/questions/status and returns the job', async () => {
+      let body: unknown
+      server.use(
+        http.put(`${BASE_URL}/processes/p1/questions/status`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ jobId: 'bjob-1' })
+        }),
+      )
+
+      const res = await client.elections.bulkSetQuestionStatus('p1', {
+        status: 'paused',
+        questions: [{ id: 'q1' }, { id: 'q2' }],
+      })
+      expect(res.jobId).toBe('bjob-1')
+      expect(body).toEqual({ status: 'paused', questions: [{ id: 'q1' }, { id: 'q2' }] })
+    })
+
+    it('omits questions to target every published question', async () => {
+      let body: unknown
+      server.use(
+        http.put(`${BASE_URL}/processes/p1/questions/status`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ jobId: 'bjob-2' })
+        }),
+      )
+
+      await client.elections.bulkSetQuestionStatus('p1', { status: 'ended' })
+      expect(body).toEqual({ status: 'ended' })
+    })
+  })
+
 })
 
 

@@ -33,10 +33,10 @@ pnpm add -D @vocdoni/api-types
 ## Usage
 
 ~~~ts
-import type { Election } from '@vocdoni/api-types'
+import type { VotingProcessResponse } from '@vocdoni/api-types'
 
-function describe(election: Election): string {
-  return `${election.title} — ${election.status}`
+function describe(process: VotingProcessResponse): string {
+  return `${process.title.default} — ${process.questions.length} question(s)`
 }
 ~~~
 

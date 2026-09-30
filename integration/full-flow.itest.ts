@@ -16,11 +16,12 @@ import { apiKey, makeAdminClient, makeClient } from './helpers'
 //      whose census is rooted at the CSP's blind key, and a ballot-protocol
 //      matrix covering every remaining type @vocdoni/ballot supports: approval,
 //      capped approval, pick-slot multichoice, ranked, budget and quadratic)
-//      each built from that one group, then proves the PUBLIC voter surface for each: drafts 404 on the
-//      token-less process read (draft gating, saas-backend#599) while published
-//      processes are fully public — chainId, questions, census size/totalWeight
-//      — with the PII `eligibleMemberIds` stripped for non-managers; plus the
-//      public single-question read (choices/ballotProtocol/upstreamId, and the
+//      each built from that one group, then proves the PUBLIC voter surface
+//      for each: drafts 404 on the token-less process read (draft gating,
+//      saas-backend#599) while published processes are fully public —
+//      chainId, questions, census size/totalWeight — with the PII
+//      `eligibleMemberIds` stripped for non-managers; plus the public
+//      single-question read (choices/ballotProtocol/upstreamId, and the
 //      secret question's encryption keys) and the public process list
 //   6. has 4 members vote on every question of every process via the
 //      process-scoped CSP flow (client.elections: authStep0 → check → sign —
