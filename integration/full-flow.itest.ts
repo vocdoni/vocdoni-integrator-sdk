@@ -8,7 +8,8 @@ import { apiKey, makeAdminClient, makeClient } from './helpers'
 //   1. creates a managed organization
 //   2. loads a 100-member memberbase (memberNumber 1..100)
 //   3. reads the auto-created "All members" group
-//   4. builds + publishes a CSP census from that group
+//   4. (no standalone census step: each process below embeds its CSP census
+//      as `census: { groupId, authFields }` on `POST /processes`)
 //   5. creates and publishes 5 processes (single-choice, multi-choice, a
 //      secretUntilTheEnd single-choice — its per-question encryption keys are
 //      polled after publish, per saas-backend#594 — an anonymous single-choice
@@ -140,20 +141,11 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       const groupId = autoGroup.id
       step(`3. auto group read — ${groupId}`)
 
-      // 4. CSP census from the group (auth-only: memberNumber, no 2FA).
-      const census = await admin.census.create({
-        orgAddress,
-        authFields: ['memberNumber'],
-      })
-      const censusId = census.id
-      step(`4. census created — ${censusId}`)
-      await admin.census.publishGroup(censusId, groupId, {
-        authFields: ['memberNumber'],
-        weighted: false,
-      })
-      step(`4. census published from group ${groupId}`)
+      // 4. No standalone census: each draft below embeds its CSP census from
+      // this group (`census: { groupId, authFields }`), auth-only (memberNumber,
+      // no 2FA). Step numbers are kept so the step() logs stay comparable.
 
-      // 5. Two processes sharing the one census, as flat
+      // 5. Processes built from the one group census, as flat
       // CreateVotingProcessRequest drafts: the ballot semantics now live on each
       // question (`type` / `typeSetup`), not on a process-level voteType.
       // endDate is required; omitting startDate makes each election start

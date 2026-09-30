@@ -56,7 +56,8 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
 2. Load a 100-member memberbase (`memberNumber` 1..100), polling the unified
    jobs endpoint for the import.
 3. Read the auto-created "All members" group.
-4. Build and publish a CSP census from that group.
+4. No standalone census step: each process embeds its CSP census from that
+   group (below).
 5. Create and publish 5 processes (each embedding its census via
    `census: { groupId, authFields }` — publish rejects censusless processes) —
    single-choice, multi-choice, a `secretUntilTheEnd` single-choice whose
