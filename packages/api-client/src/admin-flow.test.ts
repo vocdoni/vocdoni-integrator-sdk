@@ -354,34 +354,32 @@ describe('admin / integrator client methods', () => {
         ).rejects.toThrow(/Question 0: .*exactly the set 0\.\.1 \(in any order\), but they are 0, 5/)
       })
 
-      it('accepts by the legacy metadata name what the shape alone would reject', async () => {
-        // By shape this is MultiChoice and non-dense, i.e. pick-slot, whose values must be
-        // exactly 0..3 — so the gap at 3 would be refused. The legacy
-        // `single-choice-multiquestion` name says single-choice, which is value-addressed
-        // with a ceiling only: gaps are legal and every value clears maxValue 5. Refusing
-        // it would block a draft the codec encodes and decodes correctly.
-        const body = postDraft()
-        await client.elections.create({
-          orgAddress: ORG,
-          title: 'Legacy multiquestion',
-          questions: [
-            {
-              title: 'Pick one per question',
-              choices: [0, 1, 2, 4].map((v) => ({ title: `C${v}`, value: v })),
-              metadata: { type: { name: 'single-choice-multiquestion' } },
-              ballotProtocol: {
-                maxCount: 3,
-                maxValue: 5,
-                maxVoteOverwrites: 0,
-                costExponent: 1,
-                maxTotalCost: 0,
-                uniqueValues: false,
-                costFromWeight: false,
+      it('ignores a legacy metadata name the shape rules out', async () => {
+        // Three fields can't be single-choice whatever the name says. By shape it's a
+        // pick-slot list, whose values must be exactly 0..3, so the gap at 3 collides with
+        // the abstain sentinels — creation must refuse what the codec can't vote.
+        await expect(
+          client.elections.create({
+            orgAddress: ORG,
+            title: 'Legacy multiquestion',
+            questions: [
+              {
+                title: 'Pick one per question',
+                choices: [0, 1, 2, 4].map((v) => ({ title: `C${v}`, value: v })),
+                metadata: { type: { name: 'single-choice-multiquestion' } },
+                ballotProtocol: {
+                  maxCount: 3,
+                  maxValue: 5,
+                  maxVoteOverwrites: 0,
+                  costExponent: 1,
+                  maxTotalCost: 0,
+                  uniqueValues: false,
+                  costFromWeight: false,
+                },
               },
-            },
-          ],
-        })
-        expect(body().questions[0].metadata).toEqual({ type: { name: 'single-choice-multiquestion' } })
+            ],
+          }),
+        ).rejects.toThrow(/Question 0: .*exactly the set 0\.\.3/)
       })
 
       it('accepts a dense ballotProtocol with uniqueValues false', async () => {

@@ -98,8 +98,8 @@ describe('ranked: the declared name is the only signal', () => {
   it('declaresRanked answers for a question with neither a protocol nor a type', () => {
     // inferQuestionBallotType throws on that input; the predicate must not, so a UI
     // can ask "is this a ranking?" of a partial read without handling an exception.
-    // `as never` on both: neither signature declares `choices` (neither function reads
-    // it), and a bare `{}` would not say what this input is meant to be.
+    // `as never` on both: the signatures take `choices` only alongside a protocol or a
+    // name, and a bare `{}` would not say what this input is meant to be.
     expect(() => inferQuestionBallotType({ choices: choices(3) } as never)).toThrow()
     expect(declaresRanked({ choices: choices(3) } as never)).toBe(false)
   })
@@ -301,12 +301,9 @@ describe('rankedOrderToScores', () => {
 })
 
 describe('ranked: a protocol that can never produce a ranking', () => {
-  // maxValue 0 means "no upper bound" everywhere else in this module, and on chain it
-  // switches the scrutinizer to discrete aggregation — one column per option instead of
-  // a histogram. The Borda decode is an index-weighted sum over that histogram, so it
-  // reads 0 for every option however anyone votes. Ranked is therefore the one type for
-  // which maxValue 0 is not laxness but a dead election, and the guards below exist
-  // because nothing downstream can tell that tally from "nobody voted".
+  // maxValue 0 is discrete aggregation (one column per option), where a Borda read scores
+  // 0 for everyone, so inference reads it as budget. The ranked name still contradicts the
+  // protocol, so the guards refuse the question.
   const zeroMaxValue = {
     ballotProtocol: {
       maxCount: 3,
@@ -334,11 +331,10 @@ describe('ranked: a protocol that can never produce a ranking', () => {
     questions: [{ title: { default: 'Q0' }, choices: choices(3) }],
   }
 
-  it('is the failure this guards: every option decodes to zero', () => {
-    // Pinned so the guards below are not mistaken for pedantry. Discrete aggregation
-    // leaves one cell per option at column 0, and 0 × count is 0.
+  it('is decoded as what the protocol says, not as a ranking', () => {
+    // maxValue 0 admits budget/quadratic only: the one-cell rows are read as amounts.
     expect(decodeQuestionResults(zeroMaxValue, [['18'], ['10'], ['2']]).map((r) => r.votes)).toEqual([
-      0, 0, 0,
+      18, 10, 2,
     ])
   })
 

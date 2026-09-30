@@ -124,15 +124,18 @@ describe('inferBallotType', () => {
       expect(inferBallotType(createElection(ambiguous))).toBe(BallotType.Approval)
     })
 
-    it('wins over a shape that would decide otherwise', () => {
-      // A recognized name short-circuits the whole tree. Real producers emit name and
-      // shape together, so these pairings are synthetic — they pin the precedence.
+    it('is ignored when the shape rules it out', () => {
+      // The protocol decides; a name only breaks a tie. None of these shapes has one, so
+      // the name can only be wrong — trusting it would read the tally off the wrong axis.
       const cases: Array<[string, Record<string, number | boolean>, BallotType]> = [
-        ['approval', { maxCount: 2, maxValue: 3 }, BallotType.Approval],
-        ['multiple-choice', { maxCount: 1, maxValue: 1 }, BallotType.MultiChoice],
-        ['budget-based', { maxCount: 3, maxValue: 2 }, BallotType.Budget],
-        ['quadratic', { maxCount: 3, maxValue: 2 }, BallotType.Quadratic],
-        ['single-choice-multiquestion', { maxCount: 3, maxValue: 2 }, BallotType.SingleChoice],
+        ['approval', { maxCount: 2, maxValue: 3 }, BallotType.MultiChoice],
+        ['multiple-choice', { maxCount: 1, maxValue: 1 }, BallotType.SingleChoice],
+        ['budget-based', { maxCount: 3, maxValue: 2 }, BallotType.MultiChoice],
+        ['quadratic', { maxCount: 3, maxValue: 2 }, BallotType.MultiChoice],
+        ['single-choice-multiquestion', { maxCount: 3, maxValue: 2 }, BallotType.MultiChoice],
+        ['single-choice-multiquestion', { maxCount: 3, maxValue: 1 }, BallotType.Approval],
+        ['budget-based', { maxCount: 3, maxValue: 0, costExponent: 2 }, BallotType.Quadratic],
+        ['quadratic', { maxCount: 3, maxValue: 0, costExponent: 1 }, BallotType.Budget],
       ]
       for (const [type, voteType, expected] of cases) {
         expect(inferBallotType({ ...createElection(voteType), type })).toBe(expected)
@@ -239,17 +242,16 @@ describe('inferQuestionBallotType', () => {
     )
   })
 
-  it('lets a recognized named type win over a conflicting protocol', () => {
-    // Declared intent first, shape as fallback. The backend derives the dense layout from
-    // the named type, so a `multichoice` question is dense whatever maxCount says — and
-    // decodeQuestionResults remaps MultiChoice+dense to the `results[i][1]` read. The old
-    // SingleChoice label read results[0][choiceValue] instead, off the wrong axis.
+  it('ignores a recognized named type the protocol rules out', () => {
+    // The protocol decides; a name only breaks a tie it cannot. One field is single-choice
+    // whatever the name says (a one-slot pick list reads the same columns), and five
+    // values over three fields is a pick list, which one field could never be.
     expect(inferQuestionBallotType({ ballotProtocol: bp(), type: 'multichoice' })).toBe(
-      BallotType.MultiChoice
+      BallotType.SingleChoice
     )
     expect(
       inferQuestionBallotType({ ballotProtocol: bp({ maxCount: 3, maxValue: 4 }), type: 'singlechoice' })
-    ).toBe(BallotType.SingleChoice)
+    ).toBe(BallotType.MultiChoice)
   })
 
   it('reads the legacy vocabulary from the question metadata bag', () => {
@@ -262,14 +264,22 @@ describe('inferQuestionBallotType', () => {
         metadata: { type: { name: 'multiple-choice' } },
       })
     ).toBe(BallotType.MultiChoice)
-    // The SaaS field still wins when both are present.
+    // The SaaS field wins when the shape admits both names...
+    expect(
+      inferQuestionBallotType({
+        ballotProtocol: bp({ maxCount: 2, maxValue: 1 }),
+        type: 'multichoice',
+        metadata: { type: { name: 'approval' } },
+      })
+    ).toBe(BallotType.MultiChoice)
+    // ...but a SaaS name the shape rules out yields to a metadata name it admits.
     expect(
       inferQuestionBallotType({
         ballotProtocol: bp({ maxCount: 2, maxValue: 1 }),
         type: 'singlechoice',
         metadata: { type: { name: 'multiple-choice' } },
       })
-    ).toBe(BallotType.SingleChoice)
+    ).toBe(BallotType.MultiChoice)
     // And the legacy spelling is not honoured on the SaaS field, nor vice versa.
     expect(
       inferQuestionBallotType({ ballotProtocol: bp(), metadata: { type: { name: 'multichoice' } } })

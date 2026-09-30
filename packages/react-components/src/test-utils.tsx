@@ -137,8 +137,8 @@ export function makeProcess(opts: MakeProcessOptions = {}): VotingProcessRespons
     })),
     ballotProtocol: { ...DEFAULT_BALLOT_PROTOCOL, ...bpOverrides, ...(q.ballotProtocol ?? {}) },
     // A protocol override means a raw-`ballotProtocol` question, which the backend stores
-    // with an empty type label — `inferQuestionBallotType` prefers a recognized name over
-    // shape, so claiming `singlechoice` here would mask whatever the protocol expresses.
+    // with an empty type label. Inference would ignore a `singlechoice` name on any other
+    // shape anyway, but claiming it here would misstate what the backend returns.
     type: q.type ?? (voteType || q.ballotProtocol ? '' : 'singlechoice'),
     ...(q.metadata ? { metadata: q.metadata } : {}),
     secretUntilTheEnd: q.secretUntilTheEnd ?? electionType?.secretUntilTheEnd ?? false,
