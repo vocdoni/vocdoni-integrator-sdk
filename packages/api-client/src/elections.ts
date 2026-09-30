@@ -153,8 +153,8 @@ function normalizeVotingProcessRequest(req: CreateVotingProcessRequest): CreateV
 }
 
 /**
- * The whole `/processes` resource: authoring (create/publish/census/status,
- * API-key authed), public reads, the voter CSP flow and the vote relay.
+ * The whole `/processes` resource: authoring (create/publish/census/question
+ * status, API-key authed), public reads, the voter CSP flow and the vote relay.
  *
  * Two ids: `processId` is the Mongo ObjectID, while `electionId` in
  * {@link sign} is the QUESTION's on-chain id (`question.upstreamId`).

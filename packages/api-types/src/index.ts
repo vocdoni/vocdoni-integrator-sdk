@@ -358,6 +358,16 @@ export interface PublishProcessResponse {
   status: string
 }
 
+/**
+ * The writable status vocabulary of the question status routes
+ * (`setQuestionStatus` / `bulkSetQuestionStatus`) — not the read-side
+ * `ONGOING`. The legacy `PUT /process/{id}/status` it was named after is gone,
+ * but consumers type those calls with `SetElectionStatusRequest['status']`.
+ */
+export interface SetElectionStatusRequest {
+  status: 'ready' | 'paused' | 'ended' | 'canceled'
+}
+
 export interface ElectionListParams {
   /**
    * Owner organization address filter. The returned list items echo it as

@@ -11,7 +11,7 @@ import { normalizeQuestionChoiceMeta } from './choice-meta'
  * state as `ONGOING`, which is the only name {@link QuestionStatus} declares.
  * Normalize it away at the read boundary so `status === 'ONGOING'` comparisons
  * hold; the wire name `ready` then only exists in the write API
- * (`setQuestionStatus` / `bulkSetQuestionStatus`).
+ * (`SetElectionStatusRequest` / `bulkSetQuestionStatus`).
  */
 export const normalizeQuestionStatus = (status: string): QuestionStatus =>
   (status === 'READY' ? 'ONGOING' : status) as QuestionStatus
