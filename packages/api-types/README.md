@@ -36,7 +36,9 @@ pnpm add -D @vocdoni/api-types
 import type { VotingProcessResponse } from '@vocdoni/api-types'
 
 function describe(process: VotingProcessResponse): string {
-  return `${process.title.default} — ${process.questions.length} question(s)`
+  // `title` is a MultiLangString: `default` exists only when it was created from a plain string.
+  const title = process.title.default ?? Object.values(process.title)[0] ?? ''
+  return `${title} — ${process.questions.length} question(s)`
 }
 ~~~
 
