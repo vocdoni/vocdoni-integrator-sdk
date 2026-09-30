@@ -19,14 +19,12 @@ import type {
   OrganizationMembersResponse,
   OrganizationMetaRequest,
   OrganizationMetaResponse,
-  OrganizationProcessDraftsResponse,
   OrganizationRole,
   OrganizationSubscriptionInfo,
   OrganizationType,
   OrgMember,
   SubscriptionPlan,
   UpdateGroupRequest,
-  ValidateGroupRequest,
 } from '@vocdoni/api-types'
 import type { UpFetch } from 'up-fetch'
 import { handleError } from './errors'
@@ -160,29 +158,12 @@ export class OrganizationsClient {
     ).catch(handleError)
   }
 
-  async validateGroup(
-    address: string,
-    groupId: string,
-    body: ValidateGroupRequest,
-  ): Promise<void> {
-    return this.fetch<void>(`/organizations/${address}/groups/${groupId}/validate`, {
-      method: 'POST',
-      body,
-    }).catch(handleError)
-  }
-
   // ─── Scoped reads ──────────────────────────────────────────────────────────
 
   async listCensuses(address: string): Promise<OrganizationCensusesResponse> {
     return this.fetch<OrganizationCensusesResponse>(`/organizations/${address}/censuses`).catch(
       handleError,
     )
-  }
-
-  async listProcessDrafts(address: string): Promise<OrganizationProcessDraftsResponse> {
-    return this.fetch<OrganizationProcessDraftsResponse>(
-      `/organizations/${address}/processes/drafts`,
-    ).catch(handleError)
   }
 
   async getSubscription(address: string): Promise<OrganizationSubscriptionInfo> {

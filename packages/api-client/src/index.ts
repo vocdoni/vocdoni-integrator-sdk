@@ -12,7 +12,6 @@ export {
   computeProcessStatus,
   type ComputeProcessStatusOptions,
 } from './election-status'
-export { CensusClient } from './census'
 export { VocdoniApiClient } from './client'
 export { ElectionsClient, ProcessesCspClient } from './elections'
 export { VocdoniApiError } from './errors'

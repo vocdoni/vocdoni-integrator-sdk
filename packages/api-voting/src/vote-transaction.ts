@@ -80,7 +80,8 @@ export function encodeCaBundle(opts: CaBundleOptions): Uint8Array {
 
 /**
  * Builds and signs a Vochain vote transaction carrying a CSP (CA) proof, and
- * returns the hex-encoded `SignedTx` ready for POST /process/{processId}/vote.
+ * returns the hex-encoded `SignedTx` ready for the `POST /vote` (or batched
+ * `POST /votes`) relay.
  *
  * The proof reconstructs the exact `CAbundle{processId, address, voteWeight}`
  * the CSP signed, so the Vochain can verify the signature. The transaction is

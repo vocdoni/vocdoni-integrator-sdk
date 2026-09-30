@@ -160,27 +160,15 @@ export interface CensusInfo {
 }
 
 /**
- * Member-data fields a CSP census can authenticate on. Listed at census
- * creation / group publish; an auth-only census (no 2FA) is one with only
+ * Member-data fields a CSP census can authenticate on. Listed in the process
+ * census ({@link CensusSpec}); an auth-only census (no 2FA) is one with only
  * `authFields` set.
  */
 export type OrgMemberAuthField = 'name' | 'surname' | 'memberNumber' | 'nationalId' | 'birthDate'
 /** Contact fields used for the 2FA OTP challenge. */
 export type OrgMemberTwoFaField = 'email' | 'phone'
 
-/** Body of `POST /census` — creates an (empty) org-level CSP census. */
-export interface CreateCensusRequest {
-  orgAddress: string
-  authFields?: OrgMemberAuthField[]
-  twoFaFields?: OrgMemberTwoFaField[]
-}
-
-/** Response of `POST /census` — only the new census id (as `id`). */
-export interface CreateCensusResponse {
-  id: string
-}
-
-/** The SaaS census record returned by `GET /census/{id}`. */
+/** An org-level SaaS census record, as listed by `GET /organizations/{address}/censuses`. */
 export interface OrganizationCensus {
   censusId: string
   type?: string
@@ -195,39 +183,6 @@ export interface OrganizationCensus {
   groupID?: string
   authFields?: OrgMemberAuthField[]
   twoFaFields?: OrgMemberTwoFaField[]
-}
-
-/** Body of `POST /census/{id}/group/{groupId}/publish`. */
-export interface PublishCensusGroupRequest {
-  authFields?: OrgMemberAuthField[]
-  twoFaFields?: OrgMemberTwoFaField[]
-  weighted?: boolean
-}
-
-/** Body of `POST /census/{id}/publish`. */
-export interface PublishCensusRequest {
-  authFields?: OrgMemberAuthField[]
-  twoFaFields?: OrgMemberTwoFaField[]
-  weighted?: boolean
-}
-
-/** Response of the census publish endpoints. */
-export interface PublishedCensusResponse {
-  uri: string
-  /** Census Merkle root (hex). */
-  root: string
-  size: number
-}
-
-/** Body of `POST /census/{id}` — adds existing org members to the census. */
-export interface AddCensusParticipantsRequest {
-  memberIds: string[]
-}
-
-/** `GET /census/{id}/participants` — the member ids in the census. */
-export interface CensusParticipantsResponse {
-  censusId: string
-  memberIds: string[]
 }
 
 // ─── Election ─────────────────────────────────────────────────────────────────
@@ -358,13 +313,13 @@ export interface ElectionType {
 export interface Election {
   id: string
   /**
-   * On-chain (Vochain) process id, 64-hex. Returned as `address` by
-   * `GET /process/{id}`; this is the id the vote/sign/check flow signs against.
-   * The top-level `id` is the Mongo ObjectID used to fetch the process.
+   * On-chain (Vochain) election id, 64-hex; this is the id the vote/sign/check
+   * flow signs against. The top-level `id` is the Mongo ObjectID used to fetch
+   * the process. In the `/processes` model it lives per question, on
+   * `questions[i].upstreamId` ({@link VotingProcessQuestion}).
    *
    * Required: the CSP check/sign and the vote envelope are keyed by this id, and
-   * the Mongo id is not a valid substitute. {@link mapProcessToElection} throws
-   * if the process response omits it.
+   * the Mongo id is not a valid substitute.
    */
   address: string
   /** Vochain chain id the vote signs against, e.g. "vocdoni/DEV/36". */
@@ -396,22 +351,11 @@ export interface EncryptionKey {
 
 // ─── Election API ─────────────────────────────────────────────────────────────
 
-/** Synchronous response of `POST /process/{id}/publish` when already published. */
+/** Synchronous response of `POST /processes/{id}/publish` when already published. */
 export interface PublishProcessResponse {
   /** On-chain (Vochain) process id, hex. */
   address: string
   status: string
-}
-
-export interface SetElectionStatusRequest {
-  status: 'ready' | 'paused' | 'ended' | 'canceled'
-}
-
-export interface ElectionMetadata {
-  title: LocalizedInput
-  description?: LocalizedInput
-  questions: Question[]
-  media?: { header?: string }
 }
 
 export interface ElectionListParams {
@@ -1139,15 +1083,6 @@ export interface ConsumedAddressRequest {
   authToken: string
 }
 
-/** Legacy response of `POST /process/{id}/sign-info` (single-election model). */
-export interface ConsumedAddressResponse {
-  authToken?: string
-  /** Vote nullifier of the consumed process. */
-  nullifier: string
-  /** Consumption timestamp. */
-  at: string
-}
-
 /** One question's consumed voting info in {@link ProcessSignInfoResponse}. */
 export interface QuestionConsumedAddress {
   questionId: string
@@ -1351,11 +1286,6 @@ export interface ListGroupMembersResponse {
   pagination?: Pagination
 }
 
-export interface ValidateGroupRequest {
-  authFields?: OrgMemberAuthField[]
-  twoFaFields?: OrgMemberTwoFaField[]
-}
-
 // ─── API keys (integrator) ──────────────────────────────────────────────────────
 
 export interface CreateApiKeyRequest {
@@ -1464,12 +1394,6 @@ export interface OrganizationSubscriptionInfo {
   subscriptionDetails: SubscriptionDetails
   usage: SubscriptionUsage
   plan: SubscriptionPlan
-}
-
-/** `GET /organizations/{address}/processes/drafts`. `processes` are raw process docs. */
-export interface OrganizationProcessDraftsResponse {
-  processes: unknown[]
-  pagination?: Pagination
 }
 
 export interface DeleteManagedOrganizationResponse {
