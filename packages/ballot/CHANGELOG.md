@@ -1,5 +1,19 @@
 # @vocdoni/ballot
 
+## 1.3.0
+
+### Minor Changes
+
+- 8781d04: Add `tryInferQuestionBallotType(question)`: the non-throwing counterpart of `inferQuestionBallotType`, returning `undefined` for a question with neither a recognized type name nor a `ballotProtocol` (e.g. a legacy election projected by `GET /processes`). `inferQuestionBallotType` still throws on such a question.
+
+  Type-name lookups no longer resolve inherited object keys: a `type` or `metadata.type.name` such as `constructor` or `toString` is now treated as unrecognized instead of short-circuiting inference with a non-`BallotType` value.
+
+### Patch Changes
+
+- 7e0fbb9: Infer the ballot type from the protocol first and use a declared type name (SaaS `type`, legacy `metadata.type.name` / `meta.type.name`) only to break ties the protocol can't resolve. A name picks among the layouts the shape admits; a name the shape rules out is now ignored instead of overriding it — e.g. an approval ballot over three options labelled `single-choice-multiquestion` decodes as approval, and a `ranked` name on `maxCount: 1` is single-choice. Questions with no `ballotProtocol` are still typed by name alone. The same rule applies at election level against `voteType`. `declaresRanked`, `isPickSlotLayout`, `questionSelectionRange` and the creation-time checks in `@vocdoni/api-client` follow the same answer. A question declared `ranked` with `maxValue: 0` is still refused at creation and encode time, but now decodes as budget. When the choices are known, a `ranked` name also needs `maxCount` to equal the option count, and the legacy `multiple-choice` name stays pick-slot over two options with more repeatable slots than options (`{maxCount: 3, maxValue: 1}` over 2 choices). A `ranked` name doesn't need `uniqueValues`, so ranked questions created without it keep decoding as ranked. A legacy `multiple-choice` question with a single pick and abstain enabled stays pick-slot, so its abstentions keep being counted and cast.
+- Updated dependencies [e9b8476]
+  - @vocdoni/api-types@2.2.0
+
 ## 1.2.1
 
 ### Patch Changes
