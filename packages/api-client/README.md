@@ -22,11 +22,10 @@ directly.
 
 A single `VocdoniApiClient` groups the API surface into focused sub-clients:
 
-- **`elections`** — read, create, publish and manage voting processes.
-- **`organizations`** — manage organizations and their members.
-- **`census`** — create and populate censuses.
+- **`elections`** — read, create, publish and manage voting processes (each embeds its own
+  census), plus the voter-facing CSP / two-factor auth flow and vote relay.
+- **`organizations`** — manage organizations, their members and groups.
 - **`auth`** — account authentication against the SaaS API.
-- **`bundle`** — the voter-facing CSP / two-factor auth flow for a bundle of processes.
 - **`jobs`** — poll the status of asynchronous operations (publishing, vote relaying…).
 
 Authentication is optional and lazy: pass `authToken` as a string or as a (possibly async)

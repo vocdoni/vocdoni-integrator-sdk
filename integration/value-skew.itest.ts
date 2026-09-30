@@ -65,12 +65,7 @@ suite('issue #28: sparse single-choice values (live)', () => {
 
       const groups = await admin.organizations.listGroups(orgAddress)
       const groupId = groups.groups[0].id
-      const census = await admin.census.create({ orgAddress, authFields: ['memberNumber'] })
-      await admin.census.publishGroup(census.id, groupId, {
-        authFields: ['memberNumber'],
-        weighted: false,
-      })
-      step(`org ${orgAddress}, census ${census.id}, group ${groupId}`)
+      step(`org ${orgAddress}, group ${groupId}`)
 
       // No ballotProtocol on purpose: the backend must derive it from the choice
       // values. That derivation is half the contract under test — a maxValue of 2
@@ -230,11 +225,6 @@ suite('issue #28: sparse single-choice values (live)', () => {
       }
       const groups = await admin.organizations.listGroups(orgAddress)
       const groupId = groups.groups[0].id
-      const census = await admin.census.create({ orgAddress, authFields: ['memberNumber'] })
-      await admin.census.publishGroup(census.id, groupId, {
-        authFields: ['memberNumber'],
-        weighted: false,
-      })
 
       // The malformed shape from #28: values 1/2/3 under maxValue 2. Posted raw,
       // for the reason in the docblock — `client.elections.create` refuses this

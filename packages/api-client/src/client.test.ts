@@ -2,7 +2,6 @@ import { http, HttpResponse } from 'msw'
 import { server } from '../../../mocks/server'
 import {
   mockAuthToken,
-  mockElection,
   mockOrganization,
   mockProcess,
 } from '../../../mocks/handlers'

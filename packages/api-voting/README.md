@@ -31,7 +31,7 @@ It provides:
   helpers used under the hood.
 
 Authentication and the CSP signature (and census weight) are obtained beforehand from the
-bundle auth/sign flow — typically through [`@vocdoni/api-client`](../api-client). This
+process CSP auth/sign flow — typically through [`@vocdoni/api-client`](../api-client). This
 package picks up from there and produces the vote.
 
 ## Install
@@ -59,13 +59,13 @@ import { VotingClient, EphemeralSigner } from '@vocdoni/api-voting'
 const client = new VocdoniApiClient({ apiUrl })
 const voting = new VotingClient({ client })
 
-// `signer` and `cspSignature` come from the bundle auth/sign flow (via api-client).
+// `signer` and `cspSignature` come from the process CSP auth/sign flow (via api-client).
 const jobId = await voting.vote({
   processId,
   chainId, // Vochain chain id the vote is destined for
   choices: [1],
   signer, // ephemeral signer whose address the CSP signed
-  cspSignature, // signature returned by the bundle sign endpoint
+  cspSignature, // signature returned by the process CSP sign endpoint
 })
 
 // Poll GET /jobs/{jobId} to obtain the vote nullifier once the job completes.

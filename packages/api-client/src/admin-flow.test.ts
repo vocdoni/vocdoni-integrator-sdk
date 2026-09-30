@@ -84,31 +84,6 @@ describe('admin / integrator client methods', () => {
     })
   })
 
-  describe('census.create + publishGroup', () => {
-    it('creates an org census and publishes it from a group', async () => {
-      let createBody: unknown
-      let publishBody: unknown
-      server.use(
-        http.post(`${BASE_URL}/census`, async ({ request }) => {
-          createBody = await request.json()
-          return HttpResponse.json({ id: 'c1' })
-        }),
-        http.post(`${BASE_URL}/census/c1/group/g1/publish`, async ({ request }) => {
-          publishBody = await request.json()
-          return HttpResponse.json({ uri: 'ipfs://x', root: '0xroot', size: 100 })
-        }),
-      )
-
-      const census = await client.census.create({ orgAddress: ORG, authFields: ['memberNumber'] })
-      expect(census.id).toBe('c1')
-      expect(createBody).toEqual({ orgAddress: ORG, authFields: ['memberNumber'] })
-
-      const published = await client.census.publishGroup('c1', 'g1', { authFields: ['memberNumber'] })
-      expect(published.root).toBe('0xroot')
-      expect(publishBody).toEqual({ authFields: ['memberNumber'] })
-    })
-  })
-
   describe('elections.create', () => {
     it('POSTs a CreateVotingProcessRequest to /processes and returns the draft id string', async () => {
       let body: unknown
@@ -642,18 +617,50 @@ describe('admin / integrator client methods', () => {
     })
   })
 
-  describe('elections.setStatus', () => {
-    it('PUTs the status and returns the enqueued job', async () => {
+  describe('elections.setQuestionStatus', () => {
+    it('PUTs { status } to /processes/{id}/questions/{questionId}/status and returns the job', async () => {
       let body: unknown
       server.use(
-        http.put(`${BASE_URL}/process/p1/status`, async ({ request }) => {
+        http.put(`${BASE_URL}/processes/p1/questions/q1/status`, async ({ request }) => {
           body = await request.json()
-          return HttpResponse.json({ jobId: 'sjob-1' })
+          return HttpResponse.json({ jobId: 'qjob-1' })
         }),
       )
 
-      const res = await client.elections.setStatus('p1', { status: 'ended' })
-      expect(res.jobId).toBe('sjob-1')
+      const res = await client.elections.setQuestionStatus('p1', 'q1', 'ended')
+      expect(res.jobId).toBe('qjob-1')
+      expect(body).toEqual({ status: 'ended' })
+    })
+  })
+
+  describe('elections.bulkSetQuestionStatus', () => {
+    it('PUTs { status, questions } to /processes/{id}/questions/status and returns the job', async () => {
+      let body: unknown
+      server.use(
+        http.put(`${BASE_URL}/processes/p1/questions/status`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ jobId: 'bjob-1' })
+        }),
+      )
+
+      const res = await client.elections.bulkSetQuestionStatus('p1', {
+        status: 'paused',
+        questions: [{ id: 'q1' }, { id: 'q2' }],
+      })
+      expect(res.jobId).toBe('bjob-1')
+      expect(body).toEqual({ status: 'paused', questions: [{ id: 'q1' }, { id: 'q2' }] })
+    })
+
+    it('omits questions to target every published question', async () => {
+      let body: unknown
+      server.use(
+        http.put(`${BASE_URL}/processes/p1/questions/status`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ jobId: 'bjob-2' })
+        }),
+      )
+
+      await client.elections.bulkSetQuestionStatus('p1', { status: 'ended' })
       expect(body).toEqual({ status: 'ended' })
     })
   })

@@ -12,7 +12,6 @@ import type {
   CreateVotingProcessRequest,
   CreateVotingProcessResponse,
   ElectionListParams,
-  ElectionMetadata,
   EnqueuedResponse,
   LocalizedInput,
   MultiLangString,
@@ -25,7 +24,6 @@ import type {
   RelayVoteRequest,
   RelayVoteResponse,
   RelayVotesRequest,
-  SetElectionStatusRequest,
   SetQuestionsStatusRequest,
   SignBatchRequest,
   SignBatchResponse,
@@ -155,8 +153,8 @@ function normalizeVotingProcessRequest(req: CreateVotingProcessRequest): CreateV
 }
 
 /**
- * The whole `/processes` resource: authoring (create/publish/census/status,
- * API-key authed), public reads, the voter CSP flow and the vote relay.
+ * The whole `/processes` resource: authoring (create/publish/census/question
+ * status, API-key authed), public reads, the voter CSP flow and the vote relay.
  *
  * Two ids: `processId` is the Mongo ObjectID, while `electionId` in
  * {@link sign} is the QUESTION's on-chain id (`question.upstreamId`).
@@ -190,15 +188,6 @@ export class ElectionsClient {
   /** Public tallies via `GET /processes/{id}/results` — live per-question {@link QuestionResults} plus ids. */
   async getResults(id: string): Promise<VotingProcessResultsResponse> {
     return this.fetch<VotingProcessResultsResponse>(`/processes/${id}/results`).catch(handleError)
-  }
-
-  /**
-   * Legacy-only: `GET /process/{id}/metadata` (single-election model, vochain
-   * process id). The `/processes/{id}` model has no metadata endpoint — new-model
-   * consumers should read `title`/`description`/`header` from {@link get} instead.
-   */
-  async getMetadata(id: string): Promise<ElectionMetadata> {
-    return this.fetch<ElectionMetadata>(`/process/${id}/metadata`).catch(handleError)
   }
 
   /**
@@ -318,30 +307,6 @@ export class ElectionsClient {
     const res = await this.publish(draftId)
     if (!isEnqueued(res)) return res
     const job = await this.jobs.waitFor(res.jobId, opts)
-    return { address: job.result?.address ?? '', status: job.result?.status ?? '' }
-  }
-
-  /**
-   * Legacy-only: change a whole election's status via `PUT /process/{id}/status`
-   * (single-election model, vochain process id). The `/processes/{id}` model has
-   * no process-level status route — use {@link setQuestionStatus} /
-   * {@link bulkSetQuestionStatus} instead. Returns the enqueued job to poll.
-   */
-  async setStatus(id: string, status: SetElectionStatusRequest): Promise<EnqueuedResponse> {
-    return this.fetch<EnqueuedResponse>(`/process/${id}/status`, {
-      method: 'PUT',
-      body: status,
-    }).catch(handleError)
-  }
-
-  /** Legacy-only companion of {@link setStatus} that waits for the on-chain result. */
-  async setStatusAndWait(
-    id: string,
-    status: SetElectionStatusRequest,
-    opts?: WaitForJobOptions,
-  ): Promise<PublishProcessResponse> {
-    const { jobId } = await this.setStatus(id, status)
-    const job = await this.jobs.waitFor(jobId, opts)
     return { address: job.result?.address ?? '', status: job.result?.status ?? '' }
   }
 

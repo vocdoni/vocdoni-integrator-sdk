@@ -17,7 +17,7 @@
 
 Shared TypeScript types for the Vocdoni SaaS API. This package is **type-only**: it has no
 runtime code, just the interfaces and types that describe the shapes the SaaS API speaks —
-`Organization`, `Census`, `Election`, `Bundle`, the CSP bundle auth flow, vote relay
+`Organization`, `VotingProcessResponse` and its questions, the process CSP auth flow, vote relay
 requests, async jobs, auth tokens and the client config.
 
 It is the single source of truth for those shapes across the SDK: the other `@vocdoni/*`
@@ -33,10 +33,12 @@ pnpm add -D @vocdoni/api-types
 ## Usage
 
 ~~~ts
-import type { Election, Bundle } from '@vocdoni/api-types'
+import type { VotingProcessResponse } from '@vocdoni/api-types'
 
-function describe(election: Election): string {
-  return `${election.title} — ${election.status}`
+function describe(process: VotingProcessResponse): string {
+  // `title` is a MultiLangString: `default` exists only when it was created from a plain string.
+  const title = process.title.default ?? Object.values(process.title)[0] ?? ''
+  return `${title} — ${process.questions.length} question(s)`
 }
 ~~~
 
