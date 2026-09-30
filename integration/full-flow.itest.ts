@@ -140,20 +140,8 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       const groupId = autoGroup.id
       step(`3. auto group read — ${groupId}`)
 
-      // 4. CSP census from the group (auth-only: memberNumber, no 2FA).
-      const census = await admin.census.create({
-        orgAddress,
-        authFields: ['memberNumber'],
-      })
-      const censusId = census.id
-      step(`4. census created — ${censusId}`)
-      await admin.census.publishGroup(censusId, groupId, {
-        authFields: ['memberNumber'],
-        weighted: false,
-      })
-      step(`4. census published from group ${groupId}`)
-
-      // 5. Two processes sharing the one census, as flat
+      // 4. Processes whose census is the auto group (auth-only: memberNumber, no
+      // 2FA), declared on each draft's `census`. As flat
       // CreateVotingProcessRequest drafts: the ballot semantics now live on each
       // question (`type` / `typeSetup`), not on a process-level voteType.
       // endDate is required; omitting startDate makes each election start
@@ -413,7 +401,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       let chainId: string | undefined
       for (const d of drafts) {
         const draftId = await admin.elections.create(d.body)
-        step(`5. draft created — ${d.label} (${draftId})`)
+        step(`4. draft created — ${d.label} (${draftId})`)
 
         // Draft gating (saas-backend#599): the process read is public, but a
         // draft must 404 to anyone who is not an org manager / scoped API key —
@@ -474,7 +462,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
           }
           const keyCount = secretQuestions.reduce((n, q) => n + (q.encryptionKeys?.length ?? 0), 0)
           expect(keyCount, `${d.label} resolved no encryption keys`).toBeGreaterThan(0)
-          step(`5. encryption keys ready — ${keyCount} key(s) for ${d.label}`)
+          step(`4. encryption keys ready — ${keyCount} key(s) for ${d.label}`)
         }
 
         // Public voter surface for this process (no API key): every question is
@@ -545,7 +533,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
         for (const q of pubInfo.questions) {
           expect(q.eligibleMemberIds, `${d.label} public read leaks eligibleMemberIds`).toBeUndefined()
         }
-        step(`5. public process read verified — ${d.label} (chain ${pubInfo.chainId})`)
+        step(`4. public process read verified — ${d.label} (chain ${pubInfo.chainId})`)
 
         processes.push({
           label: d.label,
@@ -571,9 +559,9 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
           expect(q.results, 'list items must not resolve results').toBeUndefined()
         }
       }
-      step(`5. public process list verified — ${publicList.processes.length} published`)
+      step(`4. public process list verified — ${publicList.processes.length} published`)
 
-      // 6. Every member votes on every process through the process-scoped CSP
+      // 5. Every member votes on every process through the process-scoped CSP
       // flow (client.elections — the ONLY voter flow since the backend dropped
       // the bundle routes). The auth token is anchored to the process (one
       // authStep0 per member+process), the check reports every question's
@@ -662,14 +650,14 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
             expect(nullifier, `no nullifier (${p.label}, member ${memberNumber})`).toBeTruthy()
             expect(nullifiers.has(nullifier!), 'duplicate nullifier').toBe(false)
             nullifiers.add(nullifier!)
-            step(`6. vote emitted — member ${memberNumber} on ${p.label} → ${nullifier!.slice(0, 12)}…`)
+            step(`5. vote emitted — member ${memberNumber} on ${p.label} → ${nullifier!.slice(0, 12)}…`)
           }
         }
       }
 
       expect(nullifiers.size).toBe(VOTERS.length * questionCount)
 
-      // 6b. Unlinkability, as the API reports it: the anonymous process knows a
+      // 5b. Unlinkability, as the API reports it: the anonymous process knows a
       // voter consumed its question, but not which address did it or which
       // nullifier resulted — the CSP blind-signed a ballot it never saw. Its
       // nullifiers came from the relay job above, which is the ONLY place an
@@ -691,9 +679,9 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
           }
         }
       }
-      step(`6b. sign-info verified — anonymous process reports no address and no nullifier`)
+      step(`5b. sign-info verified — anonymous process reports no address and no nullifier`)
 
-      // 7. Live results (saas-backend#596 + #599): tallies are public and live —
+      // 6. Live results (saas-backend#596 + #599): tallies are public and live —
       // no RESULTS status needed. Poll `GET /processes/{id}/results` until every
       // question's voteCount reflects every voter (the chain indexer may lag a
       // few blocks behind the relay jobs), then check the tally shape: live
@@ -834,7 +822,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
             `${p.label} / "${q.title?.default}" question-read tally differs from /results`,
           ).toEqual(expected)
         }
-        step(`7. live results verified — ${p.label} (${VOTES_PER_QUESTION} votes per question)`)
+        step(`6. live results verified — ${p.label} (${VOTES_PER_QUESTION} votes per question)`)
       }
 
       step(`done — ${nullifiers.size} votes cast across ${questionCount} on-chain processes`)

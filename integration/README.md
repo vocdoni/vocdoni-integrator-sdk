@@ -15,7 +15,7 @@ real API.
 ## Why one suite
 
 Everything that needs a real backend is asserted inside the lifecycle, which
-creates all of its own data — org, members, group, census, processes, votes —
+creates all of its own data — org, members, group, processes, votes —
 so there are no dev-DB fixtures to rot. It runs in CI
 (`.github/workflows/integration.yml`) against a disposable saas-api + vochain
 container on every pull request, on pushes to `main`, and on a nightly
@@ -56,8 +56,7 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
 2. Load a 100-member memberbase (`memberNumber` 1..100), polling the unified
    jobs endpoint for the import.
 3. Read the auto-created "All members" group.
-4. Build and publish a CSP census from that group.
-5. Create and publish 5 processes (each embedding its census via
+4. Create and publish 5 processes (each embedding its census via
    `census: { groupId, authFields }` — publish rejects censusless processes) —
    single-choice, multi-choice, a `secretUntilTheEnd` single-choice whose
    per-question encryption keys are polled after publish, an **anonymous**
@@ -72,7 +71,7 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
    `encryptionKeys`) and the public process list. Also assert no question ships
    an unsatisfiable ballot config, and that a multichoice question created with
    `uniqueChoices: true` was normalized to `false`.
-6. 4 members vote on every question through the **process-scoped CSP flow**
+5. 4 members vote on every question through the **process-scoped CSP flow**
    (`client.elections`: `authStep0` → `check` → `sign`), with `chainId` read
    straight off the **public** process read — no integrator handoff. The secret
    question's ballots are sealed with its encryption keys. The anonymous
@@ -80,10 +79,10 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
    → `blindSign` → unblind — and casts an `ECDSA_BLIND_PIDSALTED` proof, which
    is the only end-to-end check that the SDK, the backend and the chain salt
    the census key identically.
-7. Assert one distinct vote nullifier per (member, question) — 40 in total —
+6. Assert one distinct vote nullifier per (member, question) — 40 in total —
    and that `sign-info` reports neither address nor nullifier for the anonymous
    process while reporting both for every other one.
-8. Read the live public tallies (`getResults` + single reads): every question
+7. Read the live public tallies (`getResults` + single reads): every question
    reaches `voteCount = 4` with `finalResults = false`, `maxVoters` = census
    size, and — for cleartext questions — the **decoded per-choice tally**
    matches the expected result exactly (a secret question's matrix stays hidden
