@@ -4,7 +4,6 @@ import { http, HttpResponse } from 'msw'
 import { mockBlindCsp } from '../packages/api-voting/src/blind-secp256k1.testkit'
 
 const BASE = 'http://localhost'
-export const BUNDLE_ID = 'bundle-1'
 /** Vochain process id (64-hex) the process info exposes as `address`. */
 export const MOCK_PROCESS_ADDRESS =
   '6be21a5a9dc01036097ea184999095aed31735e7264a19652130030800000001'
@@ -121,35 +120,6 @@ export const handlers = [
     }),
   ),
 
-  // Legacy single-process endpoint — kept for tests that still exercise old paths.
-  http.get(`${BASE}/process/:id`, ({ params }) =>
-    HttpResponse.json({
-      id: params.id as string,
-      address: MOCK_PROCESS_ADDRESS,
-      chainId: 'test',
-      status: mockElection.status,
-      orgAdress: mockElection.organizationId,
-      census: {
-        id: 'census-1',
-        type: 'csp',
-        weighted: false,
-        size: 10,
-        published: { uri: 'https://example.org/census-1', root: '0xroot' },
-        authFields: ['memberNumber'],
-        twoFaFields: [],
-      },
-      metadata: { title: mockElection.title, description: mockElection.description },
-      electionParams: {
-        startDate: mockElection.startDate,
-        endDate: mockElection.endDate,
-        questions: mockElection.questions,
-        voteType: mockElection.voteType,
-        electionType: mockElection.electionType,
-      },
-      publishedAt: '2024-01-01T00:00:00Z',
-    }),
-  ),
-
   // Vote relay — flat public POST /vote; the process is named in the envelope.
   // Returns an async job id (202).
   http.post(`${BASE}/vote`, async ({ request }) => {
@@ -212,53 +182,8 @@ export const handlers = [
     })
   }),
 
-  // Process status change (pause/resume/end/cancel) — 200, body is { status }.
-  http.put(`${BASE}/process/:id/status`, () => HttpResponse.json({}, { status: 200 })),
-
   http.post(`${BASE}/auth/login`, () => HttpResponse.json(mockAuthToken)),
   http.post(`${BASE}/auth/refresh`, () => HttpResponse.json(mockAuthToken)),
-
-  // ─── Bundle info ─────────────────────────────────────────────────────────────
-  http.get(`${BASE}/process/bundle/:bundleId`, ({ params }) =>
-    HttpResponse.json({
-      id: params.bundleId as string,
-      chainId: 'test',
-      processes: [mockElection.id],
-      orgAddress: '0xorg',
-      // 2FA census (twoFaFields populated) → exercises the auth0 → auth1 flow.
-      census: { id: 'census-1', type: 'sms', authFields: ['memberNumber'], twoFaFields: ['phone'] },
-    }),
-  ),
-
-  // ─── Bundle CSP auth ─────────────────────────────────────────────────────────
-  http.post(`${BASE}/process/bundle/:bundleId/auth/0`, () =>
-    HttpResponse.json({ authToken: 'csp-step0-token' }),
-  ),
-
-  http.post(`${BASE}/process/bundle/:bundleId/auth/1`, async ({ request }) => {
-    const body = (await request.json()) as Record<string, unknown>
-    return HttpResponse.json({
-      authToken: `confirmed-${body.authToken ?? ''}`,
-      weight: MOCK_WEIGHT_HEX,
-    })
-  }),
-
-  http.post(`${BASE}/process/bundle/:bundleId/auth/resend`, async ({ request }) => {
-    const body = (await request.json()) as Record<string, unknown>
-    return HttpResponse.json({ authToken: body.authToken ?? 'csp-step0-token' })
-  }),
-
-  http.post(`${BASE}/process/bundle/:bundleId/check`, () =>
-    HttpResponse.json({ belongs: true, hasVoted: false, weight: MOCK_WEIGHT_HEX }),
-  ),
-
-  http.post(`${BASE}/process/bundle/:bundleId/sign`, () =>
-    HttpResponse.json({ signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX }),
-  ),
-
-  http.post(`${BASE}/process/bundle/:bundleId/weight`, () =>
-    HttpResponse.json({ weight: MOCK_WEIGHT_HEX }),
-  ),
 
   // ─── Process-scoped CSP voter routes (bundle-less flow) ──────────────────────
   http.post(`${BASE}/processes/:processId/auth/0`, () =>

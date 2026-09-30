@@ -2,7 +2,6 @@ import type { ApiClientConfig, InfoResponse } from '@vocdoni/api-types'
 import { up } from 'up-fetch'
 import type { UpFetch } from 'up-fetch'
 import { AuthClient } from './auth'
-import { CensusClient } from './census'
 import { ElectionsClient } from './elections'
 import { handleError } from './errors'
 import { JobsClient } from './jobs'
@@ -27,7 +26,6 @@ export class VocdoniApiClient {
    */
   readonly processes: ElectionsClient
   readonly organizations: OrganizationsClient
-  readonly census: CensusClient
   readonly auth: AuthClient
   readonly jobs: JobsClient
   private readonly fetch: UpFetch
@@ -68,7 +66,6 @@ export class VocdoniApiClient {
     this.elections = new ElectionsClient(fetcher)
     this.processes = this.elections // deprecated alias, not a second client
     this.organizations = new OrganizationsClient(fetcher)
-    this.census = new CensusClient(fetcher)
     this.auth = new AuthClient(fetcher)
     this.jobs = new JobsClient(fetcher)
   }
