@@ -42,7 +42,6 @@ client.elections    // ElectionsClient — the whole /processes resource:
                     //   vote relay (vote/voteBatch)
 client.processes    // DEPRECATED alias of client.elections — removed next major
 client.organizations // OrganizationsClient
-client.census       // CensusClient
 client.auth         // AuthClient
 client.jobs         // JobsClient
 ```
@@ -337,8 +336,6 @@ await client.elections.validateCensus({ orgAddress, census: { authFields: ['memb
 // (re-get() for the stored shape; 409 once published). delete(id) removes it.
 // signInfo(id, { authToken }) → { consumed: [{ questionId, nullifier, … }] },
 // one entry per question the voter already cast.
-// Legacy-only (single-election model, vochain ids): setStatus()/setStatusAndWait()
-// (PUT /process/{id}/status) and getMetadata() — do not use with mongo process ids.
 
 // Relay a vote (called internally by VotingClient — you rarely call this directly)
 const { jobId } = await client.elections.vote({ txPayload })
@@ -353,22 +350,28 @@ const { jobId } = await client.elections.voteBatch({ votes: [{ txPayload }, ...]
 
 ---
 
-## CensusClient (`client.census`) & OrganizationsClient (`client.organizations`)
+## OrganizationsClient (`client.organizations`)
 
 The organizer-side surface used to set up an election before anyone votes. Only
 relevant for admin/integrator flows (an API key with `managed:write` +
 `members:write`); voter apps never touch these.
 
 ```ts
-// Census: create an org-level CSP census, then publish it from a member group.
-const { id: censusId } = await client.census.create({ orgAddress, authFields: ['memberNumber'] })
-await client.census.publishGroup(censusId, groupId, { authFields: ['memberNumber'], weighted: false })
-
 // Organizations: managed orgs, members, groups, and reads.
 const org = await client.organizations.createManaged({ name: 'Acme', type: 'company', website })
 const { jobId } = await client.organizations.addMembers(org.address, members, { async: true })
 if (jobId) await client.jobs.waitFor(jobId) // progress in job.result.added/total/progress
 const { groups } = await client.organizations.listGroups(org.address)         // auto "All members" group
+
+// Census: there is no standalone census resource — a process embeds its CSP
+// census on create, built from a member group (or explicit memberIds).
+const draftId = await client.elections.create({
+  orgAddress: org.address,
+  census: { groupId: groups[0].id, authFields: ['memberNumber'] }, // + twoFaFields for OTP
+  title: 'Board election',
+  endDate,
+  questions,
+})
 
 // Integrator quota/usage (also callable with a scoped API key, scope quota:read).
 const { enabled, limits, usage } = await client.organizations.getIntegratorInfo()
@@ -385,7 +388,7 @@ const key = await client.organizations.createApiKey(org.address, {
 ```
 
 `OrganizationsClient` also covers groups CRUD, meta, subscription, and
-list-reads (censuses/drafts). See `packages/api-client/src/{census,organizations}.ts`
+list-reads (censuses). See `packages/api-client/src/organizations.ts`
 for the full set — the live `integration/full-flow.itest.ts` drives the whole flow end to end.
 
 ---
