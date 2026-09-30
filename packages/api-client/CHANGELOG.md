@@ -1,5 +1,32 @@
 # @vocdoni/api-client
 
+## 2.3.0
+
+### Minor Changes
+
+- e9b8476: Remove the wrappers for the legacy SaaS routes that saas-backend#722 retires (`/census`, `/process`, `/process/bundle`, `/transactions`, plus `/organizations/{address}/processes/drafts` and `POST /organizations/{address}/groups/{groupId}/validate`). Once that backend change is deployed they all return 404.
+
+  Removed from `@vocdoni/api-client`:
+
+  - `CensusClient` and `client.census` (`get`, `create`, `addParticipants`, `getParticipants`, `publish`, `publishGroup`). A process now embeds its CSP census on create: pass `census: { groupId, authFields, twoFaFields? }` (or `memberIds` instead of `groupId`) to `client.elections.create()`. Use `client.elections.addCensusMembers()` to grow a published process's census, and `client.elections.validateCensus()` for a pre-flight check. The census is published together with its process (`client.elections.publishAndWait()`); read it back from `(await client.elections.get(id)).census`, or list the organization's censuses with `client.organizations.listCensuses()`. There is no census member listing anymore: `client.elections.participants(id, { field, value })` looks members up by credential.
+  - `client.elections.getMetadata()`: read `title`/`description`/`header` from `client.elections.get()`.
+  - `client.elections.setStatus()` / `setStatusAndWait()`: use `setQuestionStatus()` / `bulkSetQuestionStatus()` with the same wire status names (`ready`, `paused`, `ended`, `canceled` — not the read-side `ONGOING`; omit `questions` to target every published question), then `client.jobs.waitFor(jobId)` on the returned job.
+  - `client.organizations.validateGroup()`: use `client.elections.validateCensus({ orgAddress, census: { groupId, authFields } })`.
+  - `client.organizations.listProcessDrafts()`: use `client.elections.list({ orgAddress, published: false })` with a manager/admin session or a scoped API key (drafts only; without `published: false` a manager gets drafts and published processes together).
+
+  Removed from `@vocdoni/api-types`, which only those wrappers used: `CreateCensusRequest`, `CreateCensusResponse`, `PublishCensusRequest`, `PublishCensusGroupRequest`, `PublishedCensusResponse`, `AddCensusParticipantsRequest`, `CensusParticipantsResponse`, `ElectionMetadata`, `ConsumedAddressResponse`, `ValidateGroupRequest` and `OrganizationProcessDraftsResponse`. `OrganizationCensus` stays: `organizations.listCensuses()` still returns it. `SetElectionStatusRequest` stays too, now documented as the writable status vocabulary of `setQuestionStatus` / `bulkSetQuestionStatus`, which consumers use to type those calls.
+
+  **Why this is a minor and not a major.** Removing exported members is nominally breaking, but once the backend change deploys every removed method can only 404: the routes behind them are gone. A sweep of the known consumers (this SDK, `vocdoni-app`) found no caller of any of them, so anyone still referencing one holds a call that cannot work, and the migration above replaces it. This follows the `@vocdoni/api-types` 1.2.0 precedent.
+
+### Patch Changes
+
+- 7e0fbb9: Infer the ballot type from the protocol first and use a declared type name (SaaS `type`, legacy `metadata.type.name` / `meta.type.name`) only to break ties the protocol can't resolve. A name picks among the layouts the shape admits; a name the shape rules out is now ignored instead of overriding it — e.g. an approval ballot over three options labelled `single-choice-multiquestion` decodes as approval, and a `ranked` name on `maxCount: 1` is single-choice. Questions with no `ballotProtocol` are still typed by name alone. The same rule applies at election level against `voteType`. `declaresRanked`, `isPickSlotLayout`, `questionSelectionRange` and the creation-time checks in `@vocdoni/api-client` follow the same answer. A question declared `ranked` with `maxValue: 0` is still refused at creation and encode time, but now decodes as budget. When the choices are known, a `ranked` name also needs `maxCount` to equal the option count, and the legacy `multiple-choice` name stays pick-slot over two options with more repeatable slots than options (`{maxCount: 3, maxValue: 1}` over 2 choices). A `ranked` name doesn't need `uniqueValues`, so ranked questions created without it keep decoding as ranked. A legacy `multiple-choice` question with a single pick and abstain enabled stays pick-slot, so its abstentions keep being counted and cast.
+- Updated dependencies [7e0fbb9]
+- Updated dependencies [e9b8476]
+- Updated dependencies [8781d04]
+  - @vocdoni/ballot@1.3.0
+  - @vocdoni/api-types@2.2.0
+
 ## 2.2.0
 
 ### Minor Changes
