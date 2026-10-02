@@ -1,5 +1,11 @@
 # @vocdoni/react-components
 
+## 3.2.0
+
+### Minor Changes
+
+- d4b49e7: `ElectionSchedule` now shows the real end of a process that was ended early (`endedAt ?? endDate`), and the `ElectionResults` secret-until-the-end placeholder shows the real end of the secret questions. `endedAt` is typed on the process and on each question.
+
 ## 3.1.1
 
 ### Patch Changes
