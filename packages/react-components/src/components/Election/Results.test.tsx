@@ -269,6 +269,22 @@ describe('ElectionResults', () => {
     expect(captured.secretText).not.toContain('31-12-2020')
   })
 
+  it('uses the secret question endedAt when another question keeps the process open', () => {
+    captured = undefined
+    state.election = makeProcess({
+      questions: [
+        { ...question, secretUntilTheEnd: true, endedAt: '2020-02-01T12:00:00Z' },
+        { ...question, secretUntilTheEnd: false },
+      ],
+      endDate: '2020-12-31T12:00:00Z',
+    })
+    state.status = 'ONGOING'
+    state.results = makeResults([{ finalResults: false }])
+    renderWithComponents(<ElectionResults />, slots)
+
+    expect(captured.secretText).toContain('1-2-2020')
+  })
+
   it('forceRender overrides the secret placeholder', () => {
     state.election = makeProcess({
       electionType: { secretUntilTheEnd: true },

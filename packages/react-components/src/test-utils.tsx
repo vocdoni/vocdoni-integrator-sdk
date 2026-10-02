@@ -82,6 +82,7 @@ type MakeProcessQuestionInput = {
   metadata?: Record<string, unknown>
   status?: QuestionStatus
   secretUntilTheEnd?: boolean
+  endedAt?: string
   upstreamId?: string
 }
 
@@ -144,6 +145,7 @@ export function makeProcess(opts: MakeProcessOptions = {}): VotingProcessRespons
     ...(q.metadata ? { metadata: q.metadata } : {}),
     secretUntilTheEnd: q.secretUntilTheEnd ?? electionType?.secretUntilTheEnd ?? false,
     status: q.status ?? status,
+    ...(q.endedAt ? { endedAt: q.endedAt } : {}),
   }))
 
   // Process reads return orgAddress as unprefixed lowercase hex.

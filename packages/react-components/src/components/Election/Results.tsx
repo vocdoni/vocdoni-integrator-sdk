@@ -5,7 +5,7 @@ import { useComponents } from '../context/useComponents'
 import { linkifyIpfs } from '../shared/ipfs'
 import { useReactComponentsLocalize } from '../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
-import { getElectionEndDate, resolveTitle } from '../../election/normalized'
+import { getElectionDate, getElectionEndDate, resolveTitle } from '../../election/normalized'
 
 const formatPercent = (pct: number | null) => (pct ?? 0).toFixed(1) + '%'
 
@@ -28,13 +28,20 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
 
   // Secret-until-the-end: show placeholder if any question is still secret
   // and its results are not yet final.
-  const anySecretNotFinal = election.questions.some((q) => {
+  const blockingQuestions = election.questions.filter((q) => {
     const qResults = resultsByQuestionId.get(q.id)
     return q.secretUntilTheEnd && !qResults?.finalResults && !forceRender
   })
+  const anySecretNotFinal = blockingQuestions.length > 0
 
   if (anySecretNotFinal) {
-    const endDate = getElectionEndDate(election) ?? null
+    // The process-level `endedAt` is omitted while any question is still open,
+    // but the placeholder only waits on the secret questions: once they have all
+    // ended, the latest of their own `endedAt` is when voting really stopped.
+    const blockingEnds = blockingQuestions.map((q) => getElectionDate(q, 'endedAt'))
+    const endDate = blockingEnds.every(Boolean)
+      ? new Date(Math.max(...blockingEnds.map((d) => d!.getTime())))
+      : getElectionEndDate(election)
     return (
       <Slot
         {...rest}
