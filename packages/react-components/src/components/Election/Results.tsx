@@ -5,7 +5,7 @@ import { useComponents } from '../context/useComponents'
 import { linkifyIpfs } from '../shared/ipfs'
 import { useReactComponentsLocalize } from '../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
-import { resolveTitle } from '../../election/normalized'
+import { getElectionEndDate, resolveTitle } from '../../election/normalized'
 
 const formatPercent = (pct: number | null) => (pct ?? 0).toFixed(1) + '%'
 
@@ -34,7 +34,7 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
   })
 
   if (anySecretNotFinal) {
-    const endDate = election.endDate ? new Date(election.endDate) : null
+    const endDate = getElectionEndDate(election) ?? null
     return (
       <Slot
         {...rest}

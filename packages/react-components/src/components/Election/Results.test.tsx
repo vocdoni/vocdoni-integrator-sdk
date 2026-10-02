@@ -253,6 +253,22 @@ describe('ElectionResults', () => {
     expect(captured.questions).toBeUndefined()
   })
 
+  it('shows the real end in the secret placeholder for an early-ended election', () => {
+    captured = undefined
+    state.election = makeProcess({
+      electionType: { secretUntilTheEnd: true },
+      questions: [question],
+      endDate: '2020-12-31T12:00:00Z',
+      endedAt: '2020-02-01T12:00:00Z',
+    })
+    state.status = 'ENDED'
+    state.results = makeResults([{ finalResults: false }])
+    renderWithComponents(<ElectionResults />, slots)
+
+    expect(captured.secretText).toContain('1-2-2020')
+    expect(captured.secretText).not.toContain('31-12-2020')
+  })
+
   it('forceRender overrides the secret placeholder', () => {
     state.election = makeProcess({
       electionType: { secretUntilTheEnd: true },

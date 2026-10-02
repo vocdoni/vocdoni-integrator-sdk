@@ -68,4 +68,21 @@ describe('ElectionSchedule', () => {
     renderWithComponents(<ElectionSchedule format="yyyy-MM-dd" />, slots)
     expect(screen.getByTestId('sched').textContent).toContain('2020-12-31')
   })
+
+  it('measures the "Ended X ago" distance from endedAt, not the scheduled end', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2020-02-03T00:00:00Z'))
+    try {
+      state.election = makeProcess({
+        startDate: '2020-01-01T00:00:00Z',
+        endDate: '2020-12-31T00:00:00Z',
+        endedAt: '2020-02-01T00:00:00Z',
+      })
+      state.status = 'ENDED'
+      renderWithComponents(<ElectionSchedule showRemaining />, slots)
+      expect(screen.getByTestId('sched')).toHaveTextContent('Ended 2 days ago')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
