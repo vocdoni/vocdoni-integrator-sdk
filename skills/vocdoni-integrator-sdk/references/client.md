@@ -480,6 +480,7 @@ interface VotingProcessBase {
   description?: MultiLangString
   census: CensusSpec                  // { weighted?, authFields?, twoFaFields?, ... }
   questions: VotingProcessQuestion[]
+  endedAt?: string                    // set only if ended before endDate; show endedAt ?? endDate
 }
 interface DraftVotingProcessResponse extends VotingProcessBase {
   published: false

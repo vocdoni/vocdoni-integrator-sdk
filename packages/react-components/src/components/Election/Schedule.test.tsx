@@ -45,4 +45,27 @@ describe('ElectionSchedule', () => {
     renderWithComponents(<ElectionSchedule showRemaining />, slots)
     expect(screen.getByTestId('sched')).toHaveTextContent('Ended')
   })
+
+  it('shows endedAt instead of the scheduled end for an early-ended election', () => {
+    state.election = makeProcess({
+      startDate: '2020-01-01T00:00:00Z',
+      endDate: '2020-12-31T00:00:00Z',
+      endedAt: '2020-02-01T00:00:00Z',
+    })
+    state.status = 'ENDED'
+    renderWithComponents(<ElectionSchedule format="yyyy-MM-dd" />, slots)
+    const text = screen.getByTestId('sched').textContent
+    expect(text).toContain('2020-02-01')
+    expect(text).not.toContain('2020-12-31')
+  })
+
+  it('shows the scheduled end when endedAt is absent', () => {
+    state.election = makeProcess({
+      startDate: '2020-01-01T00:00:00Z',
+      endDate: '2020-12-31T00:00:00Z',
+    })
+    state.status = 'ENDED'
+    renderWithComponents(<ElectionSchedule format="yyyy-MM-dd" />, slots)
+    expect(screen.getByTestId('sched').textContent).toContain('2020-12-31')
+  })
 })

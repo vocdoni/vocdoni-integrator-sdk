@@ -90,6 +90,7 @@ type MakeProcessOptions = {
   title?: string
   startDate?: string
   endDate?: string
+  endedAt?: string
   published?: boolean
   census?: Record<string, unknown>
   questions?: MakeProcessQuestionInput[]
@@ -152,6 +153,7 @@ export function makeProcess(opts: MakeProcessOptions = {}): VotingProcessRespons
     title: { default: rest.title ?? 'Test Process' },
     startDate: rest.startDate ?? '2024-01-01T00:00:00Z',
     endDate: rest.endDate ?? '2024-12-31T23:59:59Z',
+    ...(rest.endedAt ? { endedAt: rest.endedAt } : {}),
     census: rest.census ?? {},
     questions,
   }

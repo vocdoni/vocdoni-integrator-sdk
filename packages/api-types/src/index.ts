@@ -600,6 +600,12 @@ export interface VotingProcessBase {
    * Serialized with `omitempty`.
    */
   chainId?: string
+  /**
+   * When the process was actually ended, set only if it was stopped before its
+   * scheduled `endDate`. Prefer `endedAt ?? endDate` when displaying the end.
+   * Serialized with `omitempty`.
+   */
+  endedAt?: string
 }
 
 /**
