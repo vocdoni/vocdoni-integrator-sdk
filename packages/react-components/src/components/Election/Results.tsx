@@ -1,5 +1,5 @@
 import { decodeQuestionResults, questionReservesAbstain, tryInferQuestionBallotType } from '@vocdoni/ballot'
-import { format } from 'date-fns'
+import { format, max } from 'date-fns'
 import { ComponentPropsWithoutRef } from 'react'
 import { useComponents } from '../context/useComponents'
 import { linkifyIpfs } from '../shared/ipfs'
@@ -28,10 +28,9 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
 
   // Secret-until-the-end: show placeholder if any question is still secret
   // and its results are not yet final.
-  const blockingQuestions = election.questions.filter((q) => {
-    const qResults = resultsByQuestionId.get(q.id)
-    return q.secretUntilTheEnd && !qResults?.finalResults && !forceRender
-  })
+  const blockingQuestions = forceRender
+    ? []
+    : election.questions.filter((q) => q.secretUntilTheEnd && !resultsByQuestionId.get(q.id)?.finalResults)
   const anySecretNotFinal = blockingQuestions.length > 0
 
   if (anySecretNotFinal) {
@@ -40,7 +39,7 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
     // ended, the latest of their own `endedAt` is when voting really stopped.
     const blockingEnds = blockingQuestions.map((q) => getElectionDate(q, 'endedAt'))
     const endDate = blockingEnds.every(Boolean)
-      ? new Date(Math.max(...blockingEnds.map((d) => d!.getTime())))
+      ? max(blockingEnds as Date[])
       : getElectionEndDate(election)
     return (
       <Slot

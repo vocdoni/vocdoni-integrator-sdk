@@ -11,6 +11,9 @@ vi.mock('@vocdoni/react-providers', () => ({ useElection: () => state }))
 
 import { ElectionSchedule } from './Schedule'
 
+// Local-noon timestamps keep date-only assertions stable in every timezone.
+const localNoon = (month: number, day: number) => new Date(2020, month, day, 12).toISOString()
+
 const Slot = ({ text }: any) => <p data-testid="sched">{text}</p>
 const slots = { components: { ElectionSchedule: Slot } }
 
@@ -48,9 +51,9 @@ describe('ElectionSchedule', () => {
 
   it('shows endedAt instead of the scheduled end for an early-ended election', () => {
     state.election = makeProcess({
-      startDate: '2020-01-01T00:00:00Z',
-      endDate: '2020-12-31T00:00:00Z',
-      endedAt: '2020-02-01T00:00:00Z',
+      startDate: localNoon(0, 1),
+      endDate: localNoon(11, 31),
+      endedAt: localNoon(1, 1),
     })
     state.status = 'ENDED'
     renderWithComponents(<ElectionSchedule format="yyyy-MM-dd" />, slots)
@@ -61,8 +64,8 @@ describe('ElectionSchedule', () => {
 
   it('shows the scheduled end when endedAt is absent', () => {
     state.election = makeProcess({
-      startDate: '2020-01-01T00:00:00Z',
-      endDate: '2020-12-31T00:00:00Z',
+      startDate: localNoon(0, 1),
+      endDate: localNoon(11, 31),
     })
     state.status = 'ENDED'
     renderWithComponents(<ElectionSchedule format="yyyy-MM-dd" />, slots)
@@ -84,5 +87,19 @@ describe('ElectionSchedule', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('falls back to the scheduled end when endedAt precedes the start', () => {
+    state.election = makeProcess({
+      startDate: localNoon(2, 1),
+      endDate: localNoon(11, 31),
+      endedAt: localNoon(1, 1),
+    })
+    state.status = 'CANCELED'
+    renderWithComponents(<ElectionSchedule format="yyyy-MM-dd" />, slots)
+    const text = screen.getByTestId('sched').textContent
+    expect(text).toContain('2020-03-01')
+    expect(text).toContain('2020-12-31')
+    expect(text).not.toContain('2020-02-01')
   })
 })

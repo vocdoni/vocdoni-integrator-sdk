@@ -258,8 +258,8 @@ describe('ElectionResults', () => {
     state.election = makeProcess({
       electionType: { secretUntilTheEnd: true },
       questions: [question],
-      endDate: '2020-12-31T12:00:00Z',
-      endedAt: '2020-02-01T12:00:00Z',
+      endDate: new Date(2020, 11, 31, 12).toISOString(),
+      endedAt: new Date(2020, 1, 1, 12).toISOString(),
     })
     state.status = 'ENDED'
     state.results = makeResults([{ finalResults: false }])
@@ -273,10 +273,10 @@ describe('ElectionResults', () => {
     captured = undefined
     state.election = makeProcess({
       questions: [
-        { ...question, secretUntilTheEnd: true, endedAt: '2020-02-01T12:00:00Z' },
+        { ...question, secretUntilTheEnd: true, endedAt: new Date(2020, 1, 1, 12).toISOString() },
         { ...question, secretUntilTheEnd: false },
       ],
-      endDate: '2020-12-31T12:00:00Z',
+      endDate: new Date(2020, 11, 31, 12).toISOString(),
     })
     state.status = 'ONGOING'
     state.results = makeResults([{ finalResults: false }])
