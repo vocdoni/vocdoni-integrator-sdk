@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   getElectionDate,
   getElectionDescription,
+  getElectionEndDate,
   getElectionField,
   getElectionStatus,
   getElectionTitle,
@@ -56,6 +57,16 @@ describe('normalized election helpers', () => {
       const existing = new Date()
       expect(getElectionDate({ endDate: existing }, 'endDate')).toBe(existing)
       expect(getElectionDate({}, 'startDate')).toBeUndefined()
+    })
+  })
+
+  describe('getElectionEndDate', () => {
+    it('prefers endedAt, else endDate, ignoring an unparseable endedAt', () => {
+      const both = { endDate: '2024-12-31T00:00:00Z', endedAt: '2024-02-01T00:00:00Z' }
+      expect(getElectionEndDate(both)?.toISOString()).toBe('2024-02-01T00:00:00.000Z')
+      expect(getElectionEndDate({ endDate: both.endDate })?.toISOString()).toBe('2024-12-31T00:00:00.000Z')
+      expect(getElectionEndDate({ ...both, endedAt: 'nope' })?.toISOString()).toBe('2024-12-31T00:00:00.000Z')
+      expect(getElectionEndDate(null)).toBeUndefined()
     })
   })
 

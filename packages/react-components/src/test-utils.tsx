@@ -82,6 +82,7 @@ type MakeProcessQuestionInput = {
   metadata?: Record<string, unknown>
   status?: QuestionStatus
   secretUntilTheEnd?: boolean
+  endedAt?: string
   upstreamId?: string
 }
 
@@ -90,6 +91,7 @@ type MakeProcessOptions = {
   title?: string
   startDate?: string
   endDate?: string
+  endedAt?: string
   published?: boolean
   census?: Record<string, unknown>
   questions?: MakeProcessQuestionInput[]
@@ -143,6 +145,7 @@ export function makeProcess(opts: MakeProcessOptions = {}): VotingProcessRespons
     ...(q.metadata ? { metadata: q.metadata } : {}),
     secretUntilTheEnd: q.secretUntilTheEnd ?? electionType?.secretUntilTheEnd ?? false,
     status: q.status ?? status,
+    ...(q.endedAt ? { endedAt: q.endedAt } : {}),
   }))
 
   // Process reads return orgAddress as unprefixed lowercase hex.
@@ -152,6 +155,7 @@ export function makeProcess(opts: MakeProcessOptions = {}): VotingProcessRespons
     title: { default: rest.title ?? 'Test Process' },
     startDate: rest.startDate ?? '2024-01-01T00:00:00Z',
     endDate: rest.endDate ?? '2024-12-31T23:59:59Z',
+    ...(rest.endedAt ? { endedAt: rest.endedAt } : {}),
     census: rest.census ?? {},
     questions,
   }

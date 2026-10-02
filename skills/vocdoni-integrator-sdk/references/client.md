@@ -480,6 +480,9 @@ interface VotingProcessBase {
   description?: MultiLangString
   census: CensusSpec                  // { weighted?, authFields?, twoFaFields?, ... }
   questions: VotingProcessQuestion[]
+  endedAt?: string                    // when it really ended (early or cancelled); show endedAt ?? endDate.
+                                      // ABSENT does not mean "ran to schedule": also omitted while any
+                                      // question is open or before a historical process is backfilled
 }
 interface DraftVotingProcessResponse extends VotingProcessBase {
   published: false
@@ -502,6 +505,7 @@ interface VotingProcessQuestion {
                                       // type; empty for raw-ballotProtocol questions
   typeSetup?: QuestionTypeSetup       // { minChoices, maxChoices, uniqueChoices }
   secretUntilTheEnd: boolean
+  endedAt?: string                    // when this question really ended (early or cancelled)
   status: QuestionStatus              // 'UPCOMING' | 'ONGOING' | 'ENDED' | 'CANCELED' | 'PAUSED' | 'RESULTS' | 'PROCESS_UNKNOWN'
                                       // wire may say 'READY' for live; the client normalizes it to 'ONGOING' on read
   metadata?: Record<string, unknown>  // free-form creator bag; its `choices` key is SDK-recognized

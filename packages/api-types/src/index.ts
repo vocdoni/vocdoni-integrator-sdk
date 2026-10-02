@@ -465,6 +465,8 @@ export interface VotingProcessQuestion {
    * it for everyone else, so absence does not mean "unrestricted".
    */
   eligibleMemberIds?: string[]
+  /** When this question was actually ended on-chain (ended early or cancelled). Serialized with `omitempty`. */
+  endedAt?: string
   ballotProtocol: BallotProtocol
   /**
    * Named question type as stored — `"singlechoice"` / `"multichoice"` when
@@ -600,6 +602,16 @@ export interface VotingProcessBase {
    * Serialized with `omitempty`.
    */
   chainId?: string
+  /**
+   * When the process was actually ended (stopped early or cancelled). Prefer
+   * `endedAt ?? endDate` when displaying the end. Absence does not prove the
+   * process ran to its schedule: it is also omitted while any published
+   * question is still open or has no recorded `endedAt` yet (historical
+   * processes only get it once their detail is first read). Per-question
+   * values are on {@link VotingProcessQuestion.endedAt}. Serialized with
+   * `omitempty`.
+   */
+  endedAt?: string
 }
 
 /**
@@ -656,6 +668,8 @@ export interface PublicQuestionResponse {
   typeSetup?: QuestionTypeSetup
   secretUntilTheEnd: boolean
   status: QuestionStatus
+  /** When this question was actually ended on-chain (ended early or cancelled). Serialized with `omitempty`. */
+  endedAt?: string
   metadata?: Record<string, unknown>
   /**
    * On-chain vote-encryption public keys — only for `secretUntilTheEnd`

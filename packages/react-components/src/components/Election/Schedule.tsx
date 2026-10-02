@@ -4,7 +4,7 @@ import { ComponentPropsWithoutRef } from 'react'
 import { useComponents } from '../context/useComponents'
 import { useReactComponentsLocalize } from '../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
-import { getElectionDate } from '../../election/normalized'
+import { getElectionDate, getElectionEndDate } from '../../election/normalized'
 import { useIsHydrationRender } from '../shared/useIsHydrationRender'
 
 export type ElectionScheduleProps = ComponentPropsWithoutRef<'p'> &
@@ -27,7 +27,11 @@ export const ElectionSchedule = ({
   const { ElectionSchedule: Slot } = useComponents()
   const isHydrationRender = useIsHydrationRender()
   const startDate = getElectionDate(election, 'startDate')
-  const endDate = getElectionDate(election, 'endDate')
+  const resolvedEnd = getElectionEndDate(election)
+  // An `endedAt` before the start (cancelled before it began) would render an
+  // inverted range, so keep the scheduled end in that case.
+  const endDate =
+    resolvedEnd && startDate && resolvedEnd < startDate ? getElectionDate(election, 'endDate') : resolvedEnd
 
   if (!election || !startDate || !endDate || !status) return null
 
