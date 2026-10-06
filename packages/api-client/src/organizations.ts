@@ -25,6 +25,7 @@ import type {
   OrgMember,
   SubscriptionPlan,
   UpdateGroupRequest,
+  UpsertOrgMemberResponse,
 } from '@vocdoni/api-types'
 import type { UpFetch } from 'up-fetch'
 import { handleError } from './errors'
@@ -104,8 +105,13 @@ export class OrganizationsClient {
     }).catch(handleError)
   }
 
-  async upsertMember(address: string, member: OrgMember): Promise<OrgMember> {
-    return this.fetch<OrgMember>(`/organizations/${address}/members`, {
+  /**
+   * Create a member (no `id`, or an unused one) or update one. On an update a
+   * field left out keeps its stored value. Resolves to the member's id, not
+   * the member — poll any `censusJobIds` via `client.jobs.waitFor(jobId)`.
+   */
+  async upsertMember(address: string, member: OrgMember): Promise<UpsertOrgMemberResponse> {
+    return this.fetch<UpsertOrgMemberResponse>(`/organizations/${address}/members`, {
       method: 'PUT',
       body: member,
     }).catch(handleError)

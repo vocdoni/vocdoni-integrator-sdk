@@ -1248,11 +1248,20 @@ export interface OrgMember {
   surname?: string
   birthDate?: string
   /**
-   * Census weight as a DECIMAL string (e.g. `"42"`), not the hex the CSP voter
-   * routes use. Empty or omitted is the default `1`; a non-numeric value is
-   * rejected with a 400. On `upsertMember`, omitting it keeps the stored weight.
+   * Census weight as a decimal string (e.g. `"42"`), not the bare hex the CSP
+   * voter routes use: `"10"` here is ten. Reads always return decimal. Writes
+   * also accept a `0x`-prefixed hex string. Only a weighted census uses it.
+   *
+   * Empty, or omitted on a new member, is the default `1`. `"0"` is a valid
+   * zero weight, which a weighted census refuses at auth time. Since
+   * saas-backend v3.1.2, a value that is not an unsigned 64-bit integer is
+   * rejected with a 400, and omitting the weight on an `upsertMember` update
+   * keeps the stored one; earlier backends store an unparsable weight as `0`
+   * and reset an omitted one to `1`.
    */
   weight?: string
+  /** Write-only: hashed by the backend and never returned. */
+  password?: string
   other?: Record<string, unknown>
 }
 
@@ -1266,6 +1275,29 @@ export interface AddMembersResponse {
   errors?: string[]
   /** Present when the add runs asynchronously — poll via `GET /jobs/{jobId}` (`jobs.waitFor`). */
   jobId?: string
+  /**
+   * Jobs raising the on-chain `maxCensusSize` of live elections whose census
+   * just grew, one per organization — poll each via `jobs.waitFor`. Absent
+   * when no live census was affected.
+   */
+  censusJobIds?: string[]
+}
+
+/** Response of `PUT /organizations/{address}/members`: the id, not the member. */
+export interface UpsertOrgMemberResponse {
+  /** The created or updated member's id. */
+  id: string
+  /**
+   * Jobs raising the on-chain `maxCensusSize` of the elections a new member
+   * grew — poll each via `jobs.waitFor`.
+   */
+  censusJobIds?: string[]
+  /**
+   * Per-census problems that did not stop the member from being written: it
+   * exists either way, but may be missing from a live census or lack the
+   * on-chain room to vote.
+   */
+  errors?: string[]
 }
 
 export interface OrganizationMembersResponse {

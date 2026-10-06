@@ -68,18 +68,18 @@ describe('admin / integrator client methods', () => {
   })
 
   describe('organizations.upsertMember', () => {
-    it('PUTs the member with its weight as a decimal string', async () => {
+    it('PUTs the member with its weight as a decimal string and returns the id', async () => {
       let body: unknown
       server.use(
         http.put(`${BASE_URL}/organizations/${ORG}/members`, async ({ request }) => {
           body = await request.json()
-          return HttpResponse.json({ id: 'm1', name: 'Alice', weight: '3' })
+          return HttpResponse.json({ id: 'm1', censusJobIds: ['cjob-1'] })
         }),
       )
 
-      const member = await client.organizations.upsertMember(ORG, { id: 'm1', weight: '3' })
+      const res = await client.organizations.upsertMember(ORG, { id: 'm1', weight: '3' })
       expect(body).toEqual({ id: 'm1', weight: '3' })
-      expect(member.weight).toBe('3')
+      expect(res).toEqual({ id: 'm1', censusJobIds: ['cjob-1'] })
     })
   })
 

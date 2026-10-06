@@ -363,18 +363,22 @@ relevant for admin/integrator flows (an API key with `managed:write` +
 ```ts
 // Organizations: managed orgs, members, groups, and reads.
 const org = await client.organizations.createManaged({ name: 'Acme', type: 'company', website })
-// Member `weight` is a DECIMAL string ('2'), unlike the hex `weight` of the CSP
-// voter routes. Omitted/empty = 1. A JSON number is rejected with a 400.
+// Member `weight` is a DECIMAL string ('2'), unlike the bare-hex `weight` of the
+// CSP voter routes. A new member without one weighs 1. A JSON number is rejected
+// with a 400. Weights only count in a census created with `weighted: true`.
 const members = [{ memberNumber: '1', name: 'Alice', weight: '2' }]
 const { jobId } = await client.organizations.addMembers(org.address, members, { async: true })
 if (jobId) await client.jobs.waitFor(jobId) // progress in job.result.added/total/progress
 const { groups } = await client.organizations.listGroups(org.address)         // auto "All members" group
+// Create or update ONE member. A field left out of an update keeps its stored
+// value. Resolves to { id, censusJobIds?, errors? }, not the member.
+const { id, censusJobIds } = await client.organizations.upsertMember(org.address, { id: memberId, weight: '3' })
 
 // Census: there is no standalone census resource — a process embeds its CSP
 // census on create, built from a member group (or explicit memberIds).
 const draftId = await client.elections.create({
   orgAddress: org.address,
-  census: { groupId: groups[0].id, authFields: ['memberNumber'] }, // + twoFaFields for OTP
+  census: { groupId: groups[0].id, authFields: ['memberNumber'], weighted: true }, // + twoFaFields for OTP
   title: 'Board election',
   endDate,
   questions,
