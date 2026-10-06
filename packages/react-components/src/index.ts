@@ -56,6 +56,7 @@ export {
   resolveTitle,
   type ElectionLike,
 } from './election/normalized'
+export { questionsEndedAt, resolveEndDate, type EndDates } from '@vocdoni/api-client'
 
 // ─── Re-export providers (so consumers only install this one package) ──────────
 export {

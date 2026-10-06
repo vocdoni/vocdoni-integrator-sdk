@@ -258,6 +258,7 @@ describe('ElectionResults', () => {
     state.election = makeProcess({
       electionType: { secretUntilTheEnd: true },
       questions: [question],
+      startDate: new Date(2020, 0, 1, 12).toISOString(),
       endDate: new Date(2020, 11, 31, 12).toISOString(),
       endedAt: new Date(2020, 1, 1, 12).toISOString(),
     })

@@ -267,6 +267,14 @@ describe('resolveEndDate', () => {
     expect(resolveEndDate({ endDate, endedAt: 'nope' })?.toISOString()).toBe('2024-12-31T00:00:00.000Z')
   })
 
+  it('falls back to endDate when endedAt precedes the start', () => {
+    const startDate = '2024-03-01T00:00:00Z'
+    expect(resolveEndDate({ startDate, endDate, endedAt })?.toISOString()).toBe('2024-12-31T00:00:00.000Z')
+    // An endedAt at or after the start still wins; an unparseable start disables the check.
+    expect(resolveEndDate({ startDate: endedAt, endDate, endedAt })?.toISOString()).toBe('2024-02-01T00:00:00.000Z')
+    expect(resolveEndDate({ startDate: 'nope', endDate, endedAt })?.toISOString()).toBe('2024-02-01T00:00:00.000Z')
+  })
+
   it('is undefined when neither date parses', () => {
     expect(resolveEndDate({ endDate: 'nope' })).toBeUndefined()
     expect(resolveEndDate({})).toBeUndefined()

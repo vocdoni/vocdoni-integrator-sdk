@@ -481,7 +481,8 @@ interface VotingProcessBase {
   census: CensusSpec                  // { weighted?, authFields?, twoFaFields?, ... }
   questions: VotingProcessQuestion[]
   endedAt?: string                    // when it really ended (early or cancelled); show endedAt ?? endDate
-                                      // — resolveEndDate(process) from @vocdoni/api-client does this.
+                                      // — resolveEndDate(process) from @vocdoni/api-client does this
+                                      // (and ignores an endedAt before startDate).
                                       // ABSENT does not mean "ran to schedule": also omitted while any
                                       // question is open or before a historical process is backfilled
 }

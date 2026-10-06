@@ -58,24 +58,31 @@ export const isBeforeStart = (startDate: string | Date | null | undefined, now: 
   return start !== undefined && start.getTime() > now.getTime()
 }
 
-/** Anything that carries a scheduled `endDate` and/or a real `endedAt`. */
+/** Anything that carries a schedule (`startDate` / `endDate`) and/or a real `endedAt`. */
 export interface EndDates {
+  startDate?: string | Date | null
   endDate?: string | Date | null
   endedAt?: string | Date | null
 }
 
 /**
- * When voting actually stopped: `endedAt` when the process (or question) was
- * ended before its schedule, otherwise the scheduled `endDate`. Falls back to
- * `endDate` when `endedAt` is absent or unparseable; `undefined` when neither
- * parses.
+ * When a process's voting actually stopped: `endedAt` when it was ended before
+ * its schedule, otherwise the scheduled `endDate`. Falls back to `endDate` when
+ * `endedAt` is absent, unparseable, or before `startDate` (cancelled before it
+ * began — showing it would render an inverted start–end range); `undefined`
+ * when nothing usable parses.
  *
  * The process-level `endedAt` is omitted while any question is still open, so
  * this is the scheduled end for a partly-ended process — see
- * {@link questionsEndedAt} for the end of a subset of its questions.
+ * {@link questionsEndedAt} for the end of a subset of its questions (questions
+ * carry no scheduled `endDate`).
  */
-export const resolveEndDate = (item: EndDates | null | undefined): Date | undefined =>
-  parseDate(item?.endedAt) ?? parseDate(item?.endDate)
+export const resolveEndDate = (item: EndDates | null | undefined): Date | undefined => {
+  const endedAt = parseDate(item?.endedAt)
+  const startDate = parseDate(item?.startDate)
+  if (endedAt && !(startDate && endedAt < startDate)) return endedAt
+  return parseDate(item?.endDate)
+}
 
 /**
  * The latest `endedAt` of `questions`: when the last of them stopped. Only
