@@ -1248,16 +1248,8 @@ export interface OrgMember {
   surname?: string
   birthDate?: string
   /**
-   * Census weight as a decimal string (e.g. `"42"`), not the bare hex the CSP
-   * voter routes use: `"10"` here is ten. Reads always return decimal. Writes
-   * also accept a `0x`-prefixed hex string. Only a weighted census uses it.
-   *
-   * Empty, or omitted on a new member, is the default `1`. `"0"` is a valid
-   * zero weight, which a weighted census refuses at auth time. Since
-   * saas-backend v3.1.2, a value that is not an unsigned 64-bit integer is
-   * rejected with a 400, and omitting the weight on an `upsertMember` update
-   * keeps the stored one; earlier backends store an unparsable weight as `0`
-   * and reset an omitted one to `1`.
+   * Census weight as a decimal string (`"42"`), unlike the hex weights of the
+   * CSP voter routes. Defaults to `1`; only a weighted census uses it.
    */
   weight?: string
   /** Write-only: hashed by the backend and never returned. */
