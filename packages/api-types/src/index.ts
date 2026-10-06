@@ -1247,7 +1247,12 @@ export interface OrgMember {
   name?: string
   surname?: string
   birthDate?: string
-  weight?: number
+  /**
+   * Census weight as a DECIMAL string (e.g. `"42"`), not the hex the CSP voter
+   * routes use. Empty or omitted is the default `1`; a non-numeric value is
+   * rejected with a 400. On `upsertMember`, omitting it keeps the stored weight.
+   */
+  weight?: string
   other?: Record<string, unknown>
 }
 

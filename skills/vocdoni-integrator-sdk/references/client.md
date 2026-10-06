@@ -363,6 +363,9 @@ relevant for admin/integrator flows (an API key with `managed:write` +
 ```ts
 // Organizations: managed orgs, members, groups, and reads.
 const org = await client.organizations.createManaged({ name: 'Acme', type: 'company', website })
+// Member `weight` is a DECIMAL string ('2'), unlike the hex `weight` of the CSP
+// voter routes. Omitted/empty = 1. A JSON number is rejected with a 400.
+const members = [{ memberNumber: '1', name: 'Alice', weight: '2' }]
 const { jobId } = await client.organizations.addMembers(org.address, members, { async: true })
 if (jobId) await client.jobs.waitFor(jobId) // progress in job.result.added/total/progress
 const { groups } = await client.organizations.listGroups(org.address)         // auto "All members" group
