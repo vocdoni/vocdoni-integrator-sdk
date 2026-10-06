@@ -450,6 +450,14 @@ export interface QuestionResults {
    * question has one row per choice, each `[notSelected, selected]`.
    */
   results?: string[][]
+  /**
+   * Free-text voter memos cast alongside the question's open-value choice, one
+   * entry per such vote. Only served to org managers/admins (or a scoped API
+   * key), and only for a question with an open-value choice. Absent rather than
+   * empty when there are none — including while a `secretUntilTheEnd` election
+   * is still encrypted — so absence does not mean "no memos were cast".
+   */
+  memos?: string[]
 }
 
 export interface VotingProcessQuestion {
