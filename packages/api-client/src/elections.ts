@@ -187,9 +187,8 @@ export class ElectionsClient {
   }
 
   /**
-   * Public tallies via `GET /processes/{id}/results` — live per-question
-   * {@link QuestionResults} plus ids. An org manager/admin (or a `voting:write`
-   * API key) also gets the open-value voter `memos`.
+   * Public tallies via `GET /processes/{id}/results` — live per-question {@link QuestionResults}
+   * plus ids. Managers (or a `voting:write` key) also get the open-value voter `memos`.
    */
   async getResults(id: string): Promise<VotingProcessResultsResponse> {
     return this.fetch<VotingProcessResultsResponse>(`/processes/${id}/results`).catch(handleError)
@@ -342,8 +341,7 @@ export class ElectionsClient {
    * On `secretUntilTheEnd` questions `encryptionKeys` is absent until the
    * keykeepers publish — poll until present before encrypting a ballot.
    * Normalized like {@link get}: `READY` → `ONGOING`, choice meta folded on.
-   * An org manager/admin (or a `voting:write` API key) also gets the open-value
-   * voter memos in `results.memos`.
+   * Managers (or a `voting:write` key) also get the open-value voter `results.memos`.
    */
   async getQuestion(processId: string, questionId: string): Promise<PublicQuestionResponse> {
     return this.fetch<PublicQuestionResponse>(`/processes/${processId}/questions/${questionId}`)

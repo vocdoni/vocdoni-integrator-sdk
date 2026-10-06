@@ -283,11 +283,8 @@ export interface Choice {
    */
   meta?: ChoiceMeta
   /**
-   * Marks the choice that collects free-text voter memos: a manager read
-   * returns, in the question's {@link QuestionResults.memos}, the memo of each
-   * vote that selected it. At most one per question, and only on a
-   * `singlechoice`, `multichoice` or `cumulative` question — the API rejects it
-   * on any other shape (ranked, raw protocol). Serialized with `omitempty`.
+   * Marks the one choice whose voters' memos manager reads return in
+   * {@link QuestionResults.memos}. Singlechoice, multichoice or cumulative only.
    */
   openValue?: boolean
 }
@@ -459,18 +456,9 @@ export interface QuestionResults {
    */
   results?: string[][]
   /**
-   * Free-text memos of the votes that selected the question's
-   * {@link Choice.openValue} choice. The SaaS API returns them only to an org
-   * manager/admin, or to a `voting:write` API key whose owner is one, and only
-   * for a question with an open-value choice. That gates this read, not the
-   * data: a memo rides the vote envelope in cleartext and anyone can read it
-   * from the chain.
-   *
-   * Best effort and resolved live from the chain, uncached, on every manager
-   * read. The field is absent rather than empty when there are none, when the
-   * chain lookup fails, and while a `secretUntilTheEnd` election is still
-   * encrypted, so absence does not mean "no memos were cast". A present list
-   * can also briefly miss the newest votes while the chain indexes them.
+   * Free-text memos of votes that picked the {@link Choice.openValue} choice.
+   * Manager-only read (the memos are public on-chain), best effort: absent, not
+   * empty, when there are none, on a chain error or while still encrypted.
    */
   memos?: string[]
 }

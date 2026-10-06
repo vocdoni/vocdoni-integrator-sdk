@@ -178,8 +178,7 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
                 title: 'Approve?',
                 choices: [
                   { title: 'No', value: 0 },
-                  // Every voter picks "Yes", so a manager read of the results
-                  // must return every voter's memo (asserted in step 7).
+                  // Every voter picks "Yes", so step 7 expects every voter's memo.
                   { title: 'Yes', value: 1, openValue: true },
                 ],
                 type: 'singlechoice',
@@ -714,9 +713,8 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
           (r) => r.questions.every((q) => (q.voteCount ?? 0) >= VOTES_PER_QUESTION),
         )
         expect(results.questions.length).toBe(p.questions.length)
-        // Open-value memos (vocdoni-integrator-sdk#72): served to a manager read only,
-        // as `memos`, and only for the question that has an `openValue` choice. The
-        // backend resolves them best-effort from the chain, so poll until it catches up.
+        // Open-value memos (#72): only a manager read gets them, best effort from the
+        // chain, so poll until it catches up.
         if (p.label === 'single-choice') {
           expect(
             results.questions.every((q) => q.memos === undefined),

@@ -250,13 +250,9 @@ const election = await client.elections.get(mongoId)
 //   question.results           — live QuestionResults ({ voteCount, maxVoters,
 //                                finalResults, results?: string[][] }) — single reads
 //                                only; a secret question's matrix stays empty until
-//                                the keys are revealed; `memos?: string[]` carries
-//                                the memos of votes that selected the
-//                                `openValue: true` choice (manager/admin or
-//                                voting:write key reads only; best effort and
-//                                uncached; absent, never empty, when there are none,
-//                                on a chain error, or while still encrypted). The
-//                                memos themselves are public on-chain.
+//                                the keys are revealed; `memos?: string[]` holds the
+//                                `openValue` choice's voter memos (manager reads
+//                                only, best effort, absent when none)
 // election.chainId         — vochain chain id votes are signed against (omitempty).
 
 // List processes
