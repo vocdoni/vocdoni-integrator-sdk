@@ -1,3 +1,4 @@
+import type { OrgMember } from '@vocdoni/api-types'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../mocks/server'
 import { VocdoniApiClient } from './client'
@@ -44,6 +45,54 @@ describe('admin / integrator client methods', () => {
       ])
       expect(res.jobId).toBe('mjob-1')
       expect(body).toEqual({ members: [{ memberNumber: '1' }, { memberNumber: '2' }] })
+    })
+
+    // The backend decodes `weight` as a string: a JSON number fails to decode
+    // and the whole request is rejected with a 400.
+    it('sends the member weight as a decimal string', async () => {
+      let body: unknown
+      server.use(
+        http.post(`${BASE_URL}/organizations/${ORG}/members`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ added: 1 })
+        }),
+      )
+
+      await client.organizations.addMembers(ORG, [{ name: 'Alice', weight: '2' }])
+      expect(body).toEqual({ members: [{ name: 'Alice', weight: '2' }] })
+
+      // @ts-expect-error a numeric weight is rejected by the backend
+      const numeric: OrgMember = { weight: 2 }
+      void numeric
+    })
+  })
+
+  describe('organizations.updateGroup', () => {
+    it('returns the census resize report, or undefined on a bare OK', async () => {
+      const url = `${BASE_URL}/organizations/${ORG}/groups/g1`
+      server.use(http.put(url, () => HttpResponse.json({ censusJobIds: ['cjob-2'] })))
+      expect(await client.organizations.updateGroup(ORG, 'g1', { title: 'x' })).toEqual({
+        censusJobIds: ['cjob-2'],
+      })
+
+      server.use(http.put(url, () => new HttpResponse('\n')))
+      expect(await client.organizations.updateGroup(ORG, 'g1', { title: 'x' })).toBeUndefined()
+    })
+  })
+
+  describe('organizations.upsertMember', () => {
+    it('PUTs the member with its weight as a decimal string and returns the id', async () => {
+      let body: unknown
+      server.use(
+        http.put(`${BASE_URL}/organizations/${ORG}/members`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ id: 'm1', censusJobIds: ['cjob-1'] })
+        }),
+      )
+
+      const res = await client.organizations.upsertMember(ORG, { id: 'm1', weight: '3' })
+      expect(body).toEqual({ id: 'm1', weight: '3' })
+      expect(res).toEqual({ id: 'm1', censusJobIds: ['cjob-1'] })
     })
   })
 

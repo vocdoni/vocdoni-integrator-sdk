@@ -1,4 +1,4 @@
-import type { VotingProcessQuestion } from '@vocdoni/api-types'
+import type { OrgMember, VotingProcessQuestion } from '@vocdoni/api-types'
 import { EphemeralSigner, ProofCA_Type, signBlindCspBallots, VotingClient } from '@vocdoni/api-voting'
 import { decodeQuestionResults, encodeQuestionBallot, unsatisfiableQuestionReason } from '@vocdoni/ballot'
 import { apiKey, makeAdminClient, makeClient } from './helpers'
@@ -117,9 +117,14 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       expect(orgAddress, 'managed org has no address').toBeTruthy()
       step(`1. organization created — ${orgAddress}`)
 
-      // 2. Memberbase: 100 members, only memberNumber set (1..100).
+      // 2. Memberbase: 100 members, only memberNumber set (1..100). The first
+      // one also carries a weight, to prove the backend decodes the decimal
+      // string `OrgMember.weight` (a JSON number is a 400). The census below
+      // is not weighted, so the weight changes no tally.
+      const WEIGHTED_MEMBER = '1'
       const members = Array.from({ length: MEMBER_COUNT }, (_, i) => ({
         memberNumber: String(i + 1),
+        ...(String(i + 1) === WEIGHTED_MEMBER ? { weight: '3' } : {}),
       }))
       const added = await admin.organizations.addMembers(orgAddress, members)
       if (added.jobId) {
@@ -131,6 +136,13 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
         })
         expect(job.result?.progress).toBe(100)
       }
+      let weighted: OrgMember | undefined
+      for (let page: number | null = 1; page !== null && !weighted; ) {
+        const res = await admin.organizations.listMembers(orgAddress, page)
+        weighted = res.members.find((m) => m.memberNumber === WEIGHTED_MEMBER)
+        page = res.pagination?.nextPage ?? null
+      }
+      expect(weighted?.weight, 'member weight did not round-trip').toBe('3')
       step(`2. ${MEMBER_COUNT} members added (memberNumber 1..${MEMBER_COUNT})`)
 
       // 3. Auto-created "All members" group.

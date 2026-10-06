@@ -1247,7 +1247,13 @@ export interface OrgMember {
   name?: string
   surname?: string
   birthDate?: string
-  weight?: number
+  /**
+   * Census weight as a decimal string (`"42"`), unlike the hex weights of the
+   * CSP voter routes. Defaults to `1`; only a weighted census uses it.
+   */
+  weight?: string
+  /** Write-only: hashed by the backend and never returned. */
+  password?: string
   other?: Record<string, unknown>
 }
 
@@ -1258,9 +1264,34 @@ export interface AddMembersRequest {
 /** Response of `POST /organizations/{address}/members`. Async for large batches. */
 export interface AddMembersResponse {
   added: number
-  errors?: string[]
+  /** `null` when there is nothing to report, including on async adds. */
+  errors?: string[] | null
   /** Present when the add runs asynchronously — poll via `GET /jobs/{jobId}` (`jobs.waitFor`). */
   jobId?: string
+  /**
+   * Jobs raising the on-chain `maxCensusSize` of live elections whose census
+   * just grew, one per organization — poll each via `jobs.waitFor`. Only
+   * reported by synchronous adds: absent on an async one even when a live
+   * census grew.
+   */
+  censusJobIds?: string[]
+}
+
+/** Response of `PUT /organizations/{address}/members`: the id, not the member. */
+export interface UpsertOrgMemberResponse {
+  /** The created or updated member's id. */
+  id: string
+  /**
+   * Jobs raising the on-chain `maxCensusSize` of the elections a new member
+   * grew — poll each via `jobs.waitFor`.
+   */
+  censusJobIds?: string[]
+  /**
+   * Per-census problems that did not stop the member from being written: it
+   * exists either way, but may be missing from a live census or lack the
+   * on-chain room to vote.
+   */
+  errors?: string[]
 }
 
 export interface OrganizationMembersResponse {
@@ -1275,6 +1306,13 @@ export interface DeleteMembersRequest {
 
 export interface DeleteMembersResponse {
   count: number
+  /**
+   * Jobs raising the on-chain `maxCensusSize` of elections whose questions the
+   * deletion opened to the whole census — poll each via `jobs.waitFor`.
+   */
+  censusJobIds?: string[]
+  /** Resize problems that did not stop the deletion. */
+  errors?: string[]
 }
 
 // ─── Organization member groups ─────────────────────────────────────────────────
@@ -1315,6 +1353,17 @@ export interface UpdateGroupRequest {
   description?: string
   addMembers?: string[]
   removeMembers?: string[]
+}
+
+/**
+ * Response of `PUT` and `DELETE /organizations/{address}/groups/{groupId}`
+ * when there is something to report; a bare OK (`undefined`) otherwise.
+ */
+export interface UpdateGroupResponse {
+  /** Jobs raising the on-chain `maxCensusSize` of elections whose census grew or reopened. */
+  censusJobIds?: string[]
+  /** Per-census problems that did not stop the group change. */
+  errors?: string[]
 }
 
 export interface ListGroupMembersResponse {
