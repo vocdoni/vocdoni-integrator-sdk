@@ -329,7 +329,7 @@ Key election components (all from `@vocdoni/react-components`):
 | `<ElectionTitle />` | `election.title` as a heading |
 | `<ElectionDescription />` | `election.description` |
 | `<ElectionHeader />` | Header image / media |
-| `<ElectionSchedule />` | Start/end dates (end is `endedAt ?? endDate`, so an early-ended vote shows when it really stopped) |
+| `<ElectionSchedule />` | Start/end dates (end is `endedAt ?? endDate`, so an early-ended vote shows when it really stopped; a custom slot gets only `text`, so compute it with `resolveEndDate(election)`, re-exported from `@vocdoni/react-components`) |
 | `<ElectionStatusBadge />` | Status chip (ONGOING, PAUSED, ENDED…) |
 | `<ElectionQuestions />` | Full question + choices form (calls `vote()` on submit); renders a failed cast as a form-level `QuestionsError` |
 | `<VoteButton />` | Submit button; auto-disabled when `!isAbleToVote`, when `status !== 'ONGOING'`, or while a vote is in flight. Passes the slot a `tooltip` naming why it is disabled ("Voting opens on Sep 29, 2026, 9:00 AM", "Voting not open yet" without a start date, "Voting is paused", "Voting has ended", "Voting was canceled", "You have already voted", "Identify first to vote", "You are not eligible to vote in this process") — the default slot renders it as the button's `title`, which is a minimal reference only — a disabled button takes no keyboard focus and touch devices never reveal `title`, so a production slot should render the reason as visible helper text tied to the button with `aria-describedby`. A consumer-passed `disabled` carries no tooltip. Strings live under `vote.disabled.*` in the `react-components` i18n namespace; `vote.disabled.upcoming_date_format` is the date-fns pattern of the dated one. |

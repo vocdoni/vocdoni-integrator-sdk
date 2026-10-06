@@ -10,7 +10,10 @@ export {
   normalizeVotingProcess,
   processVoteCount,
   computeProcessStatus,
+  questionsEndedAt,
+  resolveEndDate,
   type ComputeProcessStatusOptions,
+  type EndDates,
 } from './election-status'
 export { VocdoniApiClient } from './client'
 export { ElectionsClient, ProcessesCspClient } from './elections'
