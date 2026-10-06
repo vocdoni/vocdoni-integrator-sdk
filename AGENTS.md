@@ -23,15 +23,19 @@ The SDK has consumers outside this repo that do not update themselves. Changing 
 
 ### Developer docs (`vocdoni/vocdoni.io`)
 
-The public developer documentation lives in [vocdoni/vocdoni.io](https://github.com/vocdoni/vocdoni.io), under `content/developers/docs/` (e.g. `sdk-quickstart.md`, `sdks-and-tools.md`, `casting-votes.md`), served at `vocdoni.io/developers`. It is not generated from this repo, and the skill in `skills/` does not replace it.
+The public developer documentation lives in [vocdoni/vocdoni.io](https://github.com/vocdoni/vocdoni.io), under `content/developers/docs/en/` (e.g. `sdk-quickstart.md`, `sdks-and-tools.md`, `casting-votes.md`), served at `vocdoni.io/developers`. It is not generated from this repo, and the skill in `skills/` does not replace it.
 
-**Rule: when a change adds, changes, renames or removes public API surface (the same list as in Skills Maintenance), suggest opening an issue or a PR in `vocdoni/vocdoni.io` to update the docs.** Name the affected pages if you can, and describe what changed: the old and new signatures, the removed method and its replacement, the new step in the flow.
+**Rule: when a change adds, changes, renames or removes public API surface (the same list as in Skills Maintenance), or renames the plugin or skill (the docs quote `vocdoni-integrator-sdk` in their install commands), suggest opening an issue or a PR in `vocdoni/vocdoni.io` to update the docs.** Name the affected pages if you can, and describe what changed: the old and new signatures, the removed method and its replacement, the new step in the flow.
+
+Mind the timing: the docs describe what is on npm. An issue can be opened as soon as the change lands, but a docs PR should not merge before the release that ships the change is published, or it documents APIs nobody can install yet (or drops methods the published version still exports).
 
 ### Vocdoni App (`vocdoni/vocdoni-app`)
 
 [vocdoni/vocdoni-app](https://github.com/vocdoni/vocdoni-app) consumes the published `@vocdoni/*` packages from npm.
 
-**Rule: when a release is about to publish API changes (a `chore(release): version packages` PR, or pending changesets with API changes), suggest opening an issue or a PR in `vocdoni/vocdoni-app` to adopt the new version.** Point at the changelog entries that need action: breaking changes, removed or replaced APIs, new required options.
+**Rule: when a release with API changes is about to be published (you are working on or reviewing the `chore(release): version packages` PR, or the user is preparing a release), suggest opening an issue in `vocdoni/vocdoni-app` to adopt the new version.** Point at the changeset entries that need action: breaking changes, removed or replaced APIs, new required options. Check for an existing issue first so the same release is not reported twice. Suggest a PR only once the new versions are published: before that, bumping vocdoni-app's ranges cannot install.
+
+Other known consumers depend on the packages too (`vocdoni/saas-integrator-demo`, `vocdoni/decidim-secure_elections`). When a release removes or replaces APIs, mention them as well so the user can decide whether they need the same follow-up.
 
 ## Changesets / Release Workflow
 
@@ -43,7 +47,7 @@ This repo uses [Changesets](https://github.com/changesets/changesets) for versio
 - **Do not edit versions/changelogs manually:** Changesets manages version bumps and changelog generation via `changeset version`.
 - **Publish flow:** CI owns publishing. When a release PR is merged with changesets, GitHub Actions runs `changeset publish` automatically. If there are no pending changesets after merge, you may run `pnpm release` directly.
 - **Private package:** `packages/tsconfig` is private and must never be published. Changesets respects this via its `package.json` `"private": true`.
-- **Downstream follow-up:** Before a release with API changes, suggest the `vocdoni/vocdoni-app` issue or PR described in [Downstream Repositories](#downstream-repositories).
+- **Downstream follow-up:** Before a release with API changes, suggest the `vocdoni/vocdoni-app` issue described in [Downstream Repositories](#downstream-repositories).
 - **Workflow filename matters:** The workflow file is `.github/workflows/release.yml`. Keep this name for npm trusted publishing.
 
 ### Typical Workflow
