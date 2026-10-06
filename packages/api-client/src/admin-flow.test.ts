@@ -67,6 +67,19 @@ describe('admin / integrator client methods', () => {
     })
   })
 
+  describe('organizations.updateGroup', () => {
+    it('returns the census resize report, or undefined on a bare OK', async () => {
+      const url = `${BASE_URL}/organizations/${ORG}/groups/g1`
+      server.use(http.put(url, () => HttpResponse.json({ censusJobIds: ['cjob-2'] })))
+      expect(await client.organizations.updateGroup(ORG, 'g1', { title: 'x' })).toEqual({
+        censusJobIds: ['cjob-2'],
+      })
+
+      server.use(http.put(url, () => new HttpResponse('\n')))
+      expect(await client.organizations.updateGroup(ORG, 'g1', { title: 'x' })).toBeUndefined()
+    })
+  })
+
   describe('organizations.upsertMember', () => {
     it('PUTs the member with its weight as a decimal string and returns the id', async () => {
       let body: unknown

@@ -25,6 +25,7 @@ import type {
   OrgMember,
   SubscriptionPlan,
   UpdateGroupRequest,
+  UpdateGroupResponse,
   UpsertOrgMemberResponse,
 } from '@vocdoni/api-types'
 import type { UpFetch } from 'up-fetch'
@@ -107,8 +108,10 @@ export class OrganizationsClient {
 
   /**
    * Create a member (no `id`, or an unused one) or update one. On an update a
-   * field left out keeps its stored value. Resolves to the member's id, not
-   * the member — poll any `censusJobIds` via `client.jobs.waitFor(jobId)`.
+   * field left out keeps its stored value; for `weight` only since
+   * saas-backend v3.1.2, earlier ones reset it to `1`. Resolves to the
+   * member's id, not the member — poll any `censusJobIds` via
+   * `client.jobs.waitFor(jobId)`.
    */
   async upsertMember(address: string, member: OrgMember): Promise<UpsertOrgMemberResponse> {
     return this.fetch<UpsertOrgMemberResponse>(`/organizations/${address}/members`, {
@@ -145,15 +148,21 @@ export class OrganizationsClient {
     )
   }
 
-  async updateGroup(address: string, groupId: string, body: UpdateGroupRequest): Promise<void> {
-    return this.fetch<void>(`/organizations/${address}/groups/${groupId}`, {
+  /** Resolves to `undefined` unless there are census resize jobs or errors to report. */
+  async updateGroup(
+    address: string,
+    groupId: string,
+    body: UpdateGroupRequest,
+  ): Promise<UpdateGroupResponse | undefined> {
+    return this.fetch<UpdateGroupResponse | undefined>(`/organizations/${address}/groups/${groupId}`, {
       method: 'PUT',
       body,
     }).catch(handleError)
   }
 
-  async deleteGroup(address: string, groupId: string): Promise<void> {
-    return this.fetch<void>(`/organizations/${address}/groups/${groupId}`, {
+  /** Resolves to `undefined` unless there are census resize jobs or errors to report. */
+  async deleteGroup(address: string, groupId: string): Promise<UpdateGroupResponse | undefined> {
+    return this.fetch<UpdateGroupResponse | undefined>(`/organizations/${address}/groups/${groupId}`, {
       method: 'DELETE',
     }).catch(handleError)
   }

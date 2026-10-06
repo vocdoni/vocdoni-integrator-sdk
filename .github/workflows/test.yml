@@ -31,7 +31,7 @@ jobs:
       # tsc over src, tests included: vitest strips types, so a test's
       # @ts-expect-error guard only fails here.
       - name: Type-check
-        run: pnpm lint
+        run: pnpm lint && pnpm exec tsc --noEmit -p integration
 
       - name: Run tests with coverage
         run: pnpm test:coverage

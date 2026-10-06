@@ -117,11 +117,11 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
       expect(orgAddress, 'managed org has no address').toBeTruthy()
       step(`1. organization created — ${orgAddress}`)
 
-      // 2. Memberbase: 100 members, only memberNumber set (1..100). The last
+      // 2. Memberbase: 100 members, only memberNumber set (1..100). The first
       // one also carries a weight, to prove the backend decodes the decimal
       // string `OrgMember.weight` (a JSON number is a 400). The census below
       // is not weighted, so the weight changes no tally.
-      const WEIGHTED_MEMBER = String(MEMBER_COUNT)
+      const WEIGHTED_MEMBER = '1'
       const members = Array.from({ length: MEMBER_COUNT }, (_, i) => ({
         memberNumber: String(i + 1),
         ...(String(i + 1) === WEIGHTED_MEMBER ? { weight: '3' } : {}),
