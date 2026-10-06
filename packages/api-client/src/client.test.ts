@@ -89,6 +89,27 @@ describe('VocdoniApiClient', () => {
     })
   })
 
+  describe('elections.getResults', () => {
+    it('types the open-value voter memos, so reading them needs no cast', async () => {
+      server.use(
+        http.get(`${BASE_URL}/processes/:id/results`, ({ params }) =>
+          HttpResponse.json({
+            id: params.id as string,
+            questions: [
+              { questionId: 'q1', voteCount: 2, maxVoters: 10, finalResults: false, memos: ['first', 'second'] },
+              { questionId: 'q2', voteCount: 2, maxVoters: 10, finalResults: false },
+            ],
+          }),
+        ),
+      )
+
+      const { questions } = await client.elections.getResults('abc123')
+      expect(questions[0].memos).toEqual(['first', 'second'])
+      // omitempty: no memos means the field is absent, not an empty array.
+      expect(questions[1].memos).toBeUndefined()
+    })
+  })
+
   describe('elections.voteBatch', () => {
     it('relays the batch to POST /votes and returns the covering job id', async () => {
       let received: Array<{ txPayload: string }> | undefined

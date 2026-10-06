@@ -250,7 +250,9 @@ const election = await client.elections.get(mongoId)
 //   question.results           — live QuestionResults ({ voteCount, maxVoters,
 //                                finalResults, results?: string[][] }) — single reads
 //                                only; a secret question's matrix stays empty until
-//                                the keys are revealed
+//                                the keys are revealed; `memos?: string[]` holds the
+//                                `openValue` choice's voter memos (manager reads
+//                                only, best effort, absent when none)
 // election.chainId         — vochain chain id votes are signed against (omitempty).
 
 // List processes
@@ -265,7 +267,9 @@ const { processes, pagination } = await client.elections.list({ orgAddress, page
 // Get per-question results — public, LIVE tallies (finalResults marks live vs final)
 const { questions } = await client.elections.getResults(mongoId)
 // questions[i] — { questionId, upstreamId, voteCount, maxVoters, finalResults,
-//                 results?: string[][] (raw histogram; see ballot protocol) }
+//                 results?: string[][] (raw histogram; see ballot protocol),
+//                 memos?: string[] (open-value voter memos; manager reads only,
+//                                   see question.results above) }
 
 // Admin: create a draft process → returns the draft id (Mongo hex string).
 // Text fields (title/description, question & choice titles) may be a plain

@@ -142,6 +142,36 @@ describe('admin / integrator client methods', () => {
       expect(body.questions[0].choices[1].title).toEqual({ default: 'Yes', es: 'Sí' })
     })
 
+    it('sends the openValue choice flag through untouched', async () => {
+      let body: any
+      server.use(
+        http.post(`${BASE_URL}/processes`, async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ processId: 'draft-open' })
+        }),
+      )
+
+      await client.elections.create({
+        orgAddress: ORG,
+        title: 'Open value',
+        questions: [
+          {
+            title: 'Question?',
+            choices: [
+              { title: 'Yes', value: 0 },
+              { title: 'Other', value: 1, openValue: true },
+            ],
+            type: 'singlechoice',
+          },
+        ],
+      })
+
+      expect(body.questions[0].choices.map((c: { openValue?: boolean }) => c.openValue)).toEqual([
+        undefined,
+        true,
+      ])
+    })
+
     describe('multichoice ballot config', () => {
       // The backend derives the dense 0/1 layout for `multichoice` but still maps
       // typeSetup.uniqueChoices onto the on-chain uniqueValues, which the

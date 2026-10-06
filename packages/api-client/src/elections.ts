@@ -177,7 +177,8 @@ export class ElectionsClient {
    * **Public** since saas-backend#599, draft-gated: published processes need
    * no auth (voter apps read `chainId` and the questions from here directly);
    * an unauthenticated read of a draft 404s — only org managers/admins or a
-   * scoped API key see drafts (and the `eligibleMemberIds` restriction lists).
+   * scoped API key see drafts (and the `eligibleMemberIds` restriction lists),
+   * and only they get the open-value voter memos in `questions[].results.memos`.
    */
   async get(id: string): Promise<VotingProcessResponse> {
     return this.fetch<VotingProcessResponse>(`/processes/${id}`)
@@ -185,7 +186,10 @@ export class ElectionsClient {
       .catch(handleError)
   }
 
-  /** Public tallies via `GET /processes/{id}/results` — live per-question {@link QuestionResults} plus ids. */
+  /**
+   * Public tallies via `GET /processes/{id}/results` — live per-question {@link QuestionResults}
+   * plus ids. Managers (or a `voting:write` key) also get the open-value voter `memos`.
+   */
   async getResults(id: string): Promise<VotingProcessResultsResponse> {
     return this.fetch<VotingProcessResultsResponse>(`/processes/${id}/results`).catch(handleError)
   }
@@ -337,6 +341,7 @@ export class ElectionsClient {
    * On `secretUntilTheEnd` questions `encryptionKeys` is absent until the
    * keykeepers publish — poll until present before encrypting a ballot.
    * Normalized like {@link get}: `READY` → `ONGOING`, choice meta folded on.
+   * Managers (or a `voting:write` key) also get the open-value voter `results.memos`.
    */
   async getQuestion(processId: string, questionId: string): Promise<PublicQuestionResponse> {
     return this.fetch<PublicQuestionResponse>(`/processes/${processId}/questions/${questionId}`)

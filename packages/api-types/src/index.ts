@@ -282,6 +282,11 @@ export interface Choice {
    * choice's `value`.
    */
   meta?: ChoiceMeta
+  /**
+   * Marks the one choice whose voters' memos manager reads return in
+   * {@link QuestionResults.memos}. Singlechoice, multichoice or cumulative only.
+   */
+  openValue?: boolean
 }
 
 export interface Question {
@@ -450,6 +455,12 @@ export interface QuestionResults {
    * question has one row per choice, each `[notSelected, selected]`.
    */
   results?: string[][]
+  /**
+   * Free-text memos of votes that picked the {@link Choice.openValue} choice.
+   * Manager-only read (the memos are public on-chain), best effort: absent, not
+   * empty, when there are none, on a chain error or while still encrypted.
+   */
+  memos?: string[]
 }
 
 export interface VotingProcessQuestion {

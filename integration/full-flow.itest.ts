@@ -178,7 +178,8 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
                 title: 'Approve?',
                 choices: [
                   { title: 'No', value: 0 },
-                  { title: 'Yes', value: 1 },
+                  // Every voter picks "Yes", so step 7 expects every voter's memo.
+                  { title: 'Yes', value: 1, openValue: true },
                 ],
                 type: 'singlechoice',
               },
@@ -712,6 +713,22 @@ suite('full election lifecycle (live — creates an org, processes and votes)', 
           (r) => r.questions.every((q) => (q.voteCount ?? 0) >= VOTES_PER_QUESTION),
         )
         expect(results.questions.length).toBe(p.questions.length)
+        // Open-value memos (#72): only a manager read gets them, best effort from the
+        // chain, so poll until it catches up.
+        if (p.label === 'single-choice') {
+          expect(
+            results.questions.every((q) => q.memos === undefined),
+            'a public results read returned the manager-only memos',
+          ).toBe(true)
+          const expectedMemos = VOTERS.map((m) => `itest member ${m} (${p.label})`).sort()
+          const managed = await pollUntil(
+            () => admin.elections.getResults(p.draftId),
+            (r) => (r.questions[0]?.memos?.length ?? 0) >= VOTERS.length,
+          )
+          expect([...(managed.questions[0].memos ?? [])].sort(), 'manager read misses the open-value memos').toEqual(
+            expectedMemos,
+          )
+        }
         for (const q of results.questions) {
           expect(q.voteCount, `${p.label} live voteCount lagging`).toBe(VOTES_PER_QUESTION)
           expect(q.finalResults, `${p.label} results marked final while live`).toBe(false)
