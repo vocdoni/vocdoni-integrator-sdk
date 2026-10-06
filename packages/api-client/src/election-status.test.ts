@@ -14,6 +14,8 @@ import {
   normalizeQuestionStatus,
   normalizeVotingProcess,
   processVoteCount,
+  questionsEndedAt,
+  resolveEndDate,
 } from './election-status'
 
 const q = (status: VotingProcessQuestion['status']): VotingProcessQuestion =>
@@ -247,6 +249,49 @@ describe('isBeforeStart', () => {
     expect(isBeforeStart(null, now)).toBe(false)
     expect(isBeforeStart('', now)).toBe(false)
     expect(isBeforeStart('garbage', now)).toBe(false)
+  })
+})
+
+describe('resolveEndDate', () => {
+  const endDate = '2024-12-31T00:00:00Z'
+  const endedAt = '2024-02-01T00:00:00Z'
+
+  it('prefers endedAt over the scheduled endDate', () => {
+    expect(resolveEndDate({ endDate, endedAt })?.toISOString()).toBe('2024-02-01T00:00:00.000Z')
+    expect(resolveEndDate({ endDate, endedAt: new Date(endedAt) })?.toISOString()).toBe('2024-02-01T00:00:00.000Z')
+  })
+
+  it('falls back to endDate when endedAt is absent or unparseable', () => {
+    expect(resolveEndDate({ endDate })?.toISOString()).toBe('2024-12-31T00:00:00.000Z')
+    expect(resolveEndDate({ endDate, endedAt: '' })?.toISOString()).toBe('2024-12-31T00:00:00.000Z')
+    expect(resolveEndDate({ endDate, endedAt: 'nope' })?.toISOString()).toBe('2024-12-31T00:00:00.000Z')
+  })
+
+  it('is undefined when neither date parses', () => {
+    expect(resolveEndDate({ endDate: 'nope' })).toBeUndefined()
+    expect(resolveEndDate({})).toBeUndefined()
+    expect(resolveEndDate(null)).toBeUndefined()
+    expect(resolveEndDate(undefined)).toBeUndefined()
+  })
+})
+
+describe('questionsEndedAt', () => {
+  it('is the latest endedAt once every question has one', () => {
+    const ended = questionsEndedAt([
+      { endedAt: '2024-02-01T00:00:00Z' },
+      { endedAt: '2024-03-01T00:00:00Z' },
+      { endedAt: new Date('2024-01-01T00:00:00Z') },
+    ])
+    expect(ended?.toISOString()).toBe('2024-03-01T00:00:00.000Z')
+  })
+
+  it('is undefined while any question has no parseable endedAt', () => {
+    expect(questionsEndedAt([{ endedAt: '2024-02-01T00:00:00Z' }, {}])).toBeUndefined()
+    expect(questionsEndedAt([{ endedAt: '2024-02-01T00:00:00Z' }, { endedAt: 'nope' }])).toBeUndefined()
+  })
+
+  it('is undefined for no questions', () => {
+    expect(questionsEndedAt([])).toBeUndefined()
   })
 })
 

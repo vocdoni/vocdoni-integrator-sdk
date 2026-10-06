@@ -196,6 +196,9 @@ importers:
       '@types/react':
         specifier: 19.x
         version: 19.2.17
+      '@vocdoni/api-client':
+        specifier: workspace:*
+        version: link:../api-client
       '@vocdoni/api-types':
         specifier: workspace:*
         version: link:../api-types

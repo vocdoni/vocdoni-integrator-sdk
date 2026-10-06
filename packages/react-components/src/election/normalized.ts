@@ -51,14 +51,6 @@ export const getElectionDate = (
   return Number.isNaN(date.getTime()) ? undefined : date
 }
 
-/**
- * The moment voting actually stopped: `endedAt` when the process was ended
- * before its schedule, otherwise the scheduled `endDate`. Falls back to
- * `endDate` when `endedAt` is absent or unparseable.
- */
-export const getElectionEndDate = (election: ElectionLike | null | undefined): Date | undefined =>
-  getElectionDate(election, 'endedAt') ?? getElectionDate(election, 'endDate')
-
 export const isInvalidElectionLike = (election: ElectionLike | null | undefined): boolean => {
   return !election
 }

@@ -1,11 +1,12 @@
 import { decodeQuestionResults, questionReservesAbstain, tryInferQuestionBallotType } from '@vocdoni/ballot'
-import { format, max } from 'date-fns'
+import { questionsEndedAt, resolveEndDate } from '@vocdoni/api-client'
+import { format } from 'date-fns'
 import { ComponentPropsWithoutRef } from 'react'
 import { useComponents } from '../context/useComponents'
 import { linkifyIpfs } from '../shared/ipfs'
 import { useReactComponentsLocalize } from '../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
-import { getElectionDate, getElectionEndDate, resolveTitle } from '../../election/normalized'
+import { resolveTitle } from '../../election/normalized'
 
 const formatPercent = (pct: number | null) => (pct ?? 0).toFixed(1) + '%'
 
@@ -37,10 +38,7 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
     // The process-level `endedAt` is omitted while any question is still open,
     // but the placeholder only waits on the secret questions: once they have all
     // ended, the latest of their own `endedAt` is when voting really stopped.
-    const blockingEnds = blockingQuestions.map((q) => getElectionDate(q, 'endedAt'))
-    const endDate = blockingEnds.every(Boolean)
-      ? max(blockingEnds as Date[])
-      : getElectionEndDate(election)
+    const endDate = questionsEndedAt(blockingQuestions) ?? resolveEndDate(election)
     return (
       <Slot
         {...rest}

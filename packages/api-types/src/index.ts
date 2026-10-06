@@ -604,7 +604,8 @@ export interface VotingProcessBase {
   chainId?: string
   /**
    * When the process was actually ended (stopped early or cancelled). Prefer
-   * `endedAt ?? endDate` when displaying the end. Absence does not prove the
+   * `endedAt ?? endDate` when displaying the end (`resolveEndDate` in
+   * `@vocdoni/api-client` does this). Absence does not prove the
    * process ran to its schedule: it is also omitted while any published
    * question is still open or has no recorded `endedAt` yet (historical
    * processes only get it once their detail is first read). Per-question

@@ -58,6 +58,40 @@ export const isBeforeStart = (startDate: string | Date | null | undefined, now: 
   return start !== undefined && start.getTime() > now.getTime()
 }
 
+/** Anything that carries a scheduled `endDate` and/or a real `endedAt`. */
+export interface EndDates {
+  endDate?: string | Date | null
+  endedAt?: string | Date | null
+}
+
+/**
+ * When voting actually stopped: `endedAt` when the process (or question) was
+ * ended before its schedule, otherwise the scheduled `endDate`. Falls back to
+ * `endDate` when `endedAt` is absent or unparseable; `undefined` when neither
+ * parses.
+ *
+ * The process-level `endedAt` is omitted while any question is still open, so
+ * this is the scheduled end for a partly-ended process — see
+ * {@link questionsEndedAt} for the end of a subset of its questions.
+ */
+export const resolveEndDate = (item: EndDates | null | undefined): Date | undefined =>
+  parseDate(item?.endedAt) ?? parseDate(item?.endDate)
+
+/**
+ * The latest `endedAt` of `questions`: when the last of them stopped. Only
+ * defined once every one has a parseable `endedAt` — while any is still open
+ * the moment they all stopped is unknown. `undefined` for an empty list.
+ */
+export const questionsEndedAt = (questions: readonly Pick<EndDates, 'endedAt'>[]): Date | undefined => {
+  let latest: Date | undefined
+  for (const q of questions) {
+    const ended = parseDate(q.endedAt)
+    if (!ended) return undefined
+    if (!latest || ended > latest) latest = ended
+  }
+  return latest
+}
+
 /**
  * Derive a single {@link QuestionStatus} for a process, by precedence:
  * 1. Any question `ONGOING` → `ONGOING` (loudest running state wins)
