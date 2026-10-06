@@ -90,7 +90,7 @@ describe('VocdoniApiClient', () => {
   })
 
   describe('elections.getResults', () => {
-    it('exposes the manager-only voter memos without a cast', async () => {
+    it('types the open-value voter memos, so reading them needs no cast', async () => {
       server.use(
         http.get(`${BASE_URL}/processes/:id/results`, ({ params }) =>
           HttpResponse.json({

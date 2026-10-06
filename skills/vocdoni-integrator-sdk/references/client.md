@@ -251,9 +251,12 @@ const election = await client.elections.get(mongoId)
 //                                finalResults, results?: string[][] }) — single reads
 //                                only; a secret question's matrix stays empty until
 //                                the keys are revealed; `memos?: string[]` carries
-//                                the open-value choice's free-text voter memos
-//                                (manager/admin or scoped API key only; absent, not
-//                                empty, when there are none)
+//                                the memos of votes that selected the
+//                                `openValue: true` choice (manager/admin or
+//                                voting:write key reads only; best effort and
+//                                uncached; absent, never empty, when there are none,
+//                                on a chain error, or while still encrypted). The
+//                                memos themselves are public on-chain.
 // election.chainId         — vochain chain id votes are signed against (omitempty).
 
 // List processes
@@ -269,8 +272,8 @@ const { processes, pagination } = await client.elections.list({ orgAddress, page
 const { questions } = await client.elections.getResults(mongoId)
 // questions[i] — { questionId, upstreamId, voteCount, maxVoters, finalResults,
 //                 results?: string[][] (raw histogram; see ballot protocol),
-//                 memos?: string[] (open-value voter memos; manager-only, absent
-//                                   for public callers and when there are none) }
+//                 memos?: string[] (open-value voter memos; manager reads only,
+//                                   see question.results above) }
 
 // Admin: create a draft process → returns the draft id (Mongo hex string).
 // Text fields (title/description, question & choice titles) may be a plain

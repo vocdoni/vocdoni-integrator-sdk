@@ -2,4 +2,4 @@
 '@vocdoni/api-types': minor
 ---
 
-`QuestionResults` (and so `VotingProcessQuestionResults`) now declares `memos?: string[]`, the free-text voter memos of a question's open-value choice. The API serves them only to org managers/admins or a scoped API key, and omits the field when there are none, so `client.elections.getResults()` and the question `results` of the single reads expose them without a cast.
+`Choice` now declares `openValue?: boolean`, which marks the choice that collects free-text voter memos. `QuestionResults` (and so `VotingProcessQuestionResults`) declares `memos?: string[]`, the memos of the votes that selected that choice. The API returns them only to an org manager/admin or a `voting:write` API key, on a best-effort basis, and omits the field when it has none to return, so absence does not mean no memos were cast. The memos themselves are cleartext on-chain.
