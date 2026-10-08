@@ -880,6 +880,27 @@ export interface VoteJobResult {
   error?: string
 }
 
+/**
+ * One election's outcome in a `set_process_metadata` job: the metadata version
+ * its SET_PROCESS_METADATA transaction commits. Once `completed` it is what the
+ * election serves and every vote must attest; once `failed` the election kept
+ * its previous version.
+ */
+export interface MetadataJobElectionResult {
+  /** On-chain election id (hex). */
+  processId: string
+  metadataURL: string
+  /** SHA-256 (lowercase hex) of the document at `metadataURL`. */
+  metadataHash: string
+  status: JobStatus
+  error?: string
+}
+
+/** A question's entry in {@link JobResult.questions}. */
+export interface QuestionMetadataJobResult extends MetadataJobElectionResult {
+  questionId: string
+}
+
 /** Unified job result — each field is only populated by the job types that produce it. */
 export interface JobResult {
   address?: string
@@ -906,6 +927,17 @@ export interface JobResult {
   total?: number
   /** added / total * 100 — produced by member/census import jobs. */
   progress?: number
+  /**
+   * Per-question outcomes of a `set_process_metadata` job, one entry per
+   * question whose metadata changed, in process order.
+   */
+  questions?: QuestionMetadataJobResult[]
+  /**
+   * The process parent election's outcome in a `set_process_metadata` job,
+   * when its metadata changed. Its shape is still being settled by the
+   * backend, so every field is optional.
+   */
+  parent?: Partial<MetadataJobElectionResult>
 }
 
 export interface JobStatusResponse {

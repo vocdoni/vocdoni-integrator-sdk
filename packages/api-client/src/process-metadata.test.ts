@@ -1,9 +1,11 @@
 import type { VotingProcessMetadata } from '@vocdoni/api-types'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../mocks/server'
+import { vi } from 'vitest'
 import { VocdoniApiClient } from './client'
+import { METADATA_UPDATE_TIMEOUT_MS } from './elections'
 import { VocdoniApiError } from './errors'
-import { JobFailedError } from './jobs'
+import { JobFailedError, JobsClient } from './jobs'
 
 const BASE_URL = 'http://localhost'
 const PROCESS_ID = '0123456789abcdef01234567'
@@ -19,6 +21,14 @@ const METADATA: VotingProcessMetadata = {
     },
   ],
 }
+
+const PARENT_OUTCOME = {
+  processId: 'bb'.repeat(32),
+  metadataURL: 'https://example.com/parent.json',
+  metadataHash: 'cc'.repeat(32),
+  status: 'completed',
+}
+const QUESTION_OUTCOME = { ...PARENT_OUTCOME, questionId: 'q-0', processId: 'aa'.repeat(32) }
 
 describe('process metadata', () => {
   let client: VocdoniApiClient
@@ -89,12 +99,45 @@ describe('process metadata', () => {
             jobId: 'meta-job',
             type: 'set_process_metadata',
             status: polls === 1 ? 'pending' : 'completed',
+            result: { questions: [QUESTION_OUTCOME], parent: PARENT_OUTCOME },
           })
         }),
       )
 
-      await client.elections.updateProcessMetadataAndWait(PROCESS_ID, METADATA, { intervalMs: 1 })
+      const job = await client.elections.updateProcessMetadataAndWait(PROCESS_ID, METADATA, { intervalMs: 1 })
       expect(polls).toBe(2)
+      expect(job?.result?.questions).toEqual([QUESTION_OUTCOME])
+      expect(job?.result?.parent).toEqual(PARENT_OUTCOME)
+    })
+
+    it('waits METADATA_UPDATE_TIMEOUT_MS by default, overridable per call', async () => {
+      const waitFor = vi.spyOn(JobsClient.prototype, 'waitFor').mockResolvedValue({
+        jobId: 'meta-job',
+        type: 'set_process_metadata',
+        status: 'completed',
+      })
+      server.use(
+        http.put(`${BASE_URL}/processes/${PROCESS_ID}/metadata`, () =>
+          HttpResponse.json({ jobId: 'meta-job' }, { status: 202 }),
+        ),
+      )
+
+      try {
+        await client.elections.updateProcessMetadataAndWait(PROCESS_ID, METADATA)
+        expect(METADATA_UPDATE_TIMEOUT_MS).toBeGreaterThanOrEqual(16 * 60 * 1000)
+        expect(waitFor).toHaveBeenLastCalledWith('meta-job', {
+          expectType: 'set_process_metadata',
+          timeoutMs: METADATA_UPDATE_TIMEOUT_MS,
+        })
+
+        await client.elections.updateProcessMetadataAndWait(PROCESS_ID, METADATA, { timeoutMs: 5 })
+        expect(waitFor).toHaveBeenLastCalledWith('meta-job', {
+          expectType: 'set_process_metadata',
+          timeoutMs: 5,
+        })
+      } finally {
+        waitFor.mockRestore()
+      }
     })
 
     it('rejects a completed job of another type', async () => {
@@ -122,7 +165,7 @@ describe('process metadata', () => {
         }),
       )
 
-      await client.elections.updateProcessMetadataAndWait(PROCESS_ID, METADATA)
+      await expect(client.elections.updateProcessMetadataAndWait(PROCESS_ID, METADATA)).resolves.toBeUndefined()
       expect(polled).toBe(false)
     })
 

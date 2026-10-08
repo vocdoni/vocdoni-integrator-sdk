@@ -339,9 +339,13 @@ if (jobId) await client.jobs.waitFor(jobId)
 // Votes attesting the old text's metadata hash are then refused on chain.
 const text = await client.elections.getProcessMetadata(mongoId)
 text.questions[0].title = { default: 'Fixed typo' }
+// The txs can stay pending up to the mempool TTL (~15 min): poll with a long
+// timeout, not waitFor's 60 s default.
 const pending = await client.elections.updateProcessMetadata(mongoId, text)
-if (pending) await client.jobs.waitFor(pending.jobId)
-// Or: await client.elections.updateProcessMetadataAndWait(mongoId, text)
+if (pending) await client.jobs.waitFor(pending.jobId, { timeoutMs: METADATA_UPDATE_TIMEOUT_MS })
+// Or: updateProcessMetadataAndWait(mongoId, text) — waits 16 min by default and
+// resolves to the job: result.questions[] / result.parent hold each election's
+// new { processId, metadataURL, metadataHash, status, error? }.
 
 // Admin: publish-readiness dry-run (GET /processes/{id}/validation).
 const { valid, errors } = await client.elections.validate(mongoId)
