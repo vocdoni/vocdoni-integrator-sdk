@@ -742,6 +742,54 @@ export interface PublicQuestionResponse {
   results?: QuestionResults
 }
 
+/**
+ * A choice's extended display info in {@link VotingProcessMetadata}: the
+ * storage form of {@link ChoiceMeta}, i.e. a {@link ChoiceMetadataEntry}
+ * without its `value`, which is the choice's own and cannot be edited.
+ */
+export interface VotingProcessMetadataChoiceMeta {
+  description?: string
+  /** A plain URL, or the explicit `{ default, thumbnail }` sizes. */
+  image?: string | { default?: string; thumbnail?: string }
+  /** Creator-defined keys, stored verbatim. */
+  [key: string]: unknown
+}
+
+/** One choice's text in {@link VotingProcessMetadata}. */
+export interface VotingProcessMetadataChoice {
+  title: MultiLangString
+  /**
+   * The choice's extended display info. On update it replaces the choice's
+   * whole entry in the question's `metadata.choices` (keys left out are
+   * dropped); absent leaves the entry unchanged.
+   */
+  meta?: VotingProcessMetadataChoiceMeta
+}
+
+/** One question's text in {@link VotingProcessMetadata}. */
+export interface VotingProcessMetadataQuestion {
+  title: MultiLangString
+  description?: MultiLangString
+  /** One entry per choice of the question, in the question's choice order. */
+  choices: VotingProcessMetadataChoice[]
+}
+
+/**
+ * The human-readable text and media of a voting process: what `GET` and
+ * `PUT /processes/{id}/metadata` read and write. Questions and choices are
+ * matched by position, so an update must carry exactly as many questions as the
+ * process, and as many choices per question as it has (400 otherwise); only the
+ * text can change, never the ballot itself.
+ */
+export interface VotingProcessMetadata {
+  title: MultiLangString
+  description?: MultiLangString
+  header?: string
+  streamUri?: string
+  /** One entry per question of the process, in process order. */
+  questions: VotingProcessMetadataQuestion[]
+}
+
 /** Per-question entry in `GET /processes/{id}/results` — a {@link QuestionResults} plus ids. */
 export interface VotingProcessQuestionResults extends QuestionResults {
   questionId: string
@@ -879,6 +927,7 @@ export type JobType =
   | 'relay_vote'
   | 'relay_votes'
   | 'publish_voting_process'
+  | 'set_process_metadata'
 
 /**
  * One envelope's outcome in a `relay_votes` batch job, index-aligned with the
@@ -893,6 +942,27 @@ export interface VoteJobResult {
   status: JobStatus
   voteID?: string
   error?: string
+}
+
+/**
+ * One election's outcome in a `set_process_metadata` job: the metadata version
+ * its SET_PROCESS_METADATA transaction commits. Once `completed` it is what the
+ * election serves and every vote must attest; once `failed` the election kept
+ * its previous version.
+ */
+export interface MetadataJobElectionResult {
+  /** On-chain election id (hex). */
+  processId: string
+  metadataURL: string
+  /** SHA-256 (lowercase hex) of the document at `metadataURL`. */
+  metadataHash: string
+  status: JobStatus
+  error?: string
+}
+
+/** A question's entry in {@link JobResult.questions}. */
+export interface QuestionMetadataJobResult extends MetadataJobElectionResult {
+  questionId: string
 }
 
 /** Unified job result — each field is only populated by the job types that produce it. */
@@ -921,6 +991,17 @@ export interface JobResult {
   total?: number
   /** added / total * 100 — produced by member/census import jobs. */
   progress?: number
+  /**
+   * Per-question outcomes of a `set_process_metadata` job, one entry per
+   * question whose metadata changed, in process order.
+   */
+  questions?: QuestionMetadataJobResult[]
+  /**
+   * The process parent election's outcome in a `set_process_metadata` job,
+   * when its metadata changed. Its shape is still being settled by the
+   * backend, so every field is optional.
+   */
+  parent?: Partial<MetadataJobElectionResult>
 }
 
 export interface JobStatusResponse {
