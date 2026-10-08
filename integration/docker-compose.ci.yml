@@ -95,9 +95,8 @@ services:
       VOCDONI_FULLTRANSPARENTMODE: 'false'
       # Dummy values: cmd/service/main.go requires both non-empty at startup
       # (log.Fatalf otherwise) even though the Stripe service is never
-      # constructed in this stack — nothing here goes through a checkout. The
-      # integrator wallet that pays for publishing is seeded straight into
-      # mongo instead (integration/seed-wallet.js).
+      # constructed in this stack. The integrator wallet is seeded into mongo
+      # instead (integration/seed-wallet.js).
       VOCDONI_STRIPEAPISECRET: sk_test_dummy
       VOCDONI_STRIPEWEBHOOKSECRET: whsec_dummy
       VOCDONI_OAUTHSERVICEURL: http://oauth.invalid

@@ -50,6 +50,9 @@ start it — it prints `INTEGRATION_API_URL` and `INTEGRATION_API_KEY` — then
 export those and run `pnpm test:integration` directly. If port `8080` (or
 `8025`) is already taken locally, set `INTEGRATION_HOST_PORT` (and/or
 `INTEGRATION_MAILHOG_PORT`) to an alternate port before calling `up`.
+`up` funds the integrator wallet with `INTEGRATION_WALLET_CENTS` (default
+€100,000). Each run spends €325 of it and nothing refunds it, so a reused stack
+lasts about 300 runs.
 
 ## What it covers
 
@@ -110,7 +113,7 @@ asserted here rather than only the two named question types.
 
 The key's organization must be an **integrator** with scopes `managed:write` +
 `members:write` + `voting:write`, and quota for ≥5 processes / ≥11 on-chain
-elections / ≥300 census size, and its prepaid wallet must cover ≥€325: each of
+elections / ≥300 census size, and its prepaid wallet must hold ≥€325 per run: each of
 the 5 processes has a 100-voter census, above the free tier, so publishing it
 debits €65 from the integrator's wallet (an empty one answers
 `402 insufficient integrator wallet balance`). The suite creates real on-chain

@@ -23,15 +23,35 @@ BOOTSTRAP_SCRIPT="$SCRIPT_DIR/ci-bootstrap-integrator.sh"
 
 INTEGRATION_HOST_PORT="${INTEGRATION_HOST_PORT:-8080}"
 INTEGRATION_MAILHOG_PORT="${INTEGRATION_MAILHOG_PORT:-8025}"
-# A full run publishes 5 processes at €65 each (see integration/seed-wallet.js);
-# €1000 leaves room for the suite to grow before this needs touching.
-INTEGRATION_WALLET_CENTS="${INTEGRATION_WALLET_CENTS:-100000}"
+# A full run spends €325 (5 processes at €65) with no refund; €100k lasts ~300 runs of one stack.
+INTEGRATION_WALLET_CENTS="${INTEGRATION_WALLET_CENTS:-10000000}"
 export INTEGRATION_HOST_PORT INTEGRATION_MAILHOG_PORT
 
 INTEGRATION_API_URL="http://localhost:${INTEGRATION_HOST_PORT}"
 
 compose() {
   docker compose -f "$COMPOSE_FILE" "$@"
+}
+
+# Runs a mongosh script; extra args go to `compose exec` (e.g. `-e NAME=value`).
+# Via --eval, not stdin: on stdin mongosh survives an uncaught error and exits 0.
+mongo_script() {
+  local file="$1"
+  shift
+  compose exec -T "$@" mongo mongosh --quiet 'mongodb://root:vocdoni@localhost:27017/admin' --eval "$(cat "$file")" >&2
+}
+
+# Prints Python expression $1 over the JSON on stdin (as `d`), or nothing when
+# the body is not JSON or the expression fails, so a missing field is not a zero.
+json_get() {
+  python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print($1)
+except Exception:
+    pass
+" 2>/dev/null || true
 }
 
 # True (exit 0) if nothing is listening on 127.0.0.1:$1. Uses bash's built-in
@@ -89,6 +109,11 @@ wait_api_ready() {
 }
 
 cmd_up() {
+  # NumberLong silently turns "1e5" into 1 and wraps past int64: digits only.
+  if ! [[ "$INTEGRATION_WALLET_CENTS" =~ ^[1-9][0-9]{0,17}$ ]]; then
+    echo "ERROR: INTEGRATION_WALLET_CENTS must be a positive whole number of cents, got '$INTEGRATION_WALLET_CENTS'" >&2
+    exit 1
+  fi
   if ! port_is_free "$INTEGRATION_HOST_PORT"; then
     echo "ERROR: host port $INTEGRATION_HOST_PORT is already in use. Set INTEGRATION_HOST_PORT to a free port and retry, e.g. INTEGRATION_HOST_PORT=$((INTEGRATION_HOST_PORT + 10000))." >&2
     exit 1
@@ -110,7 +135,7 @@ cmd_up() {
   wait_container_healthy vocone 450
 
   echo "== seeding default plan" >&2
-  compose exec -T mongo mongosh --quiet 'mongodb://root:vocdoni@localhost:27017/admin' <"$SEED_FILE"
+  mongo_script "$SEED_FILE"
 
   echo "== waiting for api to answer /ping" >&2
   wait_api_ready 60
@@ -124,15 +149,7 @@ cmd_up() {
     echo "ERROR: GET $INTEGRATION_API_URL/plans did not respond — the api container is not serving. This is NOT a seed problem; check the api logs." >&2
     exit 1
   fi
-  PLANS_COUNT=$(printf '%s' "$PLANS_JSON" | python3 -c "
-import sys, json
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    print(0)
-else:
-    print(len(d) if isinstance(d, list) else 0)
-" 2>/dev/null || echo 0)
+  PLANS_COUNT=$(printf '%s' "$PLANS_JSON" | json_get "len(d) if isinstance(d, list) else 0")
   if [ "${PLANS_COUNT:-0}" -lt 1 ] 2>/dev/null; then
     echo "plan seed did not take — check db.Plan bson tags against integration/seed-plan.js" >&2
     exit 1
@@ -152,28 +169,37 @@ else:
   fi
 
   echo "== funding integrator wallet with $INTEGRATION_WALLET_CENTS cents" >&2
-  compose exec -T -e ORG_ADDRESS="$INTEGRATOR_ORG_ADDRESS" -e WALLET_CENTS="$INTEGRATION_WALLET_CENTS" \
-    mongo mongosh --quiet 'mongodb://root:vocdoni@localhost:27017/admin' <"$WALLET_SEED_FILE" >&2
+  mongo_script "$WALLET_SEED_FILE" -e ORG_ADDRESS="$INTEGRATOR_ORG_ADDRESS" -e WALLET_CENTS="$INTEGRATION_WALLET_CENTS"
 
   echo "== asserting the wallet seed took" >&2
-  # Read back through the API with the integrator key, so this proves the
-  # backend decodes the seeded document as this integrator's wallet — not just
-  # that mongo accepted a write.
-  WALLET_JSON=$(curl -fsS -m 10 -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL/wallet" || echo "")
-  if [ -z "$WALLET_JSON" ]; then
-    echo "ERROR: GET $INTEGRATION_API_URL/wallet did not respond — the api container is not serving or rejected the key. This is NOT a seed problem; check the api logs." >&2
-    exit 1
-  fi
-  WALLET_CENTS_READ=$(printf '%s' "$WALLET_JSON" | python3 -c "
-import sys, json
-try:
-    print(int(json.load(sys.stdin).get('balanceCents', 0)))
-except Exception:
-    print(0)
-" 2>/dev/null || echo 0)
-  if [ "${WALLET_CENTS_READ:-0}" != "$INTEGRATION_WALLET_CENTS" ]; then
-    echo "wallet seed did not take (API reports ${WALLET_CENTS_READ:-0} cents) — check db.Wallet bson tags against integration/seed-wallet.js" >&2
-    exit 1
+  # Read back through the API, proving the backend sees the seed as this integrator's wallet.
+  local wallet_body wallet_status
+  wallet_body=$(mktemp)
+  wallet_status=$(curl -sS -m 10 -o "$wallet_body" -w '%{http_code}' \
+    -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL/wallet" || echo "000")
+  WALLET_JSON=$(cat "$wallet_body")
+  rm -f "$wallet_body"
+  case "$wallet_status" in
+    200) ;;
+    404)
+      # Wallets arrived in saas-backend#706; an older SAAS_BACKEND_IMAGE has nothing to fund.
+      echo "   GET /wallet is 404: this saas-backend predates integrator wallets; skipping the check" >&2
+      ;;
+    *)
+      echo "ERROR: GET $INTEGRATION_API_URL/wallet answered HTTP $wallet_status — the api container is not serving or rejected the key. This is NOT a seed problem; check the api logs." >&2
+      exit 1
+      ;;
+  esac
+  if [ "$wallet_status" = 200 ]; then
+    WALLET_CENTS_READ=$(printf '%s' "$WALLET_JSON" | json_get "int(d['balanceCents'])")
+    if [ -z "$WALLET_CENTS_READ" ]; then
+      echo "ERROR: GET /wallet has no integer balanceCents (body: $WALLET_JSON) — the API response changed shape; this is NOT a seed problem." >&2
+      exit 1
+    fi
+    if [ "$WALLET_CENTS_READ" != "$INTEGRATION_WALLET_CENTS" ]; then
+      echo "wallet seed did not take (API reports $WALLET_CENTS_READ cents) — check db.Wallet bson tags against integration/seed-wallet.js" >&2
+      exit 1
+    fi
   fi
 
   echo "INTEGRATION_API_URL=$INTEGRATION_API_URL"
