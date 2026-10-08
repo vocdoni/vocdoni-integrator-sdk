@@ -4,7 +4,7 @@ import { bytesToHex } from '@noble/hashes/utils'
 import {
   auditElectionMetadata,
   auditProcessMetadata,
-  getListedQuestionElections,
+  getElectionChildren,
   hasIntegrityIssues,
   hasMetadataUpdates,
 } from './audit'
@@ -94,7 +94,6 @@ describe('auditElectionMetadata', () => {
         timestamp: new Date('2026-01-01T10:00:00Z'),
         status: 'verified',
         changes: null,
-        questionElections: null,
       },
     ])
   })
@@ -200,40 +199,6 @@ describe('auditElectionMetadata', () => {
     expect(hasIntegrityIssues(audit)).toBe(false)
   })
 
-  it('reads the question elections a parent election lists from its latest trusted version', async () => {
-    const parentV1 = JSON.stringify({ ...baseMetadata, questions: [], meta: { questionElections: ['0xAB01', 'ab02'] } })
-    const parentV2 = JSON.stringify({ ...baseMetadata, questions: [], meta: { questionElections: ['ab01', 'ab03'] } })
-    const fetchImpl = createFetch({
-      [historyUrl]: {
-        body: JSON.stringify({
-          versions: [
-            version('https://store.example/p1', parentV1),
-            // Recorded with another hash than the document served, so its list is not trusted.
-            version('https://store.example/p2', 'something else'),
-          ],
-        }),
-      },
-      'https://store.example/p1': { body: parentV1 },
-      'https://store.example/p2': { body: parentV2 },
-    })
-
-    const audit = await auditElectionMetadata(ELECTION_ID, options(fetchImpl))
-
-    expect(audit.versions.map((entry) => entry.questionElections)).toEqual([['ab01', 'ab02'], null])
-    expect(getListedQuestionElections(audit)).toEqual(['ab01', 'ab02'])
-  })
-
-  it('reports no listed question elections for a document without the list', async () => {
-    const fetchImpl = createFetch({
-      [historyUrl]: { body: JSON.stringify({ versions: [version('https://store.example/v1', v1)] }) },
-      'https://store.example/v1': { body: v1 },
-    })
-
-    const audit = await auditElectionMetadata(ELECTION_ID, options(fetchImpl))
-
-    expect(getListedQuestionElections(audit)).toBeNull()
-  })
-
   it('reports the history as unavailable when the gateway cannot serve it', async () => {
     const audit = await auditElectionMetadata(ELECTION_ID, options(createFetch({})))
 
@@ -247,21 +212,62 @@ describe('auditElectionMetadata', () => {
   })
 })
 
+describe('getElectionChildren', () => {
+  it('reads every page, oldest first', async () => {
+    const page = (n: number, ids: string[], nextPage: number | null) => ({
+      [`${GATEWAY}/elections/aa00/children?page=${n}&limit=100`]: {
+        body: JSON.stringify({
+          elections: ids.map((electionId) => ({ electionId, parentElectionId: 'AA00' })),
+          pagination: { totalItems: 3, currentPage: n, nextPage, lastPage: 1 },
+        }),
+      },
+    })
+    const fetchImpl = createFetch({ ...page(0, ['ab01', 'ab02'], 1), ...page(1, ['AB03'], null) })
+
+    expect(await getElectionChildren('0xaa00', options(fetchImpl))).toEqual([
+      { electionId: 'ab01', parentElectionId: 'aa00' },
+      { electionId: 'ab02', parentElectionId: 'aa00' },
+      { electionId: 'ab03', parentElectionId: 'aa00' },
+    ])
+  })
+})
+
 describe('auditProcessMetadata', () => {
   const PARENT_ID = 'aa00'
-  const parentDoc = JSON.stringify({ ...baseMetadata, questions: [], meta: { questionElections: ['0xAB02', 'ab01'] } })
+  const parentDoc = JSON.stringify({ ...baseMetadata, questions: [] })
   const questionDoc = JSON.stringify(baseMetadata)
   const history = (id: string, url: string, body: string) => ({
     [`${GATEWAY}/elections/${id}/metadata/history`]: { body: JSON.stringify({ versions: [version(url, body)] }) },
     [url]: { body },
   })
+  const election = (id: string, parentElectionId?: string) => ({
+    [`${GATEWAY}/elections/${id}`]: { body: JSON.stringify({ electionId: id, parentElectionId }) },
+  })
+  const children = (parentId: string, list: Array<[string, string?]>) => ({
+    [`${GATEWAY}/elections/${parentId}/children?page=0&limit=100`]: {
+      body: JSON.stringify({
+        elections: list.map(([electionId, parentElectionId]) => ({ electionId, parentElectionId })),
+        pagination: { totalItems: list.length, currentPage: 0, nextPage: null, lastPage: 0 },
+      }),
+    },
+  })
+  const histories = {
+    ...history(PARENT_ID, 'https://store.example/parent', parentDoc),
+    ...history('ab01', 'https://store.example/q1', questionDoc),
+    ...history('ab02', 'https://store.example/q2', questionDoc),
+    ...history('ab03', 'https://store.example/q3', questionDoc),
+  }
+  const summary = (audit: Awaited<ReturnType<typeof auditProcessMetadata>>) =>
+    audit.questions.map((q) => [q.electionId, q.available, q.child, q.inProcess, q.issues])
 
-  it('audits the parent first, then the question elections it lists, then any it does not list', async () => {
+  it('audits the parent first, then its children oldest first, then any process question it does not have', async () => {
     const fetchImpl = createFetch({
-      ...history(PARENT_ID, 'https://store.example/parent', parentDoc),
-      ...history('ab01', 'https://store.example/q1', questionDoc),
-      ...history('ab02', 'https://store.example/q2', questionDoc),
-      ...history('ab03', 'https://store.example/q3', questionDoc),
+      ...histories,
+      ...children(PARENT_ID, [
+        ['ab02', PARENT_ID],
+        ['ab01', PARENT_ID],
+      ]),
+      ...election('ab03', 'ffff'),
     })
 
     const audit = await auditProcessMetadata(
@@ -269,20 +275,47 @@ describe('auditProcessMetadata', () => {
       options(fetchImpl)
     )
 
+    expect(audit).toMatchObject({ parentElectionId: PARENT_ID, childrenAvailable: true })
     expect(audit.process).toMatchObject({ electionId: PARENT_ID, available: true })
-    expect(audit.questions.map((entry) => [entry.electionId, entry.available])).toEqual([
-      ['ab02', true],
-      ['ab01', true],
-      ['ab03', true],
+    expect(summary(audit)).toEqual([
+      ['ab02', true, true, false, ['not-in-process']],
+      ['ab01', true, true, true, []],
+      ['ab03', true, false, true, ['wrong-parent', 'not-a-child']],
     ])
   })
 
-  it('audits the questions alone for a process without a parent election', async () => {
-    const fetchImpl = createFetch(history('ab01', 'https://store.example/q1', questionDoc))
+  it('finds the parent through a question election when the process does not name it', async () => {
+    const fetchImpl = createFetch({
+      ...histories,
+      ...election('ab01', `0x${PARENT_ID.toUpperCase()}`),
+      ...children(PARENT_ID, [['ab01', PARENT_ID]]),
+    })
 
     const audit = await auditProcessMetadata({ questions: [{ upstreamId: 'ab01' }] }, options(fetchImpl))
 
-    expect(audit.process).toBeNull()
-    expect(audit.questions.map((entry) => entry.electionId)).toEqual(['ab01'])
+    expect(audit.parentElectionId).toBe(PARENT_ID)
+    expect(audit.process?.available).toBe(true)
+    expect(summary(audit)).toEqual([['ab01', true, true, true, []]])
+  })
+
+  it('leaves the children unknown, not missing, when the chain cannot list them', async () => {
+    const fetchImpl = createFetch({ ...histories, ...election('ab01', PARENT_ID) })
+
+    const audit = await auditProcessMetadata(
+      { upstreamId: PARENT_ID, questions: [{ upstreamId: 'ab01' }] },
+      options(fetchImpl)
+    )
+
+    expect(audit.childrenAvailable).toBe(false)
+    expect(summary(audit)).toEqual([['ab01', true, null, true, []]])
+  })
+
+  it('audits the questions alone for a process without a parent election', async () => {
+    const fetchImpl = createFetch({ ...history('ab01', 'https://store.example/q1', questionDoc), ...election('ab01') })
+
+    const audit = await auditProcessMetadata({ questions: [{ upstreamId: 'ab01' }] }, options(fetchImpl))
+
+    expect(audit).toMatchObject({ parentElectionId: null, process: null, childrenAvailable: false })
+    expect(summary(audit)).toEqual([['ab01', true, null, true, []]])
   })
 })

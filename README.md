@@ -48,9 +48,9 @@ auth, vote envelopes, ballot encryption), optional anonymous (ZK) voting, and a
 set of headless React providers and UI components.
 
 > The SDK talks **only** to the Vocdoni SaaS API — it never reaches the
-> blockchain directly. The one exception is `@vocdoni/metadata-verify`, which
-> reads the Vochain API on purpose: it checks the SaaS API's content against
-> what the chain committed.
+> blockchain directly. The one exception is `@vocdoni/metadata-verify`, whose
+> metadata history audit (and optional independent check) reads the Vochain API
+> on purpose.
 
 ## Packages
 

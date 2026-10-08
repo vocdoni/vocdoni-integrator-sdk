@@ -22,6 +22,7 @@ export {
   type MediaVerification,
   type ProcessVerification,
   type UrlOnlyMedium,
+  type VerifyOptions,
   verifyProcessMetadata,
 } from './verify'
 export {
@@ -30,10 +31,12 @@ export {
   type ElectionMetadataAudit,
   type MetadataHistoryEntry,
   type ProcessMetadataAudit,
+  type QuestionElectionAudit,
+  type QuestionLinkIssue,
   DEFAULT_AUDIT_TIMEOUT_MS,
   auditElectionMetadata,
   auditProcessMetadata,
-  getListedQuestionElections,
+  getElectionChildren,
   hasIntegrityIssues,
   hasMetadataUpdates,
 } from './audit'

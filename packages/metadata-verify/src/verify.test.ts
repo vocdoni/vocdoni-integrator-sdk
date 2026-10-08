@@ -33,11 +33,15 @@ type World = {
   files: Record<string, Uint8Array | Error>
 }
 
-/** A `fetch` serving the world: the Vochain API's election reads, and every other URL's bytes. */
+/**
+ * A `fetch` serving the world: the Vochain API's election reads, and every other URL's bytes.
+ * Every Vochain API request is recorded in `chainCalls`.
+ */
 const fetchFor =
-  (world: World, fetched: string[] = []): FetchLike =>
+  (world: World, fetched: string[] = [], chainCalls: string[] = []): FetchLike =>
   async (url) => {
     const electionsPrefix = `${GATEWAY}/elections/`
+    if (url.startsWith(GATEWAY)) chainCalls.push(url)
     if (url.startsWith(electionsPrefix)) {
       const info = world.chain[url.slice(electionsPrefix.length)]
       if (info instanceof Error) throw info
@@ -50,7 +54,26 @@ const fetchFor =
     return new Response(new Uint8Array(file))
   }
 
-const optionsFor = (world: World, fetched?: string[]) => ({ vochainApiUrl: GATEWAY, fetch: fetchFor(world, fetched) })
+/** What the SaaS API serves for `shown`: each election's metadata URL and hash, as the world committed them. */
+const withCommitments = (shown: DisplayedProcess, world: World): DisplayedProcess => {
+  const commitment = (id?: string) => {
+    const info = id ? world.chain[id] : undefined
+    return !info || info instanceof Error ? {} : { metadataURL: info.metadataURL, metadataHash: info.metadataHash }
+  }
+  return {
+    ...shown,
+    ...commitment(shown.upstreamId),
+    questions: shown.questions?.map((q) => ({ ...q, ...commitment(q.upstreamId) })),
+  }
+}
+
+/** The default mode: commitments from the SaaS API, no Vochain API configured at all. */
+const verify = (shown: DisplayedProcess, world: World, fetched?: string[]) =>
+  verifyProcessMetadata(withCommitments(shown, world), { fetch: fetchFor(world, fetched) })
+
+/** The independent mode: commitments from the Vochain API only. */
+const verifyIndependent = (shown: DisplayedProcess, world: World, fetched?: string[]) =>
+  verifyProcessMetadata(shown, { independent: true, vochainApiUrl: GATEWAY, fetch: fetchFor(world, fetched) })
 
 const ORG = '0a1b2c3d4e5f60718293a4b5c6d7e8f901234567'
 const PARENT = 'p0'
@@ -89,16 +112,13 @@ const choiceImageHashes = () => ({ [IMAGE]: nodeHash(imageBytes) })
 /** The parent election's document saas-backend writes for `process`. */
 const parentDoc = (
   process: DisplayedProcess,
-  {
-    mediaHashes = headerHashes(),
-    questionElections = (process.questions ?? []).map((q) => q.upstreamId),
-  }: { mediaHashes?: Record<string, string>; questionElections?: unknown } = {}
+  { mediaHashes = headerHashes() }: { mediaHashes?: Record<string, string> } = {}
 ) => ({
   title: process.title,
   version: '1.0',
   description: process.description,
   media: { header: process.header, streamUri: process.streamUri },
-  meta: { mediaHashes, questionElections },
+  meta: { mediaHashes },
   questions: [],
   type: { name: 'single-choice-multiquestion', properties: null },
 })
@@ -135,25 +155,29 @@ const committedWorld = (
     questionDocs = {},
     served = {},
     files = {},
-    organizations = {},
+    parents = {},
   }: {
     parent?: unknown
     /** Document committed for a question election, keyed by its id (default: `questionDoc`). */
     questionDocs?: Record<string, unknown>
     served?: Record<string, Uint8Array>
     files?: World['files']
-    organizations?: Record<string, string>
+    /** The parent a question election links to on chain, keyed by its id (default: the process's). */
+    parents?: Record<string, string | undefined>
   } = {}
 ): World => {
   const world: World = { chain: {}, files: { [HEADER]: headerBytes, [IMAGE]: imageBytes, ...files } }
-  const add = (id: string, url: string, doc: Uint8Array) => {
-    world.chain[id] = { organizationId: organizations[id] ?? ORG, metadataURL: url, metadataHash: nodeHash(doc) }
+  const add = (id: string, url: string, doc: Uint8Array, link: Partial<ChainElectionInfo>) => {
+    world.chain[id] = { organizationId: ORG, metadataURL: url, metadataHash: nodeHash(doc), ...link }
     world.files[url] = served[id] ?? doc
   }
-  if (process.upstreamId) add(process.upstreamId, PARENT_URL, encodeDoc(parent))
+  if (process.upstreamId) add(process.upstreamId, PARENT_URL, encodeDoc(parent), { metadataOnly: true })
   for (const q of process.questions ?? []) {
     if (q.upstreamId) {
-      add(q.upstreamId, questionUrl(q.upstreamId), encodeDoc(questionDocs[q.upstreamId] ?? questionDoc(q)))
+      const parentElectionId = q.upstreamId in parents ? parents[q.upstreamId] : process.upstreamId
+      add(q.upstreamId, questionUrl(q.upstreamId), encodeDoc(questionDocs[q.upstreamId] ?? questionDoc(q)), {
+        parentElectionId,
+      })
     }
   }
   return world
@@ -265,12 +289,11 @@ describe('localizedMatches', () => {
 })
 
 describe('compareProcessContent', () => {
-  it('verifies the process fields and the question list against a matching parent document', () => {
+  it('verifies the process fields against a matching parent document', () => {
     const process = shownProcess(['e1', 'e2'])
-    const fields = compareProcessContent(process, parentDoc(process), ['e1', 'e2'])
+    const fields = compareProcessContent(process, parentDoc(process))
 
     expect(fields.map((f) => f.field)).toEqual([
-      'question-list',
       'process-title',
       'process-description',
       'header',
@@ -287,22 +310,10 @@ describe('compareProcessContent', () => {
       streamUri: 'https://other.example/v',
     }
 
-    expect(mismatches(compareProcessContent(shown, parentDoc(process), ['e1']))).toEqual([
+    expect(mismatches(compareProcessContent(shown, parentDoc(process)))).toEqual([
       { field: 'process-description', status: 'mismatch' },
       { field: 'stream', status: 'mismatch' },
     ])
-  })
-
-  it('requires the exact question elections, in order', () => {
-    const process = shownProcess(['e1', 'e2'])
-    const listed = (questionElections: unknown, ids = ['e1', 'e2']) =>
-      compareProcessContent(process, parentDoc(process, { questionElections }), ids)[0].status
-
-    expect(listed(['E1', '0xe2'])).toBe('verified')
-    expect(listed(['e2', 'e1'])).toBe('mismatch')
-    expect(listed(['e1'])).toBe('mismatch')
-    expect(listed(['e1', 'e2', 'e3'])).toBe('mismatch')
-    expect(listed(null)).toBe('mismatch')
   })
 })
 
@@ -389,7 +400,7 @@ describe('verifyProcessMetadata', () => {
     const parent = parentDoc(process, { mediaHashes: { [HEADER]: nodeHash(headerBytes).toUpperCase() } })
     const world = committedWorld(process, { parent })
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.status).toBe('verified')
     expect(result.process).toMatchObject({ electionId: PARENT, status: 'verified' })
@@ -410,7 +421,7 @@ describe('verifyProcessMetadata', () => {
     const process = shownProcess()
     const fetched: string[] = []
 
-    const result = await verifyProcessMetadata(process, optionsFor(committedWorld(process), fetched))
+    const result = await verify(process, committedWorld(process), fetched)
 
     expect(fetched).not.toContain(VIDEO)
     expect(result.media.map((m) => m.url)).not.toContain(VIDEO)
@@ -421,7 +432,7 @@ describe('verifyProcessMetadata', () => {
     const process = shownProcess()
     const parent = parentDoc(process, { mediaHashes: {} })
 
-    const result = await verifyProcessMetadata(process, optionsFor(committedWorld(process, { parent })))
+    const result = await verify(process, committedWorld(process, { parent }))
 
     expect(result.status).toBe('mismatch')
     expect(result.media[0]).toEqual({ coverage: 'content', url: HEADER, committed: true, status: 'mismatch', reason: 'not-listed' })
@@ -433,7 +444,7 @@ describe('verifyProcessMetadata', () => {
     const parent = parentDoc(process, { mediaHashes: { ...headerHashes(), ...choiceImageHashes() } })
     const questionDocs = { e1: questionDoc(process.questions![0], { mediaHashes: {} }) }
 
-    const result = await verifyProcessMetadata(process, optionsFor(committedWorld(process, { parent, questionDocs })))
+    const result = await verify(process, committedWorld(process, { parent, questionDocs }))
 
     expect(result.status).toBe('mismatch')
     expect(result.media[1]).toEqual({ coverage: 'content', url: IMAGE, committed: true, status: 'mismatch', reason: 'not-listed' })
@@ -443,7 +454,7 @@ describe('verifyProcessMetadata', () => {
     const process = shownProcess()
     const world = committedWorld(process, { files: { [IMAGE]: encode('another photo') } })
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.status).toBe('mismatch')
     expect(result.media[1]).toMatchObject({ url: IMAGE, status: 'mismatch' })
@@ -455,7 +466,7 @@ describe('verifyProcessMetadata', () => {
     const world = committedWorld(process)
     world.chain.e1 = { organizationId: ORG, metadataURL: questionUrl('e1') }
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.media[1]).toEqual({ coverage: 'content', url: IMAGE, committed: false, status: 'unverifiable', reason: 'not-committed' })
   })
@@ -466,7 +477,7 @@ describe('verifyProcessMetadata', () => {
     const shown = shownProcess()
     shown.questions![0].choices![0].title = { default: 'Mallory', es: 'Alicia' }
 
-    const result = await verifyProcessMetadata(shown, optionsFor(world))
+    const result = await verify(shown, world)
 
     expect(result.status).toBe('mismatch')
     expect(result.documents[0].status).toBe('mismatch')
@@ -477,37 +488,81 @@ describe('verifyProcessMetadata', () => {
     const process = shownProcess()
     const world = committedWorld(process)
 
-    const result = await verifyProcessMetadata({ ...process, title: { default: 'Other' } }, optionsFor(world))
+    const result = await verify({ ...process, title: { default: 'Other' } }, world)
 
     expect(result.status).toBe('mismatch')
     expect(mismatches(result.process.fields)).toEqual([{ field: 'process-title', status: 'mismatch' }])
   })
 
-  it('reports a mismatch when the parent lists other question elections', async () => {
+  it('reads no Vochain API in the default mode, and checks the SaaS-provided hashes', async () => {
     const process = shownProcess(['e1', 'e2'])
-    const world = committedWorld(process, { parent: parentDoc(process, { questionElections: ['e1'] }) })
+    const world = committedWorld(process)
+    const chainCalls: string[] = []
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verifyProcessMetadata(withCommitments(process, world), {
+      vochainApiUrl: GATEWAY,
+      fetch: fetchFor(world, [], chainCalls),
+    })
 
-    expect(result.status).toBe('mismatch')
-    expect(mismatches(result.process.fields)).toEqual([{ field: 'question-list', status: 'mismatch' }])
+    expect(result.status).toBe('verified')
+    expect(chainCalls).toEqual([])
+    expect(result.process.fields?.map((f) => f.field)).not.toContain('parent-link')
   })
 
-  it('reports a mismatch when the parent belongs to another organization', async () => {
+  it('reports a mismatch when the SaaS API serves a hash the document does not have', async () => {
     const process = shownProcess()
-    const world = committedWorld(process, { organizations: { [PARENT]: 'ffffffffffffffffffffffffffffffffffffffff' } })
+    const world = committedWorld(process)
+    const shown = withCommitments(process, world)
+    shown.questions![0].metadataHash = 'ab'.repeat(32)
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verifyProcessMetadata(shown, { fetch: fetchFor(world) })
 
     expect(result.status).toBe('mismatch')
-    expect(mismatches(result.process.fields)).toEqual([{ field: 'organization', status: 'mismatch' }])
+    expect(result.documents[0]).toMatchObject({ status: 'mismatch', expectedHash: 'ab'.repeat(32) })
   })
 
-  it('accepts the same organization written differently', async () => {
-    const process = shownProcess()
-    const world = committedWorld(process, { organizations: { [PARENT]: `0x${ORG.toUpperCase()}` } })
+  it('reads the commitments from the chain in independent mode, ignoring the SaaS-provided ones', async () => {
+    const process = shownProcess(['e1', 'e2'])
+    const world = committedWorld(process)
+    const shown = withCommitments(process, world)
+    shown.questions![0].metadataHash = 'ab'.repeat(32)
+    const chainCalls: string[] = []
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verifyProcessMetadata(shown, {
+      independent: true,
+      vochainApiUrl: GATEWAY,
+      fetch: fetchFor(world, [], chainCalls),
+    })
+
+    expect(result.status).toBe('verified')
+    expect(chainCalls).toHaveLength(3)
+    expect(result.process.fields?.find((f) => f.field === 'parent-link')?.status).toBe('verified')
+  })
+
+  it('reports a mismatch in independent mode when a question election links to another parent', async () => {
+    const process = shownProcess(['e1', 'e2'])
+    const world = committedWorld(process, { parents: { e2: 'ffff' } })
+
+    const result = await verifyIndependent(process, world)
+
+    expect(result.status).toBe('mismatch')
+    expect(mismatches(result.process.fields)).toEqual([{ field: 'parent-link', status: 'mismatch' }])
+  })
+
+  it('reports a mismatch in independent mode when a question election links to no parent', async () => {
+    const process = shownProcess()
+    const world = committedWorld(process, { parents: { e1: undefined } })
+
+    const result = await verifyIndependent(process, world)
+
+    expect(mismatches(result.process.fields)).toEqual([{ field: 'parent-link', status: 'mismatch' }])
+  })
+
+  it('accepts in independent mode the parent id written differently', async () => {
+    const process = shownProcess(['e1'], 'ab01')
+    const world = committedWorld(process, { parents: { e1: '0xAB01' } })
+
+    const result = await verifyIndependent(process, world)
 
     expect(result.status).toBe('verified')
   })
@@ -516,12 +571,11 @@ describe('verifyProcessMetadata', () => {
     const process = shownProcess(['e1'], null)
     const world = committedWorld(process, { files: { [HEADER]: headerBytes } })
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.status).toBe('verified')
     expect(result.process).toMatchObject({ status: 'unverifiable', reason: 'no-parent' })
     expect(result.process.fields?.map((f) => [f.field, f.status])).toEqual([
-      ['question-list', 'unverifiable'],
       ['process-title', 'unverifiable'],
       ['process-description', 'unverifiable'],
       ['header', 'unverifiable'],
@@ -537,11 +591,11 @@ describe('verifyProcessMetadata', () => {
     const tampered = encodeDoc(parentDoc(process, { mediaHashes: { [HEADER]: nodeHash(encode('other header')) } }))
     const world = committedWorld(process, { served: { [PARENT]: tampered }, files: { [HEADER]: headerBytes } })
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.status).toBe('mismatch')
     expect(result.process.status).toBe('mismatch')
-    expect(result.process.fields?.map((f) => f.field)).toEqual(['organization'])
+    expect(result.process.fields).toBeUndefined()
     expect(result.media[0]).toEqual({
       coverage: 'content',
       url: HEADER,
@@ -555,7 +609,7 @@ describe('verifyProcessMetadata', () => {
     const process = shownProcess()
     const world = committedWorld(process, { served: { e1: encode('something else') } })
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.status).toBe('mismatch')
     expect(result.documents[0]).toMatchObject({ status: 'mismatch' })
@@ -567,7 +621,7 @@ describe('verifyProcessMetadata', () => {
     const parent = parentDoc(process, { mediaHashes: { [HEADER]: nodeHash(encode('original header')) } })
     const world = committedWorld(process, { parent })
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.status).toBe('mismatch')
     expect(result.media[0]).toMatchObject({ url: HEADER, status: 'mismatch', actualHash: nodeHash(headerBytes) })
@@ -577,7 +631,7 @@ describe('verifyProcessMetadata', () => {
     const process = shownProcess()
     const world = committedWorld(process, { files: { [HEADER]: new TypeError('Failed to fetch') } })
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.status).toBe('verified')
     expect(result.media[0]).toMatchObject({ status: 'unverifiable', reason: 'fetch-failed' })
@@ -592,7 +646,7 @@ describe('verifyProcessMetadata', () => {
     }
     const process = { ...shownProcess(), header: undefined, streamUri: undefined, questions: [{ upstreamId: 'e1' }] }
 
-    const result = await verifyProcessMetadata(process, optionsFor(world, fetched))
+    const result = await verify(process, world, fetched)
 
     expect(result.status).toBe('no-hash')
     expect(fetched).toEqual([])
@@ -601,12 +655,12 @@ describe('verifyProcessMetadata', () => {
   it('skips questions that are not published', async () => {
     const process = { ...shownProcess([], null), questions: [{ title: { default: 'Draft' } }] }
 
-    const result = await verifyProcessMetadata(process, optionsFor({ chain: {}, files: {} }))
+    const result = await verify(process, { chain: {}, files: {} })
 
     expect(result.documents).toEqual([])
   })
 
-  it('reports unverifiable when the chain or a document cannot be read', async () => {
+  it('reports unverifiable in independent mode when the chain or a document cannot be read', async () => {
     const world: World = {
       chain: {
         e1: new Error('gateway down'),
@@ -616,7 +670,7 @@ describe('verifyProcessMetadata', () => {
       files: { [questionUrl('e2')]: new ResourceTooLargeError(questionUrl('e2')) },
     }
 
-    const result = await verifyProcessMetadata(shownProcess(['e1', 'e2', 'e3'], null), optionsFor(world))
+    const result = await verifyIndependent(shownProcess(['e1', 'e2', 'e3'], null), world)
 
     expect(result.status).toBe('unverifiable')
     expect(result.documents.map((d) => d.reason)).toEqual(['chain-unavailable', 'too-large', 'unsupported-url'])
@@ -627,7 +681,7 @@ describe('verifyProcessMetadata', () => {
     const world = committedWorld(process)
     world.chain.e2 = { organizationId: ORG, metadataURL: questionUrl('e2') }
 
-    const result = await verifyProcessMetadata(process, optionsFor(world))
+    const result = await verify(process, world)
 
     expect(result.status).toBe('unverifiable')
   })
@@ -654,7 +708,7 @@ describe('url-only coverage', () => {
     process.questions![0].choices![0].meta!.description = `Chair since 2024. <img src="${CHOICE_EMBEDDED}">`
     const fetched: string[] = []
 
-    const result = await verifyProcessMetadata(process, optionsFor(committedWorld(process), fetched))
+    const result = await verify(process, committedWorld(process), fetched)
 
     expect(result.status).toBe('verified')
     expect(result.urlOnly).toEqual([
@@ -681,7 +735,7 @@ describe('url-only coverage', () => {
     const world = committedWorld(process)
     const shown = { ...process, description: { default: `Choose the chair. ![map](${EMBEDDED})` } }
 
-    const result = await verifyProcessMetadata(shown, optionsFor(world))
+    const result = await verify(shown, world)
 
     expect(result.status).toBe('mismatch')
     expect(result.urlOnly.find((medium) => medium.url === EMBEDDED)?.status).toBe('mismatch')
@@ -690,7 +744,7 @@ describe('url-only coverage', () => {
   it('leaves the video not verifiable for a process without a parent', async () => {
     const process = shownProcess(['e1'], null)
 
-    const result = await verifyProcessMetadata(process, optionsFor(committedWorld(process)))
+    const result = await verify(process, committedWorld(process))
 
     expect(result.urlOnly).toEqual([
       { url: VIDEO, kind: 'stream', coverage: 'url-only', field: 'stream', status: 'unverifiable' },

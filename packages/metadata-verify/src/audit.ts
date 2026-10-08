@@ -21,10 +21,11 @@ import {
   isRecord,
   normalizeHex,
   parseJson,
-  readQuestionElections,
+  sameHex,
   sha256Hex,
 } from './common'
 import { type MetadataChange, diffMetadata } from './diff'
+import { getChainElection } from './verify'
 
 /** One entry of the Vochain API's metadata history, as served. */
 export interface MetadataHistoryEntry {
@@ -61,11 +62,6 @@ export interface AuditedMetadataVersion {
    * null for the first version and whenever either side is unreadable or failed verification.
    */
   changes: MetadataChange[] | null
-  /**
-   * The question elections a parent election lists in `meta.questionElections`, in question
-   * order, normalized. Null when the document does not list any or could not be trusted.
-   */
-  questionElections: string[] | null
 }
 
 export interface ElectionMetadataAudit {
@@ -75,14 +71,43 @@ export interface ElectionMetadataAudit {
   versions: AuditedMetadataVersion[]
 }
 
-export interface ProcessMetadataAudit {
-  /** The parent election's audit; null for a process published without one. */
-  process: ElectionMetadataAudit | null
+/** How a question election's on-chain link disagrees with the process. */
+export type QuestionLinkIssue =
+  /** The chain links the election to another parent than the process's, or to none. */
+  | 'wrong-parent'
+  /** A question of the process that the chain does not list among the parent's children. */
+  | 'not-a-child'
+  /** A child of the parent on chain that the process does not show. */
+  | 'not-in-process'
+
+export interface QuestionElectionAudit extends ElectionMetadataAudit {
   /**
-   * The question elections the parent lists (its latest trusted version), in that order, then any
-   * question of the process it does not list, so a disagreement between the two shows.
+   * The parent the chain links the election to, normalized; absent when it links to none, null
+   * when the chain could not be read.
    */
-  questions: ElectionMetadataAudit[]
+  parentElectionId?: string | null
+  /** Listed among the parent's children on chain; null when that list could not be read. */
+  child: boolean | null
+  /** One of the process's questions. */
+  inProcess: boolean
+  issues: QuestionLinkIssue[]
+}
+
+export interface ProcessMetadataAudit {
+  /**
+   * The parent election: the process's `upstreamId` or, failing that, the parent a question
+   * election links to on chain. Null when there is none.
+   */
+  parentElectionId: string | null
+  /** The parent election's audit; null without a parent. */
+  process: ElectionMetadataAudit | null
+  /** False when the parent's children could not be read from the chain (or there is no parent). */
+  childrenAvailable: boolean
+  /**
+   * The parent's children on chain, oldest first, then any question of the process the chain does
+   * not list as one, so a disagreement between the two shows.
+   */
+  questions: QuestionElectionAudit[]
 }
 
 /** Per-request timeout when the caller sets none. */
@@ -147,7 +172,6 @@ export const auditMetadataVersions = async (
       timestamp: parseTimestamp(entry.timestamp),
       changes:
         previous && isComparable(previous) && comparable ? diffMetadata(previous.document, current.document) : null,
-      questionElections: comparable ? readQuestionElections(current.document) : null,
     }
   })
 }
@@ -173,13 +197,6 @@ export const auditElectionMetadata = async (
   }
 }
 
-/**
- * The question elections listed by the latest trusted version of a parent election's metadata, or
- * null when no version lists them.
- */
-export const getListedQuestionElections = (audit: ElectionMetadataAudit): string[] | null =>
-  [...audit.versions].reverse().find((version) => version.questionElections !== null)?.questionElections ?? null
-
 /** True when the election had at least one metadata update after the version it was created with. */
 export const hasMetadataUpdates = (audit: ElectionMetadataAudit): boolean => audit.versions.length > 1
 
@@ -193,19 +210,103 @@ export interface AuditedProcess {
   questions?: Array<{ upstreamId?: string }>
 }
 
+/** Page size for `GET /elections/{id}/children`: the Vochain API's maximum. */
+const CHILDREN_PAGE_SIZE = 100
+/** Upper bound on the pages read, so a misbehaving API cannot keep the audit looping. */
+const MAX_CHILDREN_PAGES = 100
+
 /**
- * Audits a process: its parent election first, then the question elections the parent lists on
- * chain, then any question of the process the parent does not list. Never rejects.
+ * The elections linked to `parentId` as their parent, oldest first, with the parent each one
+ * reports (normalized), read page by page from `GET /elections/{electionId}/children`.
+ */
+export const getElectionChildren = async (
+  parentId: string,
+  options: VochainOptions
+): Promise<Array<{ electionId: string; parentElectionId?: string }>> => {
+  const children: Array<{ electionId: string; parentElectionId?: string }> = []
+  for (let page = 0; page < MAX_CHILDREN_PAGES; page++) {
+    const body = await getVochainJson(
+      `elections/${electionPath(parentId)}/children?page=${page}&limit=${CHILDREN_PAGE_SIZE}`,
+      options
+    )
+    if (!isRecord(body)) throw new Error('unexpected children response')
+    const elections = asArray(body.elections).filter(isRecord)
+    for (const election of elections) {
+      const electionId = normalizeHex(typeof election.electionId === 'string' ? election.electionId : undefined)
+      const parentElectionId =
+        typeof election.parentElectionId === 'string' ? normalizeHex(election.parentElectionId) : undefined
+      if (electionId) children.push({ electionId, ...(parentElectionId ? { parentElectionId } : {}) })
+    }
+    const nextPage = isRecord(body.pagination) ? body.pagination.nextPage : undefined
+    if (typeof nextPage !== 'number' || nextPage <= page || elections.length === 0) break
+    page = nextPage - 1
+  }
+  return children
+}
+
+/** The parent an election links to on chain: absent for none, null when the chain could not be read. */
+const readParentLink = async (electionId: string, options: VochainOptions): Promise<string | null | undefined> => {
+  try {
+    return normalizeHex((await getChainElection(electionId, options)).parentElectionId)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Audits a process: the metadata history of its parent election first, then that of each of the
+ * parent's children on chain (`GET /elections/{id}/children`, oldest first), then of any question
+ * of the process the chain does not list as a child. Each question election reports how its
+ * on-chain link disagrees with the process (`issues`). The parent is the process's `upstreamId`
+ * or, failing that, the `parentElectionId` a question election links to. Never rejects.
  */
 export const auditProcessMetadata = async (
   process: AuditedProcess,
   options: VochainOptions
 ): Promise<ProcessMetadataAudit> => {
-  const processId = normalizeHex(process.upstreamId)
-  const processAudit = processId ? await auditElectionMetadata(processId, options) : null
-  const listed = (processAudit && getListedQuestionElections(processAudit)) ?? []
-  const shown = (process.questions ?? []).map((question) => normalizeHex(question.upstreamId))
-  const electionIds = [...new Set([...listed, ...shown])].filter((id): id is string => !!id && id !== processId)
-  const questions = await Promise.all(electionIds.map((electionId) => auditElectionMetadata(electionId, options)))
-  return { process: processAudit, questions }
+  const resolved = { timeoutMs: DEFAULT_AUDIT_TIMEOUT_MS, ...options }
+  const shown = [
+    ...new Set(
+      (process.questions ?? []).map((question) => normalizeHex(question.upstreamId)).filter((id): id is string => !!id)
+    ),
+  ]
+
+  const links = new Map<string, string | null | undefined>()
+  let parentId = normalizeHex(process.upstreamId) ?? null
+  if (!parentId) {
+    for (const id of shown) {
+      const link = await readParentLink(id, resolved)
+      links.set(id, link)
+      if (link) {
+        parentId = link
+        break
+      }
+    }
+  }
+
+  const [processAudit, children] = await Promise.all([
+    parentId ? auditElectionMetadata(parentId, resolved) : Promise.resolve(null),
+    parentId ? getElectionChildren(parentId, resolved).catch(() => null) : Promise.resolve(null),
+  ])
+  for (const child of children ?? []) links.set(child.electionId, child.parentElectionId)
+
+  const childIds = new Set((children ?? []).map((child) => child.electionId))
+  const electionIds = [...new Set([...childIds, ...shown])].filter((id) => id !== parentId)
+  const questions = await Promise.all(
+    electionIds.map(async (electionId): Promise<QuestionElectionAudit> => {
+      const [audit, parentElectionId] = await Promise.all([
+        auditElectionMetadata(electionId, resolved),
+        links.has(electionId) ? links.get(electionId) : readParentLink(electionId, resolved),
+      ])
+      const child = children ? childIds.has(electionId) : null
+      const inProcess = shown.includes(electionId)
+      const issues: QuestionLinkIssue[] = []
+      if (parentId && parentElectionId !== null && !sameHex(parentElectionId, parentId)) issues.push('wrong-parent')
+      if (child === false && inProcess) issues.push('not-a-child')
+      if (child && !inProcess) issues.push('not-in-process')
+      return { ...audit, parentElectionId, child, inProcess, issues }
+    })
+  )
+
+  return { parentElectionId: parentId, process: processAudit, childrenAvailable: !!children, questions }
 }

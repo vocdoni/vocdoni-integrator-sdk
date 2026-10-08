@@ -121,22 +121,6 @@ describe('diffMetadata', () => {
     ])
   })
 
-  it('reports a change of the question elections a parent election lists', () => {
-    const parent = (questionElections: string[]) => ({
-      ...baseMetadata,
-      questions: [],
-      meta: { ...baseMetadata.meta, questionElections },
-    })
-
-    expect(diffMetadata(parent(['0xAB01', 'ab02']), parent(['ab01', 'ab02']))).toEqual([])
-    expect(diffMetadata(parent(['ab01', 'ab02']), parent(['ab02', 'ab01']))).toEqual([
-      { field: 'questionElections', before: 'ab01\nab02', after: 'ab02\nab01' },
-    ])
-    expect(
-      diffMetadata(baseMetadata, { ...baseMetadata, meta: { ...baseMetadata.meta, questionElections: ['ab01'] } })
-    ).toEqual([{ field: 'questionElections', before: null, after: 'ab01' }])
-  })
-
   describe('choice description and images', () => {
     const alicePhoto = 'https://media.example/alice.png'
     const aliceThumb = 'https://media.example/alice-thumb.png'

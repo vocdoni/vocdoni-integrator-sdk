@@ -8,7 +8,6 @@ import {
   imageVariants,
   isRecord,
   readMediaHashes,
-  readQuestionElections,
   toLanguageMap,
 } from './common'
 
@@ -21,7 +20,6 @@ export type MetadataChangeField =
   | 'mediaHash'
   /** The header image's content hash. */
   | 'headerContent'
-  | 'questionElections'
   | 'questionTitle'
   | 'questionDescription'
   | 'choiceTitle'
@@ -115,7 +113,7 @@ const withoutAuditedChoiceFields = (choice: Record<string, unknown>) => {
 const withoutAuditedFields = (doc: Record<string, unknown>): unknown => ({
   ...omit(doc, ['title', 'description', 'media', 'meta', 'questions']),
   media: omit(doc.media, ['header', 'streamUri']),
-  meta: omit(doc.meta, ['mediaHashes', 'questionElections']),
+  meta: omit(doc.meta, ['mediaHashes']),
   questions: asArray(doc.questions).map((question) =>
     isRecord(question)
       ? {
@@ -131,8 +129,7 @@ const withoutAuditedFields = (doc: Record<string, unknown>): unknown => ({
 /**
  * Field-level differences between two election metadata documents: multi-language title and
  * description, header image and video URLs, media content hashes (header, choice images, any
- * other), the question elections a parent election lists, the title and description of every
- * question, and the title, description and image URLs of every choice. Anything else that
+ * other), the title and description of every question, and the title, description and image URLs of every choice. Anything else that
  * differs is reported as a single `other` change, so no difference goes unreported.
  */
 export const diffMetadata = (beforeDoc: unknown, afterDoc: unknown): MetadataChange[] => {
@@ -176,18 +173,6 @@ export const diffMetadata = (beforeDoc: unknown, afterDoc: unknown): MetadataCha
       mediaUrl: url,
       before: beforeHash,
       after: afterHash,
-    })
-  }
-
-  // A parent election lists its question elections; the list is fixed at publish time, so any
-  // change to it is notable and reported on its own.
-  const beforeElections = readQuestionElections(before)
-  const afterElections = readQuestionElections(after)
-  if ((beforeElections ?? []).join('\n') !== (afterElections ?? []).join('\n')) {
-    changes.push({
-      field: 'questionElections',
-      before: beforeElections?.length ? beforeElections.join('\n') : null,
-      after: afterElections?.length ? afterElections.join('\n') : null,
     })
   }
 

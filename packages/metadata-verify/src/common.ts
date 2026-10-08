@@ -13,7 +13,7 @@ export type HashCheck = 'verified' | 'mismatch' | 'unverifiable' | 'no-hash'
 
 /** Why a document or image could not be checked (or, for `not-listed`, why it failed). */
 export type UnverifiableReason =
-  /** The Vochain API could not be read. */
+  /** The Vochain API could not be read (independent mode and audits only). */
   | 'chain-unavailable'
   /** The URL is not http(s), so it cannot be fetched (e.g. `ipfs://`). */
   | 'unsupported-url'
@@ -139,12 +139,6 @@ export const readMediaHashes = (metadata: unknown): Record<string, string> => {
     if (normalized) hashes[url] = normalized
   }
   return hashes
-}
-
-/** `meta.questionElections` as normalized ids, or null when the document has no such list. */
-export const readQuestionElections = (metadata: unknown): string[] | null => {
-  const list = asRecord(asRecord(metadata).meta).questionElections
-  return Array.isArray(list) ? list.map((id) => (typeof id === 'string' ? (normalizeHex(id) ?? '') : '')) : null
 }
 
 export const defaultFetch: FetchLike = (url, init) => globalThis.fetch(url, init)

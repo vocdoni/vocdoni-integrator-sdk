@@ -2,20 +2,25 @@
  * Check of what a page shows (the voter view, the organizer view) against what the Vochain
  * committed.
  *
- * A SaaS process is published as a parent election, whose metadata document carries the
- * process title, description and media plus the ordered list of its question elections, and
- * one election per question, whose document carries that question and its choices. Images
+ * A SaaS process is published as a metadata-only parent election, whose document carries the
+ * process title, description and media, and one election per question, linked on chain to that
+ * parent (`parentElectionId`), whose document carries that question and its choices. Images
  * are covered by `meta.mediaHashes`: the header by the parent document's, each choice image
  * (default and thumbnail) by its question document's. The backend imports and hashes every
  * image, so an image a verified document does not list is a mismatch. A video is never
  * hashed, nor is an image embedded in a description's markdown or HTML: only their URLs are
  * covered, as part of the hashed text (`urlOnly` in the result).
+ *
+ * By default the committed hashes and URLs are the ones the SaaS API serves, and the Vochain
+ * API is not read at all: every vote carries both the question's and the parent's metadata
+ * hash and the chain rejects it unless they are the committed ones, so a SaaS API serving other
+ * hashes cannot get a vote counted for content the organizer did not commit. The `independent`
+ * mode reads the hashes, URLs and parent links from the Vochain API instead.
  */
 import {
   type FetchOptions,
   type HashCheck,
   type UnverifiableReason,
-  type VochainOptions,
   asArray,
   asRecord,
   compareHash,
@@ -29,7 +34,6 @@ import {
   normalizeHex,
   parseJson,
   readMediaHashes,
-  readQuestionElections,
   sameHex,
   sha256Hex,
   toLanguageMap,
@@ -50,10 +54,11 @@ export type ContentField =
   | 'choice-image'
   | 'header'
   | 'stream'
-  /** The parent election belongs to the same organization as the question elections. */
-  | 'organization'
-  /** The parent document lists exactly the question elections the page shows, in order. */
-  | 'question-list'
+  /**
+   * Independent mode only: every question election links on chain to the process's parent
+   * election (`parentElectionId`).
+   */
+  | 'parent-link'
 
 export interface FieldCheck {
   field: ContentField
@@ -129,7 +134,7 @@ export interface UrlOnlyMedium {
 export interface ProcessVerification {
   /** Headline: see {@link summarize}. */
   status: HashCheck
-  /** The parent election's document: process title, description, media and question list. */
+  /** The parent election's document: process title, description and media. */
   process: DocumentVerification
   /** One per published question, in the order shown. */
   documents: DocumentVerification[]
@@ -151,6 +156,10 @@ export interface DisplayedChoice {
 export interface DisplayedQuestion {
   /** On-chain election id; questions without one are not published and are skipped. */
   upstreamId?: string
+  /** URL of the question election's metadata document, as the SaaS API serves it. */
+  metadataURL?: string
+  /** SHA-256 the question election committed for that document, as the SaaS API serves it. */
+  metadataHash?: string
   title?: LocalizedValue
   description?: LocalizedValue
   choices?: DisplayedChoice[]
@@ -163,6 +172,10 @@ export interface DisplayedQuestion {
 export interface DisplayedProcess {
   /** On-chain id of the parent election; absent for processes published without one. */
   upstreamId?: string
+  /** URL of the parent election's metadata document, as the SaaS API serves it. */
+  metadataURL?: string
+  /** SHA-256 the parent election committed for that document, as the SaaS API serves it. */
+  metadataHash?: string
   title?: LocalizedValue
   description?: LocalizedValue
   header?: string
@@ -170,21 +183,44 @@ export interface DisplayedProcess {
   questions?: DisplayedQuestion[]
 }
 
-/** The Vochain API election fields this check reads. */
+/** Options of {@link verifyProcessMetadata}. */
+export type VerifyOptions = FetchOptions &
+  (
+    | {
+        /** Reads the committed hashes from the SaaS-provided content (default); the Vochain API is not used. */
+        independent?: false
+        vochainApiUrl?: string
+      }
+    | {
+        /** Reads the committed hashes, URLs and parent links from the Vochain API instead of the SaaS API. */
+        independent: true
+        vochainApiUrl: string
+      }
+  )
+
+/** An election's commitment: the metadata document's URL and hash, and its parent link. */
 export interface ChainElectionInfo {
   organizationId?: string
   metadataURL?: string
   metadataHash?: string
+  /** The metadata-only election this one links to as its parent. */
+  parentElectionId?: string
+  metadataOnly?: boolean
 }
 
-/** Reads an election's organization and committed metadata URL and hash from the Vochain API. */
-export const getChainElection = async (electionId: string, options: VochainOptions): Promise<ChainElectionInfo> => {
+/** Reads an election's commitment from the Vochain API (`GET /elections/{electionId}`). */
+export const getChainElection = async (
+  electionId: string,
+  options: FetchOptions & { vochainApiUrl: string }
+): Promise<ChainElectionInfo> => {
   const body = asRecord(await getVochainJson(`elections/${electionPath(electionId)}`, options))
-  const text = (value: unknown) => (typeof value === 'string' ? value : undefined)
+  const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined)
   return {
     organizationId: text(body.organizationId),
     metadataURL: text(body.metadataURL),
     metadataHash: text(body.metadataHash),
+    parentElectionId: text(body.parentElectionId),
+    metadataOnly: body.metadataOnly === true,
   }
 }
 
@@ -217,27 +253,16 @@ const check = (field: ContentField, matches: boolean, choice?: number): FieldChe
 })
 
 /** Process-level fields: what the parent election's document vouches for. */
-const PROCESS_FIELDS: ContentField[] = ['question-list', 'process-title', 'process-description', 'header', 'stream']
+const PROCESS_FIELDS: ContentField[] = ['process-title', 'process-description', 'header', 'stream']
 
 /**
  * Compares the process-level content the page shows (title, description, header, stream)
- * with the parent election's hash-verified metadata document, and the page's question
- * elections, in order, with the `meta.questionElections` list that document commits.
+ * with the parent election's hash-verified metadata document.
  */
-export const compareProcessContent = (
-  process: DisplayedProcess,
-  metadata: unknown,
-  questionElectionIds: string[]
-): FieldCheck[] => {
+export const compareProcessContent = (process: DisplayedProcess, metadata: unknown): FieldCheck[] => {
   const doc = asRecord(metadata)
   const media = asRecord(doc.media)
-  const listed = readQuestionElections(doc)
-  const listMatches =
-    !!listed &&
-    listed.length === questionElectionIds.length &&
-    listed.every((id, index) => sameHex(id, questionElectionIds[index]))
   return [
-    check('question-list', listMatches),
     check('process-title', localizedMatches(process.title, doc.title)),
     check('process-description', localizedMatches(process.description, doc.description)),
     check('header', sameText(process.header, media.header)),
@@ -307,31 +332,53 @@ interface FetchedDocument {
   verification: DocumentVerification
   /** The election commits a metadata hash, and with it the images its document lists. */
   committed: boolean
-  organizationId?: string
+  /** Independent mode: the parent the chain links the election to; null when the chain could not be read. */
+  parentElectionId?: string | null
   /** Parsed document (null when not JSON), only when its bytes match the committed hash. */
   metadata?: unknown
 }
 
-/** Reads an election from the chain and hash-checks the metadata document it commits. */
-const fetchDocument = async (electionId: string, options: VochainOptions): Promise<FetchedDocument> => {
-  let info: ChainElectionInfo
-  try {
-    info = await getChainElection(electionId, options)
-  } catch {
-    // Unknown whether it commits anything: treat it as committing, so nothing passes unchecked.
-    return { verification: { electionId, status: 'unverifiable', reason: 'chain-unavailable' }, committed: true }
+/**
+ * Resolves an election's commitment (from the SaaS-provided `shown` fields, or from the chain in
+ * independent mode) and hash-checks the metadata document it commits.
+ */
+const fetchDocument = async (
+  electionId: string,
+  shown: { metadataURL?: string; metadataHash?: string },
+  options: VerifyOptions
+): Promise<FetchedDocument> => {
+  let info: ChainElectionInfo = shown
+  if (options.independent) {
+    try {
+      info = await getChainElection(electionId, options)
+    } catch {
+      // Unknown whether it commits anything: treat it as committing, so nothing passes unchecked.
+      return {
+        verification: { electionId, status: 'unverifiable', reason: 'chain-unavailable' },
+        committed: true,
+        parentElectionId: null,
+      }
+    }
   }
+  return checkDocument(electionId, info, options)
+}
 
-  const { metadataURL, organizationId } = info
+const checkDocument = async (
+  electionId: string,
+  info: ChainElectionInfo,
+  options: FetchOptions
+): Promise<FetchedDocument> => {
+  const { metadataURL } = info
+  const linked = { parentElectionId: normalizeHex(info.parentElectionId) }
   const expectedHash = normalizeHex(info.metadataHash)
   const base = { electionId, metadataURL, expectedHash }
 
-  if (!expectedHash) return { verification: { ...base, status: 'no-hash' }, committed: false, organizationId }
+  if (!expectedHash) return { verification: { ...base, status: 'no-hash' }, committed: false, ...linked }
   if (!isFetchableUrl(metadataURL)) {
     return {
       verification: { ...base, status: 'unverifiable', reason: 'unsupported-url' },
       committed: true,
-      organizationId,
+      ...linked,
     }
   }
 
@@ -342,7 +389,7 @@ const fetchDocument = async (electionId: string, options: VochainOptions): Promi
     return {
       verification: { ...base, status: 'unverifiable', reason: fetchFailureReason(error) },
       committed: true,
-      organizationId,
+      ...linked,
     }
   }
 
@@ -353,7 +400,7 @@ const fetchDocument = async (electionId: string, options: VochainOptions): Promi
   return {
     verification: { ...base, actualHash, status },
     committed: true,
-    organizationId,
+    ...linked,
     // A verified document that is not valid JSON still gets compared (as an empty one), so
     // the page cannot pass as verified against content nobody can read.
     metadata: status === 'verified' ? (parseJson(bytes) ?? null) : undefined,
@@ -496,13 +543,11 @@ const urlOnlyMedia = (
 }
 
 /**
- * Verifies a process as the page shows it against the chain:
+ * Verifies a process as the page shows it against what its elections committed:
  *
  * - the parent election (the process's own `upstreamId`) commits the process-level document:
- *   title, description, header, stream, the header's hash and the ordered list of question
- *   elections. It must belong to the same organization as the question elections, or anyone
- *   could point a process at their own parent. A process published without one leaves those
- *   fields not verifiable;
+ *   title, description, header, stream and the header's hash. A process published without one
+ *   leaves those fields not verifiable;
  * - each published question's election commits that question's document: title,
  *   description and choices (title, value, description, image URLs);
  * - each displayed image is hashed against the `meta.mediaHashes` of the document that
@@ -510,19 +555,24 @@ const urlOnlyMedia = (
  * - the video and images embedded in descriptions are covered by URL only, as part of the
  *   document carrying them, and listed in `urlOnly`; they are never fetched.
  *
+ * The committed URLs and hashes are the SaaS-provided `metadataURL` / `metadataHash` of the
+ * process and of each question, and the Vochain API is not read. With `independent: true` they
+ * are read from the Vochain API instead, which also checks that every question election links
+ * to the parent (`parent-link`).
+ *
  * Never rejects: chain and network failures come back as `unverifiable` with a reason.
  */
 export const verifyProcessMetadata = async (
   process: DisplayedProcess,
-  options: VochainOptions
+  options: VerifyOptions = {}
 ): Promise<ProcessVerification> => {
   const published = (process.questions ?? []).filter(
     (question): question is DisplayedQuestion & { upstreamId: string } => !!question.upstreamId
   )
 
   const [parent, questions] = await Promise.all([
-    process.upstreamId ? fetchDocument(process.upstreamId, options) : Promise.resolve(undefined),
-    Promise.all(published.map((question) => fetchDocument(question.upstreamId, options))),
+    process.upstreamId ? fetchDocument(process.upstreamId, process, options) : Promise.resolve(undefined),
+    Promise.all(published.map((question) => fetchDocument(question.upstreamId, question, options))),
   ])
 
   const documents = questions.map(({ verification, metadata }, index) =>
@@ -530,33 +580,27 @@ export const verifyProcessMetadata = async (
   )
 
   let processVerification: DocumentVerification
-  if (!parent) {
+  if (!parent || !process.upstreamId) {
     processVerification = {
       status: 'unverifiable',
       reason: 'no-parent',
       fields: PROCESS_FIELDS.map((field): FieldCheck => ({ field, status: 'unverifiable' })),
     }
   } else {
-    const questionOrganizations = questions.map((q) => q.organizationId).filter((id): id is string => !!id)
-    const organization: FieldCheck =
-      !parent.organizationId || questionOrganizations.length === 0
-        ? { field: 'organization', status: 'unverifiable' }
-        : check(
-            'organization',
-            questionOrganizations.every((id) => sameHex(id, parent.organizationId))
-          )
-    const fields =
-      parent.metadata === undefined
-        ? [organization]
-        : [
-            organization,
-            ...compareProcessContent(
-              process,
-              parent.metadata,
-              published.map((question) => question.upstreamId)
-            ),
-          ]
-    processVerification = withFields(parent.verification, fields)
+    const parentId = process.upstreamId
+    const links = questions.map((question) => question.parentElectionId)
+    // The chain refuses a vote whose parent hash is not the linked parent's, so in the default
+    // mode the link is enforced through the vote; only the independent mode reads it.
+    const linkFields: FieldCheck[] = !options.independent
+      ? []
+      : links.length === 0 || links.some((link) => link === null)
+        ? [{ field: 'parent-link', status: 'unverifiable' }]
+        : [check('parent-link', links.every((link) => sameHex(link, parentId)))]
+    const fields = [
+      ...linkFields,
+      ...(parent.metadata === undefined ? [] : compareProcessContent(process, parent.metadata)),
+    ]
+    processVerification = fields.length ? withFields(parent.verification, fields) : parent.verification
   }
 
   const sourceOf = new Map<DisplayedQuestion, FetchedDocument>(

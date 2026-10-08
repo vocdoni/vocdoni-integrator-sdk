@@ -1,26 +1,31 @@
 # @vocdoni/metadata-verify
 
-Framework-agnostic verification of Vocdoni election metadata against the hashes committed on the
-Vochain: one implementation for the voter view, the organizer view and the voting report.
+Framework-agnostic verification of Vocdoni election metadata against the hashes its elections
+committed: one implementation for the voter view, the organizer view and the voting report.
 
 ## Purpose
 
-The SaaS API serves its own copy of a process. The Vochain commits, per election, the SHA-256 of
-its metadata document (`metadataHash`, lowercase hex of the exact bytes at `metadataURL`). This
-package fetches those documents from the **Vochain API**, checks their hashes, and compares them
-field by field with what a page shows. It has no runtime dependencies and uses WebCrypto and
-`fetch` (injectable). Results are structured codes; the app supplies the wording.
+A process is published as a metadata-only parent election plus one election per question,
+linked to it on chain. Each commits the SHA-256 of its metadata document (`metadataHash`,
+lowercase hex of the exact bytes at `metadataURL`), and every vote carries both the question's
+and the parent's hash, which the chain checks. This package fetches those documents, checks
+their hashes, and compares them field by field with what a page shows. It has no runtime
+dependencies and uses WebCrypto and `fetch` (injectable). Results are structured codes; the app
+supplies the wording.
 
 ## Public API
 
 ```typescript
-// Live check of the content a page shows (a process as the SaaS API returns it).
-verifyProcessMetadata(process: DisplayedProcess, options: VochainOptions): Promise<ProcessVerification>
+// Live check of the content a page shows (a process as the SaaS API returns it, with
+// metadataURL / metadataHash on the process and each question). No Vochain API request
+// unless `independent: true`.
+verifyProcessMetadata(process: DisplayedProcess, options?: VerifyOptions): Promise<ProcessVerification>
 
-// History audit: every metadata version, verified, diffed against the previous one.
+// History audit (reads the Vochain API): every metadata version of the parent and of each of
+// its children, verified and diffed against the previous one, plus parent-link issues.
 auditProcessMetadata(process: AuditedProcess, options: VochainOptions): Promise<ProcessMetadataAudit>
 auditElectionMetadata(electionId: string, options: VochainOptions): Promise<ElectionMetadataAudit>
-getListedQuestionElections(audit): string[] | null
+getElectionChildren(parentId: string, options: VochainOptions): Promise<Array<{ electionId: string; parentElectionId?: string }>>
 hasMetadataUpdates(audit): boolean
 hasIntegrityIssues(audit): boolean
 
@@ -35,8 +40,11 @@ sha256Hex(bytes: ArrayBuffer | Uint8Array): Promise<string>
 MAX_VERIFIABLE_BYTES // 25 MiB
 DEFAULT_AUDIT_TIMEOUT_MS // 15 s
 
-interface VochainOptions {
+type VerifyOptions = FetchOptions & ({ independent?: false } | { independent: true; vochainApiUrl: string })
+interface VochainOptions extends FetchOptions {
   vochainApiUrl: string // e.g. https://api-dev.vocdoni.net/v2
+}
+interface FetchOptions {
   fetch?: FetchLike // defaults to globalThis.fetch
   maxBytes?: number
   timeoutMs?: number
