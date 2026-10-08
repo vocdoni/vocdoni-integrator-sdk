@@ -512,6 +512,11 @@ export interface VotingProcessQuestion {
    */
   metadataHash?: string
   /**
+   * URL of the question's on-chain metadata document, the bytes
+   * {@link metadataHash} is the SHA-256 of. Absent when not published.
+   */
+  metadataURL?: string
+  /**
    * Live on-chain tally — resolved only on the single reads for published
    * questions; see {@link QuestionResults} for the list-endpoint caveat.
    */
@@ -708,6 +713,11 @@ export interface PublicQuestionResponse {
    * questions published without a hash), in which case the vote carries none.
    */
   metadataHash?: string
+  /**
+   * URL of the question's on-chain metadata document, the bytes
+   * {@link metadataHash} is the SHA-256 of. Absent when not published.
+   */
+  metadataURL?: string
   /**
    * Live on-chain tally, present for any published question — see
    * {@link QuestionResults}.

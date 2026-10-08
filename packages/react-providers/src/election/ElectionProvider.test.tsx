@@ -283,7 +283,7 @@ describe('ElectionProvider', () => {
         return HttpResponse.json({ ...mockProcess, id: params.id as string })
       }),
       http.post(`http://localhost/votes`, () =>
-        HttpResponse.json({ error: 'vote metadata hash is stale', code: 40999 }, { status: 409 }),
+        HttpResponse.json({ error: 'vote metadata changed', code: 40904 }, { status: 409 }),
       ),
     )
 

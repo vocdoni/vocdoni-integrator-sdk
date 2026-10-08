@@ -23,7 +23,7 @@ describe('stale election metadata', () => {
   it('turns a 409 metadata rejection of the vote relay into a StaleMetadataError', async () => {
     server.use(
       http.post(`${BASE_URL}/votes`, () =>
-        HttpResponse.json({ error: 'vote metadata hash is stale', code: 40999 }, { status: 409 }),
+        HttpResponse.json({ error: 'vote metadata changed', code: 40904 }, { status: 409 }),
       ),
     )
 
@@ -37,14 +37,14 @@ describe('stale election metadata', () => {
     expect(caught).toBeInstanceOf(StaleMetadataError)
     expect(caught).toBeInstanceOf(VocdoniApiError)
     expect((caught as StaleMetadataError).status).toBe(409)
-    expect((caught as StaleMetadataError).code).toBe(40999)
+    expect((caught as StaleMetadataError).code).toBe(40904)
     expect(isStaleMetadataError(caught)).toBe(true)
   })
 
-  it('keeps other 409s as plain VocdoniApiErrors', async () => {
+  it('keeps other 409s as plain VocdoniApiErrors, whatever their message says', async () => {
     server.use(
       http.post(`${BASE_URL}/votes`, () =>
-        HttpResponse.json({ error: 'resource already exists', code: 40901 }, { status: 409 }),
+        HttpResponse.json({ error: 'metadata already exists', code: 40901 }, { status: 409 }),
       ),
     )
 

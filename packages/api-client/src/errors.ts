@@ -31,9 +31,11 @@ export class StaleMetadataError extends VocdoniApiError {
   }
 }
 
-/** A 409 from the API whose message is about the election metadata. */
-const isStaleMetadataResponse = (status: number, message: string) =>
-  status === 409 && /metadata/i.test(message)
+/**
+ * API error code of `ErrVoteMetadataChanged` (HTTP 409): the vote relay found
+ * an envelope `metadataHash` that differs from the question's stored one.
+ */
+export const VOTE_METADATA_CHANGED_CODE = 40904
 
 export function handleError(err: unknown): never {
   if (isResponseError(err)) {
@@ -45,7 +47,7 @@ export function handleError(err: unknown): never {
         : err.message
     const code =
       data && typeof data.code === 'number' ? (data.code as number) : undefined
-    if (isStaleMetadataResponse(err.status, message)) {
+    if (err.status === 409 && code === VOTE_METADATA_CHANGED_CODE) {
       throw new StaleMetadataError(err.status, err.data, message, code)
     }
     throw new VocdoniApiError(err.status, err.data, message, code)
