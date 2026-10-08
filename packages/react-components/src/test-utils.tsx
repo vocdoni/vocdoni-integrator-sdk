@@ -11,6 +11,7 @@ import { render, type RenderOptions } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import type { ReactElement, ReactNode } from 'react'
 import { ComponentsProvider } from './components/context/ComponentsProvider'
+import type { MediaUrlResolver } from './components/context/media'
 import type { ComponentsPartialDefinition } from './components/context/types'
 import { createTestI18n } from './i18n/test-i18n'
 
@@ -22,6 +23,8 @@ const testI18n = createTestI18n()
 export interface RenderWithComponentsOptions extends Omit<RenderOptions, 'wrapper'> {
   /** Slot overrides — inject simple test slots to assert on the props a component emits. */
   components?: ComponentsPartialDefinition
+  /** The components context's media URL resolver (identity when omitted). */
+  resolveMediaUrl?: MediaUrlResolver
 }
 
 /**
@@ -33,11 +36,13 @@ export interface RenderWithComponentsOptions extends Omit<RenderOptions, 'wrappe
  */
 export function renderWithComponents(
   ui: ReactElement,
-  { components, ...options }: RenderWithComponentsOptions = {},
+  { components, resolveMediaUrl, ...options }: RenderWithComponentsOptions = {},
 ) {
   const Wrapper = ({ children }: { children: ReactNode }) => (
     <I18nextProvider i18n={testI18n}>
-      <ComponentsProvider components={components}>{children}</ComponentsProvider>
+      <ComponentsProvider components={components} resolveMediaUrl={resolveMediaUrl}>
+        {children}
+      </ComponentsProvider>
     </I18nextProvider>
   )
   return render(ui, { wrapper: Wrapper, ...options })
