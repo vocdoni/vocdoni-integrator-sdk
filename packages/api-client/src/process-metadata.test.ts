@@ -97,6 +97,21 @@ describe('process metadata', () => {
       expect(polls).toBe(2)
     })
 
+    it('rejects a completed job of another type', async () => {
+      server.use(
+        http.put(`${BASE_URL}/processes/${PROCESS_ID}/metadata`, () =>
+          HttpResponse.json({ jobId: 'meta-job' }, { status: 202 }),
+        ),
+        http.get(`${BASE_URL}/jobs/meta-job`, () =>
+          HttpResponse.json({ jobId: 'meta-job', type: 'publish_voting_process', status: 'completed' }),
+        ),
+      )
+
+      await expect(
+        client.elections.updateProcessMetadataAndWait(PROCESS_ID, METADATA, { intervalMs: 1 }),
+      ).rejects.toThrow('expected "set_process_metadata"')
+    })
+
     it('does not poll when a draft is updated in place', async () => {
       let polled = false
       server.use(

@@ -347,8 +347,8 @@ export class ElectionsClient {
 
   /**
    * {@link updateProcessMetadata}, waiting for the on-chain update of a
-   * published process to complete. Resolves once the new text is in effect;
-   * throws `JobFailedError` if the job fails.
+   * published process (a `set_process_metadata` job) to complete. Resolves
+   * once the new text is in effect; throws `JobFailedError` if the job fails.
    */
   async updateProcessMetadataAndWait(
     processId: string,
@@ -356,7 +356,7 @@ export class ElectionsClient {
     opts?: WaitForJobOptions,
   ): Promise<void> {
     const res = await this.updateProcessMetadata(processId, metadata)
-    if (res) await this.jobs.waitFor(res.jobId, opts)
+    if (res) await this.jobs.waitFor(res.jobId, { expectType: 'set_process_metadata', ...opts })
   }
 
   /**

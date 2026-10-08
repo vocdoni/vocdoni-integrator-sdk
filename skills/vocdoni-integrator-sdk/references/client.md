@@ -334,7 +334,8 @@ if (jobId) await client.jobs.waitFor(jobId)
 // (GET/PUT /processes/{id}/metadata). Questions and choices are matched by
 // position: the body must have exactly as many of each as the process (400
 // otherwise). A draft is updated in place (resolves undefined); a published
-// process is updated on chain, one tx per question (resolves { jobId }).
+// process is updated on chain, one tx per question (resolves { jobId } of a
+// `set_process_metadata` job).
 // Votes attesting the old text's metadata hash are then refused on chain.
 const text = await client.elections.getProcessMetadata(mongoId)
 text.questions[0].title = { default: 'Fixed typo' }

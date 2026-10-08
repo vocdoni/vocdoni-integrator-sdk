@@ -863,6 +863,7 @@ export type JobType =
   | 'relay_vote'
   | 'relay_votes'
   | 'publish_voting_process'
+  | 'set_process_metadata'
 
 /**
  * One envelope's outcome in a `relay_votes` batch job, index-aligned with the
