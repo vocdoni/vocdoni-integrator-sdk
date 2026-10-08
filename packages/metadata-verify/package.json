@@ -1,20 +1,22 @@
 {
-  "name": "@vocdoni/api-voting",
-  "version": "1.2.2",
+  "name": "@vocdoni/metadata-verify",
+  "version": "0.0.0",
   "license": "GPL-3.0-or-later",
-  "description": "Client-side voting for the Vocdoni SaaS API (CSP auth, vote envelope, encrypted ballots)",
+  "description": "Framework-agnostic verification of Vocdoni election metadata against the hashes committed on the Vochain",
   "keywords": [
     "vocdoni",
-    "voting",
-    "csp",
-    "encryption"
+    "vochain",
+    "election",
+    "metadata",
+    "verification",
+    "audit"
   ],
   "homepage": "https://github.com/vocdoni/vocdoni-integrator-sdk",
   "bugs": "https://github.com/vocdoni/vocdoni-integrator-sdk/issues",
   "repository": {
     "type": "git",
     "url": "https://github.com/vocdoni/vocdoni-integrator-sdk.git",
-    "directory": "packages/api-voting"
+    "directory": "packages/metadata-verify"
   },
   "type": "module",
   "files": [
@@ -28,14 +30,9 @@
     "prepack": "clean-package",
     "postpack": "mv -fv package.json.backup package.json"
   },
-  "dependencies": {
-    "@noble/curves": "^1.4.0",
-    "@noble/hashes": "^1.4.0",
-    "@vocdoni/api-types": "workspace:*",
-    "@vocdoni/proto": "1.18.0",
-    "tweetnacl": "^1.0.3"
-  },
   "devDependencies": {
+    "@noble/hashes": "^1.8.0",
+    "@vocdoni/api-types": "workspace:*",
     "tsconfig": "workspace:*",
     "tsdown": "^0.22.3",
     "typescript": "^5.7.0"

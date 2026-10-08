@@ -1,11 +1,11 @@
 ---
 name: vocdoni-integrator-sdk
-description: Use this skill whenever working with the Vocdoni Integrator SDK packages — @vocdoni/api-client, @vocdoni/api-voting, @vocdoni/react-providers, or @vocdoni/react-components. Triggers on imports from any of those packages, mentions of VocdoniApiClient, VotingClient, ProcessProvider, ElectionProvider, CSP auth flow, vote relay, encrypted ballots (secretUntilTheEnd), or any task like "cast a vote", "set up voting in React", "build the vote transaction", "poll a job". The SDK talks exclusively to the Vocdoni SaaS API — no direct blockchain access.
+description: Use this skill whenever working with the Vocdoni Integrator SDK packages — @vocdoni/api-client, @vocdoni/api-voting, @vocdoni/react-providers, @vocdoni/react-components, or @vocdoni/metadata-verify. Triggers on imports from any of those packages, mentions of VocdoniApiClient, VotingClient, ProcessProvider, ElectionProvider, CSP auth flow, vote relay, encrypted ballots (secretUntilTheEnd), or any task like "cast a vote", "set up voting in React", "build the vote transaction", "poll a job", "verify the election metadata", "audit metadata changes". The SDK talks exclusively to the Vocdoni SaaS API — no direct blockchain access, except the @vocdoni/metadata-verify history audit, which reads the Vochain API.
 ---
 
 # Vocdoni Integrator SDK
 
-A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-first approach. Everything goes through the Vocdoni SaaS API; the SDK never talks to the blockchain directly.
+A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-first approach. Everything goes through the Vocdoni SaaS API; the SDK never talks to the blockchain directly, except the `@vocdoni/metadata-verify` history audit (and its optional independent check), which reads the Vochain API.
 
 ## Packages at a glance
 
@@ -17,6 +17,7 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | `@vocdoni/api-voting-zk` | ZK/anonymous voting: SIK derivation, Groth16 proofs, circuit fetching |
 | `@vocdoni/react-providers` | Headless React context providers and hooks |
 | `@vocdoni/react-components` | Unstyled React UI components built on react-providers |
+| `@vocdoni/metadata-verify` | Verify shown election content against its committed hashes; audit metadata history on the Vochain |
 
 ## Common task → reference
 
@@ -32,6 +33,7 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | Add voting to a React app | `references/react.md` | — |
 | Manage election lifecycle (pause/end/cancel) | `references/react.md` + `references/client.md` | — |
 | ZK/anonymous voting | `references/zk-voting.md` | — |
+| Verify what a page shows against the chain, or audit metadata updates | `references/metadata-verify.md` | — |
 
 ## The vote flow in one minute
 
@@ -54,7 +56,9 @@ reads `chainId` and the questions directly:
                                                questions in ONE call (client.elections.signBatch; the
                                                single-question POST /processes/{id}/sign still exists)
    [repeat steps 5–6 for each votable question]
-5. buildVoteTransaction(...)                 → build + sign the protobuf tx locally
+5. buildVoteTransaction(...)                 → build + sign the protobuf tx locally; pass the
+                                               question's metadataHash and the process's as
+                                               parentMetadataHash (stale → isStaleMetadataError)
 6. POST /vote                                → relay tx → jobId
    GET  /jobs/{jobId}                        → poll until completed → voteID (nullifier)
 ```

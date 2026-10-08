@@ -6,6 +6,7 @@ export {
   buildVoteTransaction,
   encodeCaBundle,
   MAX_MEMO_BYTES,
+  METADATA_HASH_BYTES,
   type BuildVoteTransactionOptions,
   type CaBundleOptions,
 } from './vote-transaction'

@@ -2,8 +2,8 @@ import { decodeQuestionResults, questionReservesAbstain, tryInferQuestionBallotT
 import { questionsEndedAt, resolveEndDate } from '@vocdoni/api-client'
 import { format } from 'date-fns'
 import { ComponentPropsWithoutRef } from 'react'
+import { resolveMedia, useResolveMediaUrl } from '../context/media'
 import { useComponents } from '../context/useComponents'
-import { linkifyIpfs } from '../shared/ipfs'
 import { useReactComponentsLocalize } from '../../i18n/localize'
 import { useElection } from '@vocdoni/react-providers'
 import { resolveTitle } from '../../election/normalized'
@@ -18,6 +18,14 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
   const { election, status, results } = useElection()
   const localize = useReactComponentsLocalize()
   const { ElectionResults: Slot } = useComponents()
+  const resolveMediaUrl = useResolveMediaUrl()
+
+  // A choice image's slot props: the resolved URL, or the pending flag while
+  // the context's resolver reports it not ready.
+  const choiceImage = (url: string | undefined) => {
+    const media = resolveMedia(url, resolveMediaUrl)
+    return media.pending ? { image: undefined, imagePending: true } : { image: media.src }
+  }
 
   if (!election || status === 'CANCELED') return null
 
@@ -62,7 +70,7 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
           title: resolveTitle(choice.title),
           votes: '',
           percent: '',
-          image: linkifyIpfs(choice.meta?.image?.default),
+          ...choiceImage(choice.meta?.image?.default),
         })),
       }
     }
@@ -106,7 +114,7 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
             title: choice ? resolveTitle(choice.title) : String(row.choice),
             votes: String(row.votes),
             percent: formatPercent(row.percentage),
-            image: linkifyIpfs(image),
+            ...choiceImage(image),
           }
         }),
     }

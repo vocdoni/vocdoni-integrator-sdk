@@ -329,6 +329,26 @@ const { participants } = await client.elections.participants(mongoId, {
 const { added, jobId } = await client.elections.addCensusMembers(mongoId, ['m-1', 'm-2'])
 if (jobId) await client.jobs.waitFor(jobId)
 
+// Admin: read and edit the process TEXT and media (title, description, header,
+// streamUri, question/choice titles, and per choice an optional `meta`
+// { description?, image?: url | { default, thumbnail }, ...creator keys } that
+// replaces its extended info; omit it to keep it), drafts and published processes alike
+// (GET/PUT /processes/{id}/metadata). Questions and choices are matched by
+// position: the body must have exactly as many of each as the process (400
+// otherwise). A draft is updated in place (resolves undefined); a published
+// process is updated on chain, one tx per question (resolves { jobId } of a
+// `set_process_metadata` job).
+// Votes attesting the old text's metadata hash are then refused on chain.
+const text = await client.elections.getProcessMetadata(mongoId)
+text.questions[0].title = { default: 'Fixed typo' }
+// The txs can stay pending up to the mempool TTL (~15 min): poll with a long
+// timeout, not waitFor's 60 s default.
+const pending = await client.elections.updateProcessMetadata(mongoId, text)
+if (pending) await client.jobs.waitFor(pending.jobId, { timeoutMs: METADATA_UPDATE_TIMEOUT_MS })
+// Or: updateProcessMetadataAndWait(mongoId, text) — waits 16 min by default and
+// resolves to the job: result.questions[] / result.parent hold each election's
+// new { processId, metadataURL, metadataHash, status, error? }.
+
 // Admin: publish-readiness dry-run (GET /processes/{id}/validation).
 const { valid, errors } = await client.elections.validate(mongoId)
 
@@ -447,6 +467,13 @@ const { jobs, pagination } = await client.jobs.list({
 
 `JobFailedError` carries the full `JobStatusResponse` on `error.job`; its message
 joins `job.errors` when present.
+
+A vote refused because the ballot text changed after the voter read it (its
+envelope `metadataHash` no longer matches the election's) is recognized by
+`isStaleMetadataError(err)`: true for the relay's 409 code 40904 (`StaleMetadataError`, a
+`VocdoniApiError` subclass; nothing was relayed) and for a `JobFailedError` (or
+any error) carrying the chain's "does not match the election metadata hash"
+rejection. Reload the process, show the new ballot, and build the vote again.
 
 ---
 

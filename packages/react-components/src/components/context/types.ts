@@ -11,7 +11,13 @@ export type ElectionStatusBadgeSlotProps = BaseProps<HTMLSpanElement> & {
   label: string
   tone: 'success' | 'warning' | 'danger'
 }
-export type ElectionHeaderSlotProps = BaseProps<HTMLImageElement> & { src?: string; alt?: string }
+export type ElectionHeaderSlotProps = BaseProps<HTMLImageElement> & {
+  /** Header image URL, already passed through the context's `resolveMediaUrl`. */
+  src?: string
+  alt?: string
+  /** True when the election has a header image that is not ready yet: render a placeholder. */
+  pending?: boolean
+}
 export type QuestionsTypeBadgeSlotProps = BaseProps<HTMLDivElement> & { title: string; tooltip?: string }
 export type QuestionTipSlotProps = BaseProps<HTMLDivElement> & { text: string }
 export type QuestionsEmptySlotProps = BaseProps<HTMLDivElement> & { text: string }
@@ -63,7 +69,10 @@ export type ElectionResultChoice = {
   votes: string
   percent: string
   description?: string
+  /** Choice image URL, already passed through the context's `resolveMediaUrl`. */
   image?: string
+  /** True when the choice has an image that is not ready yet: render a placeholder. */
+  imagePending?: boolean
 }
 
 export type ElectionResultQuestion = {
@@ -189,11 +198,18 @@ export type QuestionChoiceSlotProps = BaseProps<HTMLLabelElement> & {
   value: string
   label: string
   description?: string
+  /**
+   * The choice's image sizes, already passed through the context's
+   * `resolveMediaUrl`. A size that is not ready yet is absent and `pending`
+   * is true: render a placeholder for it.
+   */
   image?: {
     default?: string
     thumbnail?: string
+    pending?: boolean
   }
   compact: boolean
+  /** True whenever the choice carries an image, including while it is pending. */
   hasImage: boolean
   canOpenImageModal: boolean
   dataAttrs?: { [key: string]: string | undefined }
@@ -227,11 +243,18 @@ export type QuestionRankChoiceSlotProps = BaseProps<HTMLLabelElement> & {
   value: string
   label: string
   description?: string
+  /**
+   * The choice's image sizes, already passed through the context's
+   * `resolveMediaUrl`. A size that is not ready yet is absent and `pending`
+   * is true: render a placeholder for it.
+   */
   image?: {
     default?: string
     thumbnail?: string
+    pending?: boolean
   }
   compact: boolean
+  /** True whenever the choice carries an image, including while it is pending. */
   hasImage: boolean
   canOpenImageModal: boolean
   dataAttrs?: { [key: string]: string | undefined }

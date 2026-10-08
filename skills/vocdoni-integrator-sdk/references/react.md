@@ -223,7 +223,7 @@ Casting is **phased** so a failure can never half-vote silently:
 1. **Pre-flight** — every question is validated up front (`upstreamId` present; `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
 2. **Resume check** — a fresh `elections.check()` marks questions already voted; they are skipped, so calling `vote()` again after a failure completes the remaining questions instead of dying on a double-vote.
 3. **Sign + build** — every remaining question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch` → `POST /processes/{id}/sign-batch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure.
-4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. If, on chain, some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`, and refreshes `voterQuestions`/`hasVoted` to the on-chain truth. Catch it and offer a retry — the next `vote()` call resumes.
+4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. If, on chain, some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`, and refreshes `voterQuestions`/`hasVoted` to the on-chain truth. Catch it and offer a retry — the next `vote()` call resumes. Every envelope attests its question's `metadataHash` and the process's (parent election's) `metadataHash` as `parentMetadataHash`; if either text changed since the process was read, the vote is refused, the provider refetches the process, and `isStaleMetadataError` (from `@vocdoni/api-client`) is true for the thrown error (or a `PartialVoteError` `failed[].error`): show the voter the updated ballot before letting them vote again.
 
 Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx built, batch not yet sent) → `confirming` (enqueued, awaiting the chain) → `confirmed` | `failed`.
 
@@ -422,6 +422,26 @@ value and the chain discards the whole ballot while still counting the envelope.
 
 Note that `<ElectionResults />` shows the **Borda score** for such a question, not a
 voter count — same as it already does for budget/quadratic amounts.
+
+**Media URL resolver** — `<ComponentsProvider resolveMediaUrl={fn}>` passes every
+election media URL (the `ElectionHeader` image, each choice's `image.default` and
+`image.thumbnail`, result choice images) through `fn: MediaUrlResolver =
+(url: string) => string | undefined` before rendering. `url` is exactly what the
+election metadata carries (`ipfs://…`, `https://…`); return the URL to render (e.g. a
+`blob:` URL of bytes you downloaded and hash-checked against the metadata), the URL
+unchanged for media you do not manage, or `undefined` while it is not ready. A
+pending image reaches slots as `pending` (`ElectionHeader`), `image.pending`
+(`QuestionChoice` / `QuestionRankChoice`, with `hasImage` still true so the layout
+does not shift) or `imagePending` (`ElectionResultChoice`); the default slots render
+a `<span data-media-pending role="img" aria-busy="true">` placeholder. Defaults to the
+identity. Components only re-render when the function changes, so pass a new one
+(e.g. `useCallback` keyed on your cache) whenever a resolution changes.
+`useResolveMediaUrl()` returns the current resolver for custom components.
+
+```tsx
+const resolveMediaUrl = useCallback((url: string) => verifiedBlobs[url], [verifiedBlobs])
+<ComponentsProvider resolveMediaUrl={resolveMediaUrl}>…</ComponentsProvider>
+```
 
 **Slot customization** — every component accepts a slot override for rendering:
 
