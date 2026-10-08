@@ -17,6 +17,7 @@ export {
 } from './election-status'
 export { VocdoniApiClient } from './client'
 export { ElectionsClient, ProcessesCspClient } from './elections'
-export { VocdoniApiError } from './errors'
+export { StaleMetadataError, VOTE_METADATA_CHANGED_CODE, VocdoniApiError } from './errors'
+export { isStaleMetadataError, isStaleMetadataMessage } from './stale-metadata'
 export { JobsClient, JobFailedError, type WaitForJobOptions } from './jobs'
 export { OrganizationsClient } from './organizations'

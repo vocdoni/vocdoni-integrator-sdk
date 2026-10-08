@@ -503,6 +503,20 @@ export interface VotingProcessQuestion {
    */
   encryptionKeys?: EncryptionKey[]
   /**
+   * SHA-256 of the exact bytes served at the question's on-chain metadata URL,
+   * as lowercase hex. Once committed on chain the Vochain rejects any vote
+   * whose envelope `metadataHash` differs, so a voter app passes this value,
+   * read from the same response it rendered the ballot from, to
+   * `buildVoteTransaction`. Absent while nothing is committed (drafts, and
+   * questions published without a hash), in which case the vote carries none.
+   */
+  metadataHash?: string
+  /**
+   * URL of the question's on-chain metadata document, the bytes
+   * {@link metadataHash} is the SHA-256 of. Absent when not published.
+   */
+  metadataURL?: string
+  /**
    * Live on-chain tally — resolved only on the single reads for published
    * questions; see {@link QuestionResults} for the list-endpoint caveat.
    */
@@ -605,6 +619,23 @@ export interface VotingProcessBase {
   description?: MultiLangString
   header?: string
   streamUri?: string
+  /**
+   * On-chain election id (hex) of the process's PARENT election, which holds
+   * the process-level text and media (title, description, header, streamUri)
+   * and no questions. It is not votable: votes go to each question's own
+   * {@link VotingProcessQuestion.upstreamId}. Absent until published.
+   */
+  upstreamId?: string
+  /** URL of the parent election's metadata document. Absent until published. */
+  metadataURL?: string
+  /**
+   * SHA-256 (lowercase hex) of the bytes served at {@link metadataURL}.
+   * Every question election links to the parent, so the Vochain rejects any
+   * vote whose envelope `parentMetadataHash` differs: pass this value to
+   * `buildVoteTransaction` as `parentMetadataHash`. Absent while nothing is
+   * committed, in which case the vote carries none.
+   */
+  metadataHash?: string
   census: CensusSpec
   questions: VotingProcessQuestion[]
   /**
@@ -690,6 +721,20 @@ export interface PublicQuestionResponse {
    * building an encrypted ballot.
    */
   encryptionKeys?: EncryptionKey[]
+  /**
+   * SHA-256 of the exact bytes served at the question's on-chain metadata URL,
+   * as lowercase hex. Once committed on chain the Vochain rejects any vote
+   * whose envelope `metadataHash` differs, so a voter app passes this value,
+   * read from the same response it rendered the ballot from, to
+   * `buildVoteTransaction`. Absent while nothing is committed (drafts, and
+   * questions published without a hash), in which case the vote carries none.
+   */
+  metadataHash?: string
+  /**
+   * URL of the question's on-chain metadata document, the bytes
+   * {@link metadataHash} is the SHA-256 of. Absent when not published.
+   */
+  metadataURL?: string
   /**
    * Live on-chain tally, present for any published question — see
    * {@link QuestionResults}.

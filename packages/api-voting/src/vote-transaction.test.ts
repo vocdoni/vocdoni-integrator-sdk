@@ -120,4 +120,47 @@ describe('buildVoteTransaction', () => {
     // 256 single-byte characters is exactly at the cap.
     expect(() => buildVoteTransaction({ ...base, memo: 'a'.repeat(256) })).not.toThrow()
   })
+
+  it('carries the metadata hash as raw envelope bytes, absent by default', () => {
+    const base = { processId: PROCESS_ID, choices: [1], chainId: CHAIN_ID, signer, cspSignature: CSP_SIG }
+    const hash = 'c0ffee'.repeat(10) + 'beef'
+
+    const { vote: without } = decodeVote(buildVoteTransaction(base))
+    expect(without.metadataHash).toBeUndefined()
+
+    const { vote: empty } = decodeVote(buildVoteTransaction({ ...base, metadataHash: '' }))
+    expect(empty.metadataHash).toBeUndefined()
+
+    const { vote: withHash } = decodeVote(buildVoteTransaction({ ...base, metadataHash: hash }))
+    expect(toHex(withHash.metadataHash!)).toBe(hash)
+
+    const { vote: prefixed } = decodeVote(buildVoteTransaction({ ...base, metadataHash: `0x${hash}` }))
+    expect(toHex(prefixed.metadataHash!)).toBe(hash)
+  })
+
+  it('rejects a metadata hash that is not 32 bytes', () => {
+    const base = { processId: PROCESS_ID, choices: [1], chainId: CHAIN_ID, signer, cspSignature: CSP_SIG }
+    expect(() => buildVoteTransaction({ ...base, metadataHash: 'ab'.repeat(31) })).toThrow('is 32')
+    expect(() => buildVoteTransaction({ ...base, parentMetadataHash: 'ab'.repeat(33) })).toThrow(
+      'Parent metadata hash is 33 bytes',
+    )
+  })
+
+  it('carries the parent metadata hash next to the question one, absent by default', () => {
+    const base = { processId: PROCESS_ID, choices: [1], chainId: CHAIN_ID, signer, cspSignature: CSP_SIG }
+    const hash = 'aa'.repeat(32)
+    const parent = 'bb'.repeat(32)
+
+    const { vote: without } = decodeVote(buildVoteTransaction({ ...base, metadataHash: hash }))
+    expect(without.parentMetadataHash).toBeUndefined()
+
+    const { vote: empty } = decodeVote(buildVoteTransaction({ ...base, parentMetadataHash: '' }))
+    expect(empty.parentMetadataHash).toBeUndefined()
+
+    const { vote: both } = decodeVote(
+      buildVoteTransaction({ ...base, metadataHash: hash, parentMetadataHash: `0x${parent}` }),
+    )
+    expect(toHex(both.metadataHash!)).toBe(hash)
+    expect(toHex(both.parentMetadataHash!)).toBe(parent)
+  })
 })
