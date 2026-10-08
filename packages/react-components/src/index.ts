@@ -16,6 +16,8 @@ export type {
   PaginationComponentsDefinition,
 } from './components/context/types'
 export { useComponents } from './components/context/useComponents'
+export { useResolveMediaUrl, type MediaUrlResolver } from './components/context/media'
+export type { ComponentsProviderProps } from './components/context/ComponentsProvider'
 
 // ─── Pagination ───────────────────────────────────────────────────────────────
 export { Pagination, type PaginationProps } from './components/Pagination/Pagination'

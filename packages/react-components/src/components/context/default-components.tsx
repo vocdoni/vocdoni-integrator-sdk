@@ -21,6 +21,20 @@ const getTitle = (title: string | Record<string, string> | undefined): string =>
   return title.default ?? Object.values(title)[0] ?? ''
 }
 
+/**
+ * Stand-in for an image whose URL the context's `resolveMediaUrl` reports not
+ * ready yet. Styled by consumers through `[data-media-pending]`.
+ */
+const MediaPlaceholder = ({
+  label,
+  className,
+  ...data
+}: {
+  label?: string
+  className?: string
+  'data-choice-media'?: string
+}) => <span {...data} className={className} role='img' aria-label={label} aria-busy='true' data-media-pending='' />
+
 export const defaultComponents: ComponentsDefinition = {
   HR,
   ElectionTitle: ({ title, ...props }) => <h1 {...props}>{title}</h1>,
@@ -35,7 +49,12 @@ export const defaultComponents: ComponentsDefinition = {
       {label}
     </span>
   ),
-  ElectionHeader: ({ src, alt, ...props }) => (src ? <img {...props} alt={alt} src={linkifyIpfs(src)} /> : null),
+  ElectionHeader: ({ src, alt, pending, ...props }) =>
+    src ? (
+      <img {...props} alt={alt} src={linkifyIpfs(src)} />
+    ) : pending ? (
+      <MediaPlaceholder className={props.className} label={alt} />
+    ) : null,
   ElectionQuestions: ({ form, ...props }) => <div {...props}>{form}</div>,
   ElectionQuestion: ({
     title,
@@ -107,6 +126,8 @@ export const defaultComponents: ComponentsDefinition = {
             data-choice-media={dataAttrs?.['data-choice-media']}
             data-can-open-modal={canOpenImageModal ? 'true' : undefined}
           />
+        ) : image?.pending ? (
+          <MediaPlaceholder label={label} data-choice-media={dataAttrs?.['data-choice-media']} />
         ) : null}
         <span data-choice-body={dataAttrs?.['data-choice-body']} data-compact={compact ? '' : undefined}>
           {label}
@@ -154,6 +175,8 @@ export const defaultComponents: ComponentsDefinition = {
             data-choice-media={dataAttrs?.['data-choice-media']}
             data-can-open-modal={canOpenImageModal ? 'true' : undefined}
           />
+        ) : image?.pending ? (
+          <MediaPlaceholder label={label} data-choice-media={dataAttrs?.['data-choice-media']} />
         ) : null}
         <span data-choice-body={dataAttrs?.['data-choice-body']} data-compact={compact ? '' : undefined}>
           {label}
@@ -235,7 +258,11 @@ export const defaultComponents: ComponentsDefinition = {
               {/* Empty for a question whose results could not be decoded. */}
               {choice.votes ? ` ${choice.votes} (${choice.percent})` : null}
               <TrustedHtml html={choice.description} />
-              {choice.image ? <img src={linkifyIpfs(choice.image)} alt={choice.title} /> : null}
+              {choice.image ? (
+                <img src={linkifyIpfs(choice.image)} alt={choice.title} />
+              ) : choice.imagePending ? (
+                <MediaPlaceholder label={choice.title} />
+              ) : null}
             </div>
           ))}
         </section>
