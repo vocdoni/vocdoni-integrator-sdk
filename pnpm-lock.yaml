@@ -12,7 +12,7 @@ overrides:
   react-router-dom@<7.18.2: ^7.18.2
   underscore@<1.13.8: ^1.13.8
   ws@>=8.0.0 <8.21.0: ^8.21.0
-  '@vocdoni/proto': github:vocdoni/dvote-protobuf#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
+  '@vocdoni/proto@1.18.0': git+https://github.com/vocdoni/dvote-protobuf.git#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
 
 importers:
 
@@ -113,7 +113,7 @@ importers:
         specifier: workspace:*
         version: link:../api-types
       '@vocdoni/proto':
-        specifier: github:vocdoni/dvote-protobuf#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
+        specifier: git+https://github.com/vocdoni/dvote-protobuf.git#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
         version: https://codeload.github.com/vocdoni/dvote-protobuf/tar.gz/04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
       tweetnacl:
         specifier: ^1.0.3
@@ -144,7 +144,7 @@ importers:
         specifier: workspace:*
         version: link:../api-voting
       '@vocdoni/proto':
-        specifier: github:vocdoni/dvote-protobuf#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
+        specifier: git+https://github.com/vocdoni/dvote-protobuf.git#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
         version: https://codeload.github.com/vocdoni/dvote-protobuf/tar.gz/04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
       snarkjs:
         specifier: ^0.7.5
@@ -273,7 +273,7 @@ importers:
         specifier: workspace:*
         version: link:../api-voting
       '@vocdoni/proto':
-        specifier: github:vocdoni/dvote-protobuf#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
+        specifier: git+https://github.com/vocdoni/dvote-protobuf.git#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
         version: https://codeload.github.com/vocdoni/dvote-protobuf/tar.gz/04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
       react:
         specifier: ^19.0.0
@@ -1152,7 +1152,7 @@ packages:
     resolution: {integrity: sha512-uy+luWBAPw9XfthoHi5AkfHUnuPYEESjl0p/r+meoBnU8bxg5GDQ3Ey8MjcJ6sqahkL4PFyrvfMJJBw7LbU06g==}
 
   '@vocdoni/proto@https://codeload.github.com/vocdoni/dvote-protobuf/tar.gz/04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76':
-    resolution: {gitHosted: true, tarball: https://codeload.github.com/vocdoni/dvote-protobuf/tar.gz/04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76}
+    resolution: {gitHosted: true, integrity: sha512-He3yc83s2ogOghvDiguhlR5gMdsBANbtx5n2rFfS2GC2TEvFGpZNcmrPMwBzEYjTEQsSSqZ5XTQpAkajYRRu/Q==, tarball: https://codeload.github.com/vocdoni/dvote-protobuf/tar.gz/04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76}
     version: 1.17.0
 
   ansi-colors@4.1.3:
