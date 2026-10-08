@@ -43,7 +43,22 @@ export interface BuildVoteTransactionOptions {
    * it lives on the envelope, not inside the (encrypted) vote package.
    */
   memo?: string
+  /**
+   * The election metadata hash (hex) of the question the voter was shown —
+   * its `metadataHash` from the same process/question read the ballot was
+   * rendered from. The Vochain rejects the vote unless it byte-equals the
+   * election's current hash at inclusion time, so a vote cannot be cast
+   * against a ballot text that changed after the voter read it. Omit (or pass
+   * an empty string) when the question has no hash committed.
+   */
+  metadataHash?: string
 }
+
+/**
+ * Length of an election metadata hash (SHA-256), in bytes. A hash of any other
+ * length can never match the one committed on chain.
+ */
+export const METADATA_HASH_BYTES = 32
 
 /** Chain-level cap on `VoteEnvelope.memo`, in UTF-8 bytes (not characters). */
 export const MAX_MEMO_BYTES = 256
@@ -98,6 +113,7 @@ export function buildVoteTransaction(opts: BuildVoteTransactionOptions): string 
     encryptionKeys,
     proofType = ProofCA_Type.ECDSA_PIDSALTED,
     memo,
+    metadataHash,
   } = opts
 
   let memoBytes: Uint8Array | undefined
@@ -105,6 +121,16 @@ export function buildVoteTransaction(opts: BuildVoteTransactionOptions): string 
     memoBytes = utf8ToBytes(memo)
     if (memoBytes.length > MAX_MEMO_BYTES) {
       throw new Error(`Vote memo is ${memoBytes.length} UTF-8 bytes; the chain caps it at ${MAX_MEMO_BYTES}`)
+    }
+  }
+
+  let metadataHashBytes: Uint8Array | undefined
+  if (metadataHash) {
+    metadataHashBytes = fromHex(metadataHash)
+    if (metadataHashBytes.length !== METADATA_HASH_BYTES) {
+      throw new Error(
+        `Metadata hash is ${metadataHashBytes.length} bytes; an election metadata hash is ${METADATA_HASH_BYTES}`,
+      )
     }
   }
 
@@ -129,6 +155,7 @@ export function buildVoteTransaction(opts: BuildVoteTransactionOptions): string 
     votePackage,
     encryptionKeyIndexes: keyIndexes,
     memo: memoBytes,
+    metadataHash: metadataHashBytes,
   })
 
   const tx = asLocalBytes(Tx.encode({ payload: { $case: 'vote', vote } }).finish())

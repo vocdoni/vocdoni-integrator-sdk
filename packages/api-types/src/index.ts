@@ -503,6 +503,15 @@ export interface VotingProcessQuestion {
    */
   encryptionKeys?: EncryptionKey[]
   /**
+   * SHA-256 of the exact bytes served at the question's on-chain metadata URL,
+   * as lowercase hex. Once committed on chain the Vochain rejects any vote
+   * whose envelope `metadataHash` differs, so a voter app passes this value,
+   * read from the same response it rendered the ballot from, to
+   * `buildVoteTransaction`. Absent while nothing is committed (drafts, and
+   * questions published without a hash), in which case the vote carries none.
+   */
+  metadataHash?: string
+  /**
    * Live on-chain tally — resolved only on the single reads for published
    * questions; see {@link QuestionResults} for the list-endpoint caveat.
    */
@@ -690,6 +699,15 @@ export interface PublicQuestionResponse {
    * building an encrypted ballot.
    */
   encryptionKeys?: EncryptionKey[]
+  /**
+   * SHA-256 of the exact bytes served at the question's on-chain metadata URL,
+   * as lowercase hex. Once committed on chain the Vochain rejects any vote
+   * whose envelope `metadataHash` differs, so a voter app passes this value,
+   * read from the same response it rendered the ballot from, to
+   * `buildVoteTransaction`. Absent while nothing is committed (drafts, and
+   * questions published without a hash), in which case the vote carries none.
+   */
+  metadataHash?: string
   /**
    * Live on-chain tally, present for any published question — see
    * {@link QuestionResults}.

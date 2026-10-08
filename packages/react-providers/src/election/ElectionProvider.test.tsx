@@ -4,6 +4,7 @@ import { CAbundle, ProofCA_Type, SignedTx, Tx } from '@vocdoni/proto/vochain'
 import { blindMessageFromBundle, fromHex } from '@vocdoni/api-voting'
 import type { VotingProcessResponse } from '@vocdoni/api-types'
 import { describe, expect, it } from 'vitest'
+import { isStaleMetadataError } from '@vocdoni/api-client'
 // The chain's side of the blind check — test-only, same helper the api-voting
 // crypto tests are anchored on.
 import {
@@ -243,6 +244,63 @@ describe('ElectionProvider', () => {
     const tx = Tx.decode(signedTx.tx)
     if (tx.payload?.$case !== 'vote') throw new Error('expected a vote payload')
     expect(new TextDecoder().decode(tx.payload.vote.memo!)).toBe('Other: neither')
+  })
+
+  it('attests each question\'s metadataHash on its vote envelope', async () => {
+    const HASH = 'ef'.repeat(32)
+    server.use(
+      http.get(`http://localhost/processes/:id`, ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          questions: [{ ...mockProcess.questions[0], metadataHash: HASH }],
+        }),
+      ),
+    )
+    const txPayloads = captureBatchVotes()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.election).not.toBeNull())
+    await connect(result)
+    await waitFor(() => expect(result.current.election.isAbleToVote).toBe(true))
+
+    await act(async () => {
+      await result.current.election.vote([[0]])
+    })
+    expect(txPayloads).toHaveLength(1)
+    const tx = Tx.decode(SignedTx.decode(fromHex(txPayloads[0])).tx)
+    if (tx.payload?.$case !== 'vote') throw new Error('expected a vote payload')
+    // Decoded bytes may be a foreign-realm Buffer under jsdom, so hex them by hand.
+    const hash = Array.from(tx.payload.vote.metadataHash!, (b) => b.toString(16).padStart(2, '0')).join('')
+    expect(hash).toBe(HASH)
+  })
+
+  it('refetches the process when the relay refuses the vote for stale metadata', async () => {
+    let reads = 0
+    server.use(
+      http.get(`http://localhost/processes/:id`, ({ params }) => {
+        reads++
+        return HttpResponse.json({ ...mockProcess, id: params.id as string })
+      }),
+      http.post(`http://localhost/votes`, () =>
+        HttpResponse.json({ error: 'vote metadata hash is stale', code: 40999 }, { status: 409 }),
+      ),
+    )
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.election).not.toBeNull())
+    await connect(result)
+    await waitFor(() => expect(result.current.election.isAbleToVote).toBe(true))
+    const readsBefore = reads
+
+    let caught: unknown
+    await act(async () => {
+      await result.current.election.vote([[0]]).catch((err: unknown) => {
+        caught = err
+      })
+    })
+    expect(isStaleMetadataError(caught)).toBe(true)
+    await waitFor(() => expect(reads).toBeGreaterThan(readsBefore))
   })
 
   it('votes an anonymous census through the blind CSP flow', async () => {

@@ -1,0 +1,9 @@
+---
+'@vocdoni/api-types': minor
+'@vocdoni/api-voting': minor
+'@vocdoni/api-client': minor
+'@vocdoni/react-providers': minor
+'@vocdoni/api-voting-zk': patch
+---
+
+Votes attest the election metadata hash. Question responses declare `metadataHash?: string` (lowercase hex SHA-256 of the question's metadata document), and `buildVoteTransaction` takes a `metadataHash` option that it puts on the vote envelope; the Vochain refuses a vote whose hash differs from the election's current one. `ElectionProvider` passes each question's hash automatically and refetches the process when a vote is refused for stale metadata. `@vocdoni/api-client` adds `StaleMetadataError` (a `VocdoniApiError` thrown for the relay's 409) and `isStaleMetadataError()`, which also recognizes the chain's rejection on a failed vote job, so UIs can reload the ballot before the voter retries. `@vocdoni/proto` is bumped to 1.17.0.

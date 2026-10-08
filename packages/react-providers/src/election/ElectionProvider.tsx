@@ -6,7 +6,7 @@ import type {
   VotingProcessResultsResponse,
 } from '@vocdoni/api-types'
 import { buildVoteTransaction, EphemeralSigner, MAX_MEMO_BYTES, ProofCA_Type } from '@vocdoni/api-voting'
-import { useQuery, type UseQueryOptions } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query'
 import {
   createContext,
   useCallback,
@@ -17,7 +17,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { JobFailedError, normalizeVotingProcess, VocdoniApiError } from '@vocdoni/api-client'
+import { isStaleMetadataError, JobFailedError, normalizeVotingProcess, VocdoniApiError } from '@vocdoni/api-client'
 import { useClient } from '../client/ClientProvider'
 import {
   ElectionAuthContext,
@@ -93,6 +93,13 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * are skipped, so calling `vote()` again after a failure resumes the
    * remaining questions. If, after the batch is accepted, some votes land on
    * chain and others fail, throws {@link PartialVoteError} naming both sets.
+   *
+   * Each vote attests the `metadataHash` of the question as read here, and the
+   * chain refuses it if the ballot text changed since. When that happens the
+   * provider refetches the process; the thrown error (or, for a
+   * {@link PartialVoteError}, the error of a `failed` entry) satisfies
+   * `isStaleMetadataError` from `@vocdoni/api-client`, so the UI can show the
+   * voter the updated ballot before letting them vote again.
    */
   vote(encodedBallots: number[][], memos?: (string | undefined)[]): Promise<string>
   /**
@@ -244,6 +251,7 @@ export function ElectionProvider({
   voteOptions,
 }: ElectionProviderProps) {
   const { client } = useClient()
+  const queryClient = useQueryClient()
 
   // The id drives every query; a prefetched election carries its own, so
   // passing only `election` still leaves the provider able to refetch.
@@ -487,6 +495,7 @@ export function ElectionProvider({
             proofType,
             encryptionKeys: question.secretUntilTheEnd ? question.encryptionKeys : undefined,
             memo: memos?.[i],
+            metadataHash: question.metadataHash,
           }),
         })
         setVoteStatus((st) => ({ ...st, [question.id]: 'submitting' }))
@@ -749,12 +758,24 @@ export function ElectionProvider({
       setVoting(true)
       try {
         return await castVotes(encodedBallots, memos)
+      } catch (err) {
+        // A vote refused for stale metadata means the process read is out of
+        // date: refetch it so the UI renders the ballot the chain now expects,
+        // and the next vote() attests its fresh hash.
+        const stale =
+          err instanceof PartialVoteError
+            ? err.failed.some((f) => isStaleMetadataError(f.error))
+            : isStaleMetadataError(err)
+        if (stale && electionId) {
+          void queryClient.invalidateQueries({ queryKey: electionQueryKeys.election(electionId) })
+        }
+        throw err
       } finally {
         castInFlightRef.current = false
         setVoting(false)
       }
     },
-    [castVotes],
+    [castVotes, electionId, queryClient],
   )
 
   const clearVoter = useCallback(() => {

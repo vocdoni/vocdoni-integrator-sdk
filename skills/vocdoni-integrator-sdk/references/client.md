@@ -448,6 +448,13 @@ const { jobs, pagination } = await client.jobs.list({
 `JobFailedError` carries the full `JobStatusResponse` on `error.job`; its message
 joins `job.errors` when present.
 
+A vote refused because the ballot text changed after the voter read it (its
+envelope `metadataHash` no longer matches the election's) is recognized by
+`isStaleMetadataError(err)`: true for the relay's 409 (`StaleMetadataError`, a
+`VocdoniApiError` subclass; nothing was relayed) and for a `JobFailedError` (or
+any error) carrying the chain's "does not match the election metadata hash"
+rejection. Reload the process, show the new ballot, and build the vote again.
+
 ---
 
 ## AuthClient (`client.auth`)
