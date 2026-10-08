@@ -630,7 +630,10 @@ export interface VotingProcessBase {
   metadataURL?: string
   /**
    * SHA-256 (lowercase hex) of the bytes served at {@link metadataURL}.
-   * Absent while nothing is committed.
+   * Every question election links to the parent, so the Vochain rejects any
+   * vote whose envelope `parentMetadataHash` differs: pass this value to
+   * `buildVoteTransaction` as `parentMetadataHash`. Absent while nothing is
+   * committed, in which case the vote carries none.
    */
   metadataHash?: string
   census: CensusSpec

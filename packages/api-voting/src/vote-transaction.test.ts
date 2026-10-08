@@ -141,5 +141,26 @@ describe('buildVoteTransaction', () => {
   it('rejects a metadata hash that is not 32 bytes', () => {
     const base = { processId: PROCESS_ID, choices: [1], chainId: CHAIN_ID, signer, cspSignature: CSP_SIG }
     expect(() => buildVoteTransaction({ ...base, metadataHash: 'ab'.repeat(31) })).toThrow('is 32')
+    expect(() => buildVoteTransaction({ ...base, parentMetadataHash: 'ab'.repeat(33) })).toThrow(
+      'Parent metadata hash is 33 bytes',
+    )
+  })
+
+  it('carries the parent metadata hash next to the question one, absent by default', () => {
+    const base = { processId: PROCESS_ID, choices: [1], chainId: CHAIN_ID, signer, cspSignature: CSP_SIG }
+    const hash = 'aa'.repeat(32)
+    const parent = 'bb'.repeat(32)
+
+    const { vote: without } = decodeVote(buildVoteTransaction({ ...base, metadataHash: hash }))
+    expect(without.parentMetadataHash).toBeUndefined()
+
+    const { vote: empty } = decodeVote(buildVoteTransaction({ ...base, parentMetadataHash: '' }))
+    expect(empty.parentMetadataHash).toBeUndefined()
+
+    const { vote: both } = decodeVote(
+      buildVoteTransaction({ ...base, metadataHash: hash, parentMetadataHash: `0x${parent}` }),
+    )
+    expect(toHex(both.metadataHash!)).toBe(hash)
+    expect(toHex(both.parentMetadataHash!)).toBe(parent)
   })
 })

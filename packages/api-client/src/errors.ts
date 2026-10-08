@@ -33,7 +33,8 @@ export class StaleMetadataError extends VocdoniApiError {
 
 /**
  * API error code of `ErrVoteMetadataChanged` (HTTP 409): the vote relay found
- * an envelope `metadataHash` that differs from the question's stored one.
+ * an envelope `metadataHash` or `parentMetadataHash` that differs from the
+ * stored one.
  */
 export const VOTE_METADATA_CHANGED_CODE = 40904
 

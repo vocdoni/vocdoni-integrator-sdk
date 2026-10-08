@@ -94,8 +94,9 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * remaining questions. If, after the batch is accepted, some votes land on
    * chain and others fail, throws {@link PartialVoteError} naming both sets.
    *
-   * Each vote attests the `metadataHash` of the question as read here, and the
-   * chain refuses it if the ballot text changed since. When that happens the
+   * Each vote attests the `metadataHash` of the question and the process's own
+   * `metadataHash` (its parent election's) as read here, and the chain refuses
+   * it if either text changed since. When that happens the
    * provider refetches the process; the thrown error (or, for a
    * {@link PartialVoteError}, the error of a `failed` entry) satisfies
    * `isStaleMetadataError` from `@vocdoni/api-client`, so the UI can show the
@@ -496,6 +497,9 @@ export function ElectionProvider({
             encryptionKeys: question.secretUntilTheEnd ? question.encryptionKeys : undefined,
             memo: memos?.[i],
             metadataHash: question.metadataHash,
+            // The process-level hash is the parent election's: every question
+            // election links to it, so every vote attests it.
+            parentMetadataHash: election.metadataHash,
           }),
         })
         setVoteStatus((st) => ({ ...st, [question.id]: 'submitting' }))

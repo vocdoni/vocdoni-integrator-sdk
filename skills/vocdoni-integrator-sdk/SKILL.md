@@ -55,7 +55,8 @@ reads `chainId` and the questions directly:
                                                single-question POST /processes/{id}/sign still exists)
    [repeat steps 5–6 for each votable question]
 5. buildVoteTransaction(...)                 → build + sign the protobuf tx locally; pass the
-                                               question's metadataHash (stale → isStaleMetadataError)
+                                               question's metadataHash and the process's as
+                                               parentMetadataHash (stale → isStaleMetadataError)
 6. POST /vote                                → relay tx → jobId
    GET  /jobs/{jobId}                        → poll until completed → voteID (nullifier)
 ```

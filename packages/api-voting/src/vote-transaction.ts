@@ -52,6 +52,15 @@ export interface BuildVoteTransactionOptions {
    * an empty string) when the question has no hash committed.
    */
   metadataHash?: string
+  /**
+   * The metadata hash (hex) of the question's parent election, the
+   * metadata-only election holding the process-level text and media — the
+   * process's own `metadataHash` from the same read the ballot was rendered
+   * from. The Vochain rejects the vote unless it byte-equals the parent's
+   * current hash at inclusion time. Omit (or pass an empty string) when the
+   * process has no parent hash committed.
+   */
+  parentMetadataHash?: string
 }
 
 /**
@@ -59,6 +68,16 @@ export interface BuildVoteTransactionOptions {
  * length can never match the one committed on chain.
  */
 export const METADATA_HASH_BYTES = 32
+
+/** Decodes an optional hex metadata hash, rejecting any length but {@link METADATA_HASH_BYTES}. */
+function metadataHashToBytes(label: string, hash: string | undefined): Uint8Array | undefined {
+  if (!hash) return undefined
+  const bytes = fromHex(hash)
+  if (bytes.length !== METADATA_HASH_BYTES) {
+    throw new Error(`${label} is ${bytes.length} bytes; an election metadata hash is ${METADATA_HASH_BYTES}`)
+  }
+  return bytes
+}
 
 /** Chain-level cap on `VoteEnvelope.memo`, in UTF-8 bytes (not characters). */
 export const MAX_MEMO_BYTES = 256
@@ -114,6 +133,7 @@ export function buildVoteTransaction(opts: BuildVoteTransactionOptions): string 
     proofType = ProofCA_Type.ECDSA_PIDSALTED,
     memo,
     metadataHash,
+    parentMetadataHash,
   } = opts
 
   let memoBytes: Uint8Array | undefined
@@ -124,15 +144,8 @@ export function buildVoteTransaction(opts: BuildVoteTransactionOptions): string 
     }
   }
 
-  let metadataHashBytes: Uint8Array | undefined
-  if (metadataHash) {
-    metadataHashBytes = fromHex(metadataHash)
-    if (metadataHashBytes.length !== METADATA_HASH_BYTES) {
-      throw new Error(
-        `Metadata hash is ${metadataHashBytes.length} bytes; an election metadata hash is ${METADATA_HASH_BYTES}`,
-      )
-    }
-  }
+  const metadataHashBytes = metadataHashToBytes('Metadata hash', metadataHash)
+  const parentMetadataHashBytes = metadataHashToBytes('Parent metadata hash', parentMetadataHash)
 
   const processIdBytes = fromHex(processId)
   const { votePackage, keyIndexes } = buildVotePackage({ choices, encryptionKeys })
@@ -156,6 +169,7 @@ export function buildVoteTransaction(opts: BuildVoteTransactionOptions): string 
     encryptionKeyIndexes: keyIndexes,
     memo: memoBytes,
     metadataHash: metadataHashBytes,
+    parentMetadataHash: parentMetadataHashBytes,
   })
 
   const tx = asLocalBytes(Tx.encode({ payload: { $case: 'vote', vote } }).finish())

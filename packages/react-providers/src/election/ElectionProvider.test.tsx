@@ -246,18 +246,19 @@ describe('ElectionProvider', () => {
     expect(new TextDecoder().decode(tx.payload.vote.memo!)).toBe('Other: neither')
   })
 
-  it('attests each question\'s metadataHash on its vote envelope', async () => {
+  it('attests each question\'s metadataHash and the process (parent) one on its vote envelope', async () => {
     const HASH = 'ef'.repeat(32)
+    const PARENT_HASH = 'cc'.repeat(32)
     const QUESTION_UPSTREAM = 'aa'.repeat(32)
     server.use(
       http.get(`http://localhost/processes/:id`, ({ params }) =>
         HttpResponse.json({
           ...mockProcess,
           id: params.id as string,
-          // The process-level parent election is not votable: its id and hash
-          // must never reach an envelope.
+          // The process-level parent election is not votable: its id never
+          // reaches an envelope, while its hash is attested as the parent's.
           upstreamId: 'bb'.repeat(32),
-          metadataHash: 'cc'.repeat(32),
+          metadataHash: PARENT_HASH,
           questions: [{ ...mockProcess.questions[0], upstreamId: QUESTION_UPSTREAM, metadataHash: HASH }],
         }),
       ),
@@ -278,6 +279,7 @@ describe('ElectionProvider', () => {
     // Decoded bytes may be a foreign-realm Buffer under jsdom, so hex them by hand.
     const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
     expect(hex(tx.payload.vote.metadataHash!)).toBe(HASH)
+    expect(hex(tx.payload.vote.parentMetadataHash!)).toBe(PARENT_HASH)
     expect(hex(tx.payload.vote.processId)).toBe(QUESTION_UPSTREAM)
   })
 

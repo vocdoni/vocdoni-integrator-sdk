@@ -82,6 +82,11 @@ describe('stale election metadata', () => {
     expect(isStaleMetadataError(new Error('nullifier already exists'))).toBe(false)
     expect(isStaleMetadataError(CHAIN_ERROR)).toBe(false)
     expect(isStaleMetadataMessage(CHAIN_ERROR)).toBe(true)
+    expect(
+      isStaleMetadataError(
+        new Error('vote parent metadata hash abcd does not match the parent election metadata hash 1234'),
+      ),
+    ).toBe(true)
     expect(isStaleMetadataMessage(undefined)).toBe(false)
   })
 })
