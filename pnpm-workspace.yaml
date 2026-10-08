@@ -9,6 +9,7 @@ overrides:
   'react-router-dom@<7.18.2': ^7.18.2
   'underscore@<1.13.8': ^1.13.8
   'ws@>=8.0.0 <8.21.0': ^8.21.0
+  '@vocdoni/proto': github:vocdoni/dvote-protobuf#04e7afe6fe2b24f1a20fd5f3fbef0b9fdad87e76
 
 onlyBuiltDependencies:
   - msw
