@@ -697,9 +697,28 @@ export interface PublicQuestionResponse {
   results?: QuestionResults
 }
 
+/**
+ * A choice's extended display info in {@link VotingProcessMetadata}: the
+ * storage form of {@link ChoiceMeta}, i.e. a {@link ChoiceMetadataEntry}
+ * without its `value`, which is the choice's own and cannot be edited.
+ */
+export interface VotingProcessMetadataChoiceMeta {
+  description?: string
+  /** A plain URL, or the explicit `{ default, thumbnail }` sizes. */
+  image?: string | { default?: string; thumbnail?: string }
+  /** Creator-defined keys, stored verbatim. */
+  [key: string]: unknown
+}
+
 /** One choice's text in {@link VotingProcessMetadata}. */
 export interface VotingProcessMetadataChoice {
   title: MultiLangString
+  /**
+   * The choice's extended display info. On update it replaces the choice's
+   * whole entry in the question's `metadata.choices` (keys left out are
+   * dropped); absent leaves the entry unchanged.
+   */
+  meta?: VotingProcessMetadataChoiceMeta
 }
 
 /** One question's text in {@link VotingProcessMetadata}. */
@@ -711,7 +730,7 @@ export interface VotingProcessMetadataQuestion {
 }
 
 /**
- * The human-readable text of a voting process: what `GET` and
+ * The human-readable text and media of a voting process: what `GET` and
  * `PUT /processes/{id}/metadata` read and write. Questions and choices are
  * matched by position, so an update must carry exactly as many questions as the
  * process, and as many choices per question as it has (400 otherwise); only the

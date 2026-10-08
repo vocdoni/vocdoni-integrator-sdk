@@ -17,7 +17,18 @@ const METADATA: VotingProcessMetadata = {
   questions: [
     {
       title: { default: 'President' },
-      choices: [{ title: { default: 'Alice' } }, { title: { default: 'Bob' } }],
+      choices: [
+        {
+          title: { default: 'Alice' },
+          meta: {
+            description: 'Current treasurer',
+            image: { default: 'https://cdn.example/alice.jpeg', thumbnail: 'https://cdn.example/alice-t.jpeg' },
+            slogan: 'Keep it running',
+          },
+        },
+        { title: { default: 'Bob' }, meta: { image: 'https://cdn.example/bob.jpeg' } },
+        { title: { default: 'Carol' } },
+      ],
     },
   ],
 }

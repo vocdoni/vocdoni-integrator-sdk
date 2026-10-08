@@ -329,8 +329,10 @@ const { participants } = await client.elections.participants(mongoId, {
 const { added, jobId } = await client.elections.addCensusMembers(mongoId, ['m-1', 'm-2'])
 if (jobId) await client.jobs.waitFor(jobId)
 
-// Admin: read and edit the process TEXT (title, description, header,
-// streamUri, question/choice titles), drafts and published processes alike
+// Admin: read and edit the process TEXT and media (title, description, header,
+// streamUri, question/choice titles, and per choice an optional `meta`
+// { description?, image?: url | { default, thumbnail }, ...creator keys } that
+// replaces its extended info; omit it to keep it), drafts and published processes alike
 // (GET/PUT /processes/{id}/metadata). Questions and choices are matched by
 // position: the body must have exactly as many of each as the process (400
 // otherwise). A draft is updated in place (resolves undefined); a published
