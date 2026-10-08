@@ -1,14 +1,21 @@
 import type { Choice } from '@vocdoni/api-types'
 import { ComponentPropsWithoutRef } from 'react'
 import { QuestionChoicePresentation, QuestionRankOption, QuestionSelectionMode } from '../../context/types'
+import { identityMediaUrl, MediaUrlResolver, resolveMedia, useResolveMediaUrl } from '../../context/media'
 import { useComponents } from '../../context/useComponents'
-import { linkifyIpfs } from '../../shared/ipfs'
 import { resolveTitle } from '../../../election/normalized'
 
 export type QuestionChoiceMeta = {
+  /** Present whenever the choice carries an image, even while it is pending. */
   image?: {
     default?: string
     thumbnail?: string
+    /**
+     * True when an image size the choice carries is not ready yet (its
+     * resolver answered `undefined`), so that size is absent here: render a
+     * placeholder for it.
+     */
+    pending?: boolean
   }
   description?: string
 }
@@ -17,25 +24,34 @@ const toNonEmpty = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim().length > 0 ? value : undefined
 
 /**
- * Read a choice's extended display info (image, description), resolving `ipfs://`
- * URLs and dropping empty/whitespace-only strings.
+ * Read a choice's extended display info (image, description), passing each image
+ * URL through `resolve` (the components context's `resolveMediaUrl`; identity by
+ * default), resolving `ipfs://` URLs and dropping empty/whitespace-only strings.
  *
  * The source is `choice.meta`, which the API client fills from the parent
  * question's `metadata.choices` on read — a question without those entries
  * yields an empty meta here, and so renders the basic presentation.
  */
-export const getQuestionChoiceMeta = (choice: Choice): QuestionChoiceMeta => {
+export const getQuestionChoiceMeta = (
+  choice: Choice,
+  resolve: MediaUrlResolver = identityMediaUrl,
+): QuestionChoiceMeta => {
   const meta = choice.meta ?? {}
 
   const imageDefault = toNonEmpty(meta.image?.default)
   const imageThumbnail = toNonEmpty(meta.image?.thumbnail)
   const description = toNonEmpty(meta.description)
-  const normalizedDefault = linkifyIpfs(imageDefault)
-  const normalizedThumbnail = linkifyIpfs(imageThumbnail)
+  const resolvedDefault = resolveMedia(imageDefault, resolve)
+  const resolvedThumbnail = resolveMedia(imageThumbnail, resolve)
+  const pending = resolvedDefault.pending || resolvedThumbnail.pending
 
   const image =
-    normalizedDefault || normalizedThumbnail
-      ? { default: normalizedDefault, thumbnail: normalizedThumbnail }
+    imageDefault || imageThumbnail
+      ? {
+          default: resolvedDefault.src,
+          thumbnail: resolvedThumbnail.src,
+          ...(pending ? { pending: true } : {}),
+        }
       : undefined
 
   return {
@@ -53,13 +69,14 @@ export const hasExtendedChoiceMeta = (choice: Choice): boolean => {
  * Shared by both choice wrappers below: resolve `choice.meta` once, so a change to
  * choice-meta handling reaches the ranked and tick-box paths together.
  */
-const choicePresentationProps = (choice: Choice) => {
-  const metadata = getQuestionChoiceMeta(choice)
+const choicePresentationProps = (choice: Choice, resolve: MediaUrlResolver) => {
+  const metadata = getQuestionChoiceMeta(choice, resolve)
   return {
     label: resolveTitle(choice.title),
     description: metadata.description,
     image: metadata.image,
-    hasImage: Boolean(metadata.image?.default || metadata.image?.thumbnail),
+    // True for a pending image too, so the layout does not shift once it resolves.
+    hasImage: Boolean(metadata.image),
     canOpenImageModal: Boolean(metadata.image?.thumbnail && metadata.image?.default),
   }
 }
@@ -89,11 +106,12 @@ export const QuestionChoice = ({
   onSelect: (checked: boolean) => void
 }) => {
   const { QuestionChoice: Slot } = useComponents()
+  const resolveMediaUrl = useResolveMediaUrl()
 
   return (
     <Slot
       {...rest}
-      {...choicePresentationProps(choice)}
+      {...choicePresentationProps(choice, resolveMediaUrl)}
       choice={choice}
       value={value}
       compact={compact}
@@ -136,11 +154,12 @@ export const QuestionRankChoice = ({
   onRank: (position: number | null) => void
 }) => {
   const { QuestionRankChoice: Slot } = useComponents()
+  const resolveMediaUrl = useResolveMediaUrl()
 
   return (
     <Slot
       {...rest}
-      {...choicePresentationProps(choice)}
+      {...choicePresentationProps(choice, resolveMediaUrl)}
       choice={choice}
       value={value}
       compact={compact}

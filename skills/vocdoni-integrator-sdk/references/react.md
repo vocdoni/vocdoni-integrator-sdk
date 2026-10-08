@@ -423,6 +423,26 @@ value and the chain discards the whole ballot while still counting the envelope.
 Note that `<ElectionResults />` shows the **Borda score** for such a question, not a
 voter count — same as it already does for budget/quadratic amounts.
 
+**Media URL resolver** — `<ComponentsProvider resolveMediaUrl={fn}>` passes every
+election media URL (the `ElectionHeader` image, each choice's `image.default` and
+`image.thumbnail`, result choice images) through `fn: MediaUrlResolver =
+(url: string) => string | undefined` before rendering. `url` is exactly what the
+election metadata carries (`ipfs://…`, `https://…`); return the URL to render (e.g. a
+`blob:` URL of bytes you downloaded and hash-checked against the metadata), the URL
+unchanged for media you do not manage, or `undefined` while it is not ready. A
+pending image reaches slots as `pending` (`ElectionHeader`), `image.pending`
+(`QuestionChoice` / `QuestionRankChoice`, with `hasImage` still true so the layout
+does not shift) or `imagePending` (`ElectionResultChoice`); the default slots render
+a `<span data-media-pending role="img" aria-busy="true">` placeholder. Defaults to the
+identity. Components only re-render when the function changes, so pass a new one
+(e.g. `useCallback` keyed on your cache) whenever a resolution changes.
+`useResolveMediaUrl()` returns the current resolver for custom components.
+
+```tsx
+const resolveMediaUrl = useCallback((url: string) => verifiedBlobs[url], [verifiedBlobs])
+<ComponentsProvider resolveMediaUrl={resolveMediaUrl}>…</ComponentsProvider>
+```
+
 **Slot customization** — every component accepts a slot override for rendering:
 
 ```tsx
