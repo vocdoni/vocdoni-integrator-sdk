@@ -16,7 +16,8 @@
 #   EMAIL email to register (default a timestamped throwaway address)
 #   PASS  password to register (default a fixed test password)
 #
-# Prints INTEGRATION_API_KEY=vsk_... on stdout. When $GITHUB_OUTPUT is set,
+# Prints INTEGRATION_API_KEY=vsk_... and INTEGRATION_ORG_ADDRESS=0x... (whose
+# wallet integration-stack.sh funds) on stdout. When $GITHUB_OUTPUT is set,
 # also appends `api_key=vsk_...` and `api_url=$API` there for use by later
 # workflow steps.
 set -euo pipefail
@@ -95,6 +96,7 @@ fi
 echo "   key=${KEY:0:8}..." >&2
 
 echo "INTEGRATION_API_KEY=$KEY"
+echo "INTEGRATION_ORG_ADDRESS=$ORG"
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   {
     echo "api_key=$KEY"
