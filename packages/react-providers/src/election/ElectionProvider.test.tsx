@@ -248,12 +248,17 @@ describe('ElectionProvider', () => {
 
   it('attests each question\'s metadataHash on its vote envelope', async () => {
     const HASH = 'ef'.repeat(32)
+    const QUESTION_UPSTREAM = 'aa'.repeat(32)
     server.use(
       http.get(`http://localhost/processes/:id`, ({ params }) =>
         HttpResponse.json({
           ...mockProcess,
           id: params.id as string,
-          questions: [{ ...mockProcess.questions[0], metadataHash: HASH }],
+          // The process-level parent election is not votable: its id and hash
+          // must never reach an envelope.
+          upstreamId: 'bb'.repeat(32),
+          metadataHash: 'cc'.repeat(32),
+          questions: [{ ...mockProcess.questions[0], upstreamId: QUESTION_UPSTREAM, metadataHash: HASH }],
         }),
       ),
     )
@@ -271,8 +276,9 @@ describe('ElectionProvider', () => {
     const tx = Tx.decode(SignedTx.decode(fromHex(txPayloads[0])).tx)
     if (tx.payload?.$case !== 'vote') throw new Error('expected a vote payload')
     // Decoded bytes may be a foreign-realm Buffer under jsdom, so hex them by hand.
-    const hash = Array.from(tx.payload.vote.metadataHash!, (b) => b.toString(16).padStart(2, '0')).join('')
-    expect(hash).toBe(HASH)
+    const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+    expect(hex(tx.payload.vote.metadataHash!)).toBe(HASH)
+    expect(hex(tx.payload.vote.processId)).toBe(QUESTION_UPSTREAM)
   })
 
   it('refetches the process when the relay refuses the vote for stale metadata', async () => {

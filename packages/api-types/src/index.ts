@@ -619,6 +619,20 @@ export interface VotingProcessBase {
   description?: MultiLangString
   header?: string
   streamUri?: string
+  /**
+   * On-chain election id (hex) of the process's PARENT election, which holds
+   * the process-level text and media (title, description, header, streamUri)
+   * and no questions. It is not votable: votes go to each question's own
+   * {@link VotingProcessQuestion.upstreamId}. Absent until published.
+   */
+  upstreamId?: string
+  /** URL of the parent election's metadata document. Absent until published. */
+  metadataURL?: string
+  /**
+   * SHA-256 (lowercase hex) of the bytes served at {@link metadataURL}.
+   * Absent while nothing is committed.
+   */
+  metadataHash?: string
   census: CensusSpec
   questions: VotingProcessQuestion[]
   /**
