@@ -29,8 +29,9 @@ pnpm test:integration:stack
 ```
 
 This boots `mongo` + `vocone` + `saas-backend` (`integration/docker-compose.ci.yml`),
-seeds a default plan, mints an integrator API key, and runs the suite against it —
-identical to what CI does. Tear it down afterwards with:
+seeds a default plan, mints an integrator API key, funds that integrator's prepaid
+wallet (`integration/seed-wallet.js`), and runs the suite against it — identical to
+what CI does. Tear it down afterwards with:
 
 ```bash
 scripts/integration-stack.sh down
@@ -109,7 +110,10 @@ asserted here rather than only the two named question types.
 
 The key's organization must be an **integrator** with scopes `managed:write` +
 `members:write` + `voting:write`, and quota for ≥5 processes / ≥11 on-chain
-elections / ≥300 census size. The suite creates real on-chain elections and
-casts 40 real votes, so expect it to take ~6 minutes. (The disposable stack
+elections / ≥300 census size, and its prepaid wallet must cover ≥€325: each of
+the 5 processes has a 100-voter census, above the free tier, so publishing it
+debits €65 from the integrator's wallet (an empty one answers
+`402 insufficient integrator wallet balance`). The suite creates real on-chain
+elections and casts 40 real votes, so expect it to take ~6 minutes. (The disposable stack
 above provisions all of that for you — this only applies when pointing
 `INTEGRATION_API_URL` at a shared environment.)

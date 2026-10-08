@@ -4,23 +4,28 @@
 # developer's laptop and by .github/workflows/integration.yml.
 #
 # Usage:
-#   scripts/integration-stack.sh up    # start the stack, seed it, mint an integrator key
+#   scripts/integration-stack.sh up    # start the stack, seed it, mint an integrator key, fund its wallet
 #   scripts/integration-stack.sh down  # tear the stack down (drops volumes)
 #   scripts/integration-stack.sh run   # up, then run the integration suite, env pre-wired
 #
 # Env:
 #   INTEGRATION_HOST_PORT    host port the saas-backend API is published on (default 8080)
 #   INTEGRATION_MAILHOG_PORT host port the MailHog HTTP API is published on (default 8025)
+#   INTEGRATION_WALLET_CENTS integrator wallet balance to seed, in euro cents (default 100000)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/integration/docker-compose.ci.yml"
 SEED_FILE="$REPO_ROOT/integration/seed-plan.js"
+WALLET_SEED_FILE="$REPO_ROOT/integration/seed-wallet.js"
 BOOTSTRAP_SCRIPT="$SCRIPT_DIR/ci-bootstrap-integrator.sh"
 
 INTEGRATION_HOST_PORT="${INTEGRATION_HOST_PORT:-8080}"
 INTEGRATION_MAILHOG_PORT="${INTEGRATION_MAILHOG_PORT:-8025}"
+# A full run publishes 5 processes at €65 each (see integration/seed-wallet.js);
+# €1000 leaves room for the suite to grow before this needs touching.
+INTEGRATION_WALLET_CENTS="${INTEGRATION_WALLET_CENTS:-100000}"
 export INTEGRATION_HOST_PORT INTEGRATION_MAILHOG_PORT
 
 INTEGRATION_API_URL="http://localhost:${INTEGRATION_HOST_PORT}"
@@ -138,6 +143,36 @@ else:
   INTEGRATION_API_KEY=$(printf '%s\n' "$BOOTSTRAP_OUT" | sed -n 's/^INTEGRATION_API_KEY=//p' | tail -1)
   if [ -z "$INTEGRATION_API_KEY" ]; then
     echo "ERROR: bootstrap did not produce an INTEGRATION_API_KEY" >&2
+    exit 1
+  fi
+  INTEGRATOR_ORG_ADDRESS=$(printf '%s\n' "$BOOTSTRAP_OUT" | sed -n 's/^INTEGRATION_ORG_ADDRESS=//p' | tail -1)
+  if [ -z "$INTEGRATOR_ORG_ADDRESS" ]; then
+    echo "ERROR: bootstrap did not produce an INTEGRATION_ORG_ADDRESS" >&2
+    exit 1
+  fi
+
+  echo "== funding integrator wallet with $INTEGRATION_WALLET_CENTS cents" >&2
+  compose exec -T -e ORG_ADDRESS="$INTEGRATOR_ORG_ADDRESS" -e WALLET_CENTS="$INTEGRATION_WALLET_CENTS" \
+    mongo mongosh --quiet 'mongodb://root:vocdoni@localhost:27017/admin' <"$WALLET_SEED_FILE" >&2
+
+  echo "== asserting the wallet seed took" >&2
+  # Read back through the API with the integrator key, so this proves the
+  # backend decodes the seeded document as this integrator's wallet — not just
+  # that mongo accepted a write.
+  WALLET_JSON=$(curl -fsS -m 10 -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL/wallet" || echo "")
+  if [ -z "$WALLET_JSON" ]; then
+    echo "ERROR: GET $INTEGRATION_API_URL/wallet did not respond — the api container is not serving or rejected the key. This is NOT a seed problem; check the api logs." >&2
+    exit 1
+  fi
+  WALLET_CENTS_READ=$(printf '%s' "$WALLET_JSON" | python3 -c "
+import sys, json
+try:
+    print(int(json.load(sys.stdin).get('balanceCents', 0)))
+except Exception:
+    print(0)
+" 2>/dev/null || echo 0)
+  if [ "${WALLET_CENTS_READ:-0}" != "$INTEGRATION_WALLET_CENTS" ]; then
+    echo "wallet seed did not take (API reports ${WALLET_CENTS_READ:-0} cents) — check db.Wallet bson tags against integration/seed-wallet.js" >&2
     exit 1
   fi
 
