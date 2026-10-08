@@ -34,6 +34,7 @@ import type {
   ValidateProcessCensusRequest,
   ValidateProcessCensusResponse,
   VotingProcessListResponse,
+  VotingProcessMetadata,
   VotingProcessQuestionRequest,
   VotingProcessResponse,
   VotingProcessResultsResponse,
@@ -312,6 +313,50 @@ export class ElectionsClient {
     if (!isEnqueued(res)) return res
     const job = await this.jobs.waitFor(res.jobId, opts)
     return { address: job.result?.address ?? '', status: job.result?.status ?? '' }
+  }
+
+  /**
+   * Read the text of a process (title, description, header, stream URI and
+   * each question's and choice's text) via `GET /processes/{id}/metadata`.
+   */
+  async getProcessMetadata(processId: string): Promise<VotingProcessMetadata> {
+    return this.fetch<VotingProcessMetadata>(`/processes/${processId}/metadata`).catch(handleError)
+  }
+
+  /**
+   * Replace the text of a process via `PUT /processes/{id}/metadata`
+   * (Manager/Admin). The body must match the process shape exactly — same
+   * number of questions, same number of choices per question — or the API
+   * answers 400.
+   *
+   * A draft is updated in place and this resolves to `undefined`. A published
+   * process is updated on chain (one transaction per question, so votes
+   * attest the new metadata hash): this resolves to the enqueued job, to poll
+   * with `jobs.waitFor`, or use {@link updateProcessMetadataAndWait}.
+   */
+  async updateProcessMetadata(
+    processId: string,
+    metadata: VotingProcessMetadata,
+  ): Promise<EnqueuedResponse | undefined> {
+    const res = await this.fetch<Partial<EnqueuedResponse> | undefined>(`/processes/${processId}/metadata`, {
+      method: 'PUT',
+      body: metadata,
+    }).catch(handleError)
+    return typeof res?.jobId === 'string' ? { jobId: res.jobId } : undefined
+  }
+
+  /**
+   * {@link updateProcessMetadata}, waiting for the on-chain update of a
+   * published process to complete. Resolves once the new text is in effect;
+   * throws `JobFailedError` if the job fails.
+   */
+  async updateProcessMetadataAndWait(
+    processId: string,
+    metadata: VotingProcessMetadata,
+    opts?: WaitForJobOptions,
+  ): Promise<void> {
+    const res = await this.updateProcessMetadata(processId, metadata)
+    if (res) await this.jobs.waitFor(res.jobId, opts)
   }
 
   /**

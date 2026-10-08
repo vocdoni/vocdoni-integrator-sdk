@@ -329,6 +329,19 @@ const { participants } = await client.elections.participants(mongoId, {
 const { added, jobId } = await client.elections.addCensusMembers(mongoId, ['m-1', 'm-2'])
 if (jobId) await client.jobs.waitFor(jobId)
 
+// Admin: read and edit the process TEXT (title, description, header,
+// streamUri, question/choice titles), drafts and published processes alike
+// (GET/PUT /processes/{id}/metadata). Questions and choices are matched by
+// position: the body must have exactly as many of each as the process (400
+// otherwise). A draft is updated in place (resolves undefined); a published
+// process is updated on chain, one tx per question (resolves { jobId }).
+// Votes attesting the old text's metadata hash are then refused on chain.
+const text = await client.elections.getProcessMetadata(mongoId)
+text.questions[0].title = { default: 'Fixed typo' }
+const pending = await client.elections.updateProcessMetadata(mongoId, text)
+if (pending) await client.jobs.waitFor(pending.jobId)
+// Or: await client.elections.updateProcessMetadataAndWait(mongoId, text)
+
 // Admin: publish-readiness dry-run (GET /processes/{id}/validation).
 const { valid, errors } = await client.elections.validate(mongoId)
 

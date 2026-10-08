@@ -697,6 +697,35 @@ export interface PublicQuestionResponse {
   results?: QuestionResults
 }
 
+/** One choice's text in {@link VotingProcessMetadata}. */
+export interface VotingProcessMetadataChoice {
+  title: MultiLangString
+}
+
+/** One question's text in {@link VotingProcessMetadata}. */
+export interface VotingProcessMetadataQuestion {
+  title: MultiLangString
+  description?: MultiLangString
+  /** One entry per choice of the question, in the question's choice order. */
+  choices: VotingProcessMetadataChoice[]
+}
+
+/**
+ * The human-readable text of a voting process: what `GET` and
+ * `PUT /processes/{id}/metadata` read and write. Questions and choices are
+ * matched by position, so an update must carry exactly as many questions as the
+ * process, and as many choices per question as it has (400 otherwise); only the
+ * text can change, never the ballot itself.
+ */
+export interface VotingProcessMetadata {
+  title: MultiLangString
+  description?: MultiLangString
+  header?: string
+  streamUri?: string
+  /** One entry per question of the process, in process order. */
+  questions: VotingProcessMetadataQuestion[]
+}
+
 /** Per-question entry in `GET /processes/{id}/results` — a {@link QuestionResults} plus ids. */
 export interface VotingProcessQuestionResults extends QuestionResults {
   questionId: string
