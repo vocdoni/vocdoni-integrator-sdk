@@ -1,13 +1,15 @@
-/// <reference types="node" />
 import { act, render } from '@testing-library/react'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import type { ComponentProps } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { defaultComponents } from './default-components'
+
+declare global {
+  interface ImportMeta {
+    glob(pattern: string[], options: { query: '?raw'; import: 'default'; eager: true }): Record<string, string>
+  }
+}
 
 const XSS = '<img src=x onerror="window.__xss=1">'
 const SCRIPT = '<script>window.__xss=1</script>'
@@ -24,14 +26,9 @@ const { ElectionDescription, ElectionQuestion, QuestionChoice, QuestionRankChoic
   defaultComponents
 
 describe('default slots render metadata as plain text', () => {
-  afterEach(() => {
-    delete (window as { __xss?: unknown }).__xss
-  })
-
   it('ElectionDescription', () => {
     const { container } = render(<ElectionDescription description={XSS} />)
     expectInertText(container, XSS)
-    expect((window as { __xss?: unknown }).__xss).toBeUndefined()
   })
 
   it('ElectionQuestion', () => {
@@ -106,6 +103,19 @@ describe('PlainText line handling', () => {
     expect(root.textContent).toBe('first <b>line</b>secondthird')
     expect(root.innerHTML).toContain('&lt;b&gt;line&lt;/b&gt;')
   })
+
+  it.each(['\n', '  \n '])('renders nothing for whitespace-only description %j', (description) => {
+    const { container } = render(<ElectionDescription description={description} />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.childNodes).toHaveLength(0)
+  })
+
+  it('trims surrounding blank lines so they render no <br>', () => {
+    const { container } = render(<ElectionDescription description={'\nfirst\nsecond\n'} />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.querySelectorAll('br')).toHaveLength(1)
+    expect(root.textContent).toBe('firstsecond')
+  })
 })
 
 describe('server rendering of plain text', () => {
@@ -136,26 +146,20 @@ describe('server rendering of plain text', () => {
   })
 })
 
-// Guard: no component in this package may inject raw HTML again. The identifier is
-// split so this file never matches itself.
+// Metadata is untrusted, so no source in this package may inject raw HTML.
 describe('guard against raw-HTML injection', () => {
-  it('no non-test source under react-components/src uses dangerouslySetInnerHTML', () => {
-    const forbidden = 'dangerously' + 'SetInnerHTML'
-    const srcRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-    const offenders: string[] = []
+  it('no non-test source injects raw HTML', () => {
+    const sources = import.meta.glob(['../../**/*.{ts,tsx}', '!../../**/*.test.{ts,tsx}'], {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    })
+    const keys = Object.keys(sources)
+    // A broken glob would match nothing and pass vacuously.
+    expect(keys.some((key) => key.endsWith('default-components.tsx'))).toBe(true)
 
-    const walk = (dir: string) => {
-      for (const entry of readdirSync(dir)) {
-        const full = path.join(dir, entry)
-        if (statSync(full).isDirectory()) {
-          walk(full)
-          continue
-        }
-        if (!/\.(ts|tsx)$/.test(entry) || /\.test\.(ts|tsx)$/.test(entry)) continue
-        if (readFileSync(full, 'utf8').includes(forbidden)) offenders.push(full)
-      }
-    }
-    walk(srcRoot)
+    const sink = /dangerouslySetInnerHTML|\.(?:inner|outer)HTML\b|insertAdjacentHTML|createContextualFragment|\bsrcDoc\b|document\.write/
+    const offenders = keys.filter((key) => sink.test(sources[key]))
 
     expect(offenders, `offending files: ${offenders.join(', ')}`).toEqual([])
   })

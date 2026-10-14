@@ -13,8 +13,9 @@ const ActionButton = ({ label, loading, ...props }: any) => (
 // Metadata is untrusted (any account can write it), so it renders as text only.
 // A slot that wants Markdown or HTML must override it and sanitize the output.
 const PlainText = ({ text, ...rest }: HTMLAttributes<HTMLDivElement> & { text?: string }) => {
-  if (!text) return null
-  const lines = text.split(/\r\n|\r|\n/)
+  const value = text?.trim()
+  if (!value) return null
+  const lines = value.split(/\r\n|\r|\n/)
   return (
     <div {...rest}>
       {lines.map((line, index) => (
