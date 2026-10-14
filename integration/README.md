@@ -83,8 +83,8 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
   A later sticky comment replaces the earlier one.
 - A bare `/integration` is one-shot and does not change the sticky state.
 - `/integration reset` clears the sticky state, and takes no other token.
-- Only sticky refs from owners, members and collaborators count. Other comments
-  are ignored for this purpose.
+- Only sticky refs from users with write access count, checked the same way as
+  comment runs. Other comments are ignored for this purpose.
 - Pushes to the upstream PR do not re-run this check. Push to the SDK PR, re-run
   the check, or comment again.
 - The `pull_request` check runs the workflow from the PR's merge commit, so once

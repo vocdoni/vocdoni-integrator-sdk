@@ -204,8 +204,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Empty unless a /integration comment pinned the PR head or a dispatch
-          # named an SDK ref; then the default event ref is used, as before.
+          # Empty except for /integration comment runs (the PR's merge commit)
+          # and dispatches with integrator_sdk_ref; empty means the default event ref.
           ref: ${{ needs.resolve.outputs.checkout_ref }}
           persist-credentials: false
 
