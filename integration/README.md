@@ -37,12 +37,11 @@ what CI does. Tear it down afterwards with:
 scripts/integration-stack.sh down
 ```
 
-The stack pins `ghcr.io/vocdoni/saas-backend:main`. Override it to run against
-an unmerged backend branch:
-
-```bash
-SAAS_BACKEND_IMAGE=ghcr.io/vocdoni/saas-backend:pr-641 pnpm test:integration:stack
-```
+The stack pins `ghcr.io/vocdoni/vocdoni-node:main` and
+`ghcr.io/vocdoni/saas-backend:main`. Override either with `VOCDONI_NODE_IMAGE`
+or `SAAS_BACKEND_IMAGE` to run against an unmerged build. Neither upstream
+publishes per-commit images, so build one from source; see
+[Pinning upstream commits](#pinning-upstream-commits).
 
 To drive the stack and the suite as separate steps (e.g. to reuse the same
 stack across repeated test runs), use `scripts/integration-stack.sh up` to
@@ -53,6 +52,60 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
 `up` funds the integrator wallet with `INTEGRATION_WALLET_CENTS` (default
 €100,000). Each run spends €325 of it and nothing refunds it, so a reused stack
 lasts about 300 runs.
+
+## Pinning upstream commits
+
+Comment on a pull request to run the suite against `vocdoni-node` and/or
+`saas-backend` built from source at a given ref:
+
+```text
+/integration vocdoni-node=1a2b3c4 saas-backend=feat/wallets
+```
+
+- Each key is optional; a bare `/integration` uses the published `:main` images.
+- A ref can be a commit SHA (short or full, 7-40 hex), a branch, a tag, or
+  `#<PR number>` (its current head commit, e.g. `saas-backend=#760`).
+- Only users with write access can trigger it; comments from anyone else are
+  ignored silently.
+- The run tests the PR's merge commit, as the `pull_request` check does, as it
+  is when the run starts. The SDK SHA it tested is in the result comment.
+- Each comment starts its own run; earlier ones are not cancelled.
+- Images are built from source, so allow ~10+ extra minutes.
+- The result is posted back to the PR as a comment with the SHAs and the run link.
+- The comment trigger runs the workflow file from `main`, so changes to it only
+  take effect once merged.
+
+### One-shot or sticky
+
+- A comment with any SHA runs once.
+- A comment whose refs are all branches, tags or PRs sticks: every push to the
+  PR re-resolves those refs and builds them again, until `/integration reset`.
+  A later sticky comment replaces the earlier one.
+- A bare `/integration` is one-shot and does not change the sticky state.
+- `/integration reset` clears the sticky state, and takes no other token.
+- Only sticky refs from users with write access count, checked the same way as
+  comment runs. Other comments are ignored for this purpose.
+- Pushes to the upstream PR do not re-run this check. Push to the SDK PR, re-run
+  the check, or comment again.
+- The `pull_request` check runs the workflow from the PR's merge commit, so once
+  this is on `main` open PRs pick it up on their next push, unless they conflict with `main`.
+
+### Actions tab
+
+The "Run workflow" form takes `vocdoni_node_ref`, `saas_backend_ref` (same forms
+as above) and `integrator_sdk_ref`: the SDK commit, branch or `#PR` to test.
+Leave it empty to test the branch picked in "Use workflow from".
+
+Locally, build an image and point the stack at it:
+
+```bash
+image=$(scripts/integration-build-image.sh vocdoni-node <ref> | sed -n 's/^image=//p')
+[ -n "$image" ] && VOCDONI_NODE_IMAGE=$image pnpm test:integration:stack
+```
+
+The `up` step prints the two images it is using, so a run shows what it tested.
+
+Use `SAAS_BACKEND_IMAGE` and `saas-backend` the same way.
 
 ## What it covers
 
