@@ -64,8 +64,11 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
 
 - Each key is optional; a bare `/integration` uses the published `:main` images.
 - A ref can be a commit SHA (short or full), a branch or a tag.
-- Only users with write access can trigger it. The PR head is pinned when the
-  comment is made, so later pushes do not change what runs.
+- Only users with write access can trigger it; comments from anyone else are
+  ignored silently.
+- The run tests the PR's merge commit, as the `pull_request` check does, as it
+  is when the run starts. The SDK SHA it tested is in the result comment.
+- Each comment starts its own run; earlier ones are not cancelled.
 - Images are built from source, so allow ~10+ extra minutes.
 - The result is posted back to the PR as a comment with the SHAs and the run link.
 - The comment trigger runs the workflow file from `main`, so changes to it only
@@ -76,8 +79,11 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
 Locally, build an image and point the stack at it:
 
 ```bash
-VOCDONI_NODE_IMAGE=$(scripts/integration-build-image.sh vocdoni-node <ref> | sed -n 's/^image=//p') pnpm test:integration:stack
+image=$(scripts/integration-build-image.sh vocdoni-node <ref> | sed -n 's/^image=//p')
+[ -n "$image" ] && VOCDONI_NODE_IMAGE=$image pnpm test:integration:stack
 ```
+
+The `up` step prints the two images it is using, so a run shows what it tested.
 
 Use `SAAS_BACKEND_IMAGE` and `saas-backend` the same way.
 

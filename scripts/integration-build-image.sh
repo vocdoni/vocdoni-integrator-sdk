@@ -34,25 +34,27 @@ fi
 dir="$(mktemp -d)"
 trap 'rm -rf "$dir"' EXIT
 
-git clone --quiet --filter=blob:none --no-checkout "https://github.com/vocdoni/$repo.git" "$dir" >&2
-
-# Branches and tags first, then remote branches, then a direct fetch for refs
-# only reachable by SHA (e.g. a fork PR head).
-resolve() {
-  git -C "$dir" rev-parse --verify --quiet "$1^{commit}" 2>/dev/null || true
-}
-sha="$(resolve "$ref")"
-if [ -z "$sha" ]; then
-  sha="$(resolve "origin/$ref")"
+# Resolves the ref through the GitHub API, which takes a branch, tag or short/full
+# SHA (fork PR heads included), then shallow-fetches exactly that commit.
+auth=()
+if [ -n "${GH_TOKEN:-}" ]; then
+  auth=(-H "Authorization: Bearer $GH_TOKEN")
 fi
-if [ -z "$sha" ] && git -C "$dir" fetch --quiet origin "$ref" >&2; then
-  sha="$(resolve FETCH_HEAD)"
+body="$dir/resolve.txt"
+if curl -fsSL ${auth[@]+"${auth[@]}"} -H 'Accept: application/vnd.github.sha' \
+  "https://api.github.com/repos/vocdoni/$repo/commits/$ref" -o "$body"; then
+  sha="$(cat "$body")"
+else
+  sha=""
 fi
-if [ -z "$sha" ]; then
+rm -f "$body"
+if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
   echo "ERROR: could not resolve '$ref' in vocdoni/$repo" >&2
   exit 1
 fi
-git -C "$dir" checkout --quiet "$sha" >&2
+git -C "$dir" init --quiet >&2
+git -C "$dir" fetch --quiet --depth 1 "https://github.com/vocdoni/$repo.git" "$sha" >&2
+git -C "$dir" checkout --quiet FETCH_HEAD >&2
 
 tag="integrator-sdk-integration/$repo:$sha"
 echo "== building $repo@$sha" >&2
