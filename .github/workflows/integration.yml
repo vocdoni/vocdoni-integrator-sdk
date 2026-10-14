@@ -6,21 +6,110 @@ name: Integration
 # externally-published images and a live chain, so a red run often means
 # "upstream moved" rather than "this repo is broken" — that must not block npm
 # publishing (release gating stays on .github/workflows/test.yml only).
+# A maintainer comment `/integration vocdoni-node=<ref> saas-backend=<ref>` on a PR
+# runs it against images built from source at those refs (see integration/README.md).
+# workflow_dispatch takes the same refs as inputs.
 on:
   push:
     branches: [main]
   schedule:
     - cron: '37 3 * * *'
   workflow_dispatch:
+    inputs:
+      vocdoni_node_ref:
+        description: 'vocdoni-node commit SHA, branch or tag to build from source (empty = :main image)'
+        type: string
+        required: false
+        default: ''
+      saas_backend_ref:
+        description: 'saas-backend commit SHA, branch or tag to build from source (empty = :main image)'
+        type: string
+        required: false
+        default: ''
+  issue_comment:
+    types: [created]
   pull_request:
 
-concurrency:
-  group: integration-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
+  resolve:
+    name: Resolve refs
+    runs-on: ubuntu-latest
+    # Only a `/integration` comment on a pull request starts this workflow from
+    # issue_comment; every other comment is skipped here and nothing else runs.
+    if: github.event_name != 'issue_comment' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/integration'))
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write # the 👀 reaction on the comment
+    outputs:
+      checkout_ref: ${{ steps.refs.outputs.checkout_ref }}
+      vocdoni_node_ref: ${{ steps.refs.outputs.vocdoni_node_ref }}
+      saas_backend_ref: ${{ steps.refs.outputs.saas_backend_ref }}
+      pr_number: ${{ steps.refs.outputs.pr_number }}
+    steps:
+      # Default ref: on issue_comment that is the default branch, so the parser
+      # below always runs trusted code, never the commented PR's.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve refs
+        id: refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          PR: ${{ github.event.issue.number }}
+          DISPATCH_NODE: ${{ inputs.vocdoni_node_ref }}
+          DISPATCH_SAAS: ${{ inputs.saas_backend_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = issue_comment ]; then
+            permission="$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq .permission 2>/dev/null || echo none)"
+            case "$permission" in
+              admin | maintain | write) ;;
+              *)
+                echo "::error::$ACTOR has '$permission' on $REPO; /integration needs write access" >&2
+                exit 1
+                ;;
+            esac
+            printf '%s\n' "$COMMENT_BODY" | scripts/integration-pins.sh >> "$GITHUB_OUTPUT"
+            # Pin the head at comment time, so a later push cannot slip untested code in.
+            head_sha="$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)"
+            {
+              echo "checkout_ref=$head_sha"
+              echo "pr_number=$PR"
+            } >> "$GITHUB_OUTPUT"
+            gh api -X POST "repos/$REPO/issues/comments/$COMMENT_ID/reactions" -f content=eyes >/dev/null || true
+          elif [ "$EVENT_NAME" = workflow_dispatch ]; then
+            line="/integration"
+            if [ -n "$DISPATCH_NODE" ]; then
+              line="$line vocdoni-node=$DISPATCH_NODE"
+            fi
+            if [ -n "$DISPATCH_SAAS" ]; then
+              line="$line saas-backend=$DISPATCH_SAAS"
+            fi
+            printf '%s\n' "$line" | scripts/integration-pins.sh >> "$GITHUB_OUTPUT"
+            {
+              echo "checkout_ref="
+              echo "pr_number="
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "vocdoni_node_ref="
+              echo "saas_backend_ref="
+              echo "checkout_ref="
+              echo "pr_number="
+            } >> "$GITHUB_OUTPUT"
+          fi
+
   integration:
     name: Integration suite
+    needs: resolve
     runs-on: ubuntu-latest
     # Runs on every PR, unconditionally. It uses no secrets and touches no
     # private images, so fork PRs need no skip condition either.
@@ -36,12 +125,28 @@ jobs:
     # printed below tell you immediately whether upstream moved. If it ever
     # becomes a nuisance, gate PR runs behind a label rather than deleting the
     # job.
-    timeout-minutes: 25
+    #
+    # Source builds of the Go images (pinned refs) add a lot of time, hence 60.
+    timeout-minutes: ${{ (needs.resolve.outputs.vocdoni_node_ref != '' || needs.resolve.outputs.saas_backend_ref != '') && 60 || 25 }}
+    # Per PR for /integration comments, so a new comment supersedes a run still
+    # in flight. The workflow-level concurrency this replaces would let any
+    # comment on any PR cancel an unrelated run.
+    concurrency:
+      group: integration-${{ github.event_name == 'issue_comment' && format('pr-{0}-pinned', github.event.issue.number) || github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
+    outputs:
+      vocdoni_node_sha: ${{ steps.pins.outputs.vocdoni_node_sha }}
+      saas_backend_sha: ${{ steps.pins.outputs.saas_backend_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Empty unless a /integration comment pinned the PR head: then the
+          # default event ref is used, exactly as before.
+          ref: ${{ needs.resolve.outputs.checkout_ref }}
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -55,15 +160,50 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build pinned images
+        id: pins
+        if: needs.resolve.outputs.vocdoni_node_ref != '' || needs.resolve.outputs.saas_backend_ref != ''
+        env:
+          NODE_REF: ${{ needs.resolve.outputs.vocdoni_node_ref }}
+          SAAS_REF: ${{ needs.resolve.outputs.saas_backend_ref }}
+        run: |
+          set -euo pipefail
+          # The build output goes to a file, not $(...): errexit is suppressed
+          # inside a command substitution, so a failed build would go unnoticed.
+          if [ -n "$NODE_REF" ]; then
+            scripts/integration-build-image.sh vocdoni-node "$NODE_REF" > "$RUNNER_TEMP/node.out"
+            image="$(sed -n 's/^image=//p' "$RUNNER_TEMP/node.out")"
+            sha="$(sed -n 's/^sha=//p' "$RUNNER_TEMP/node.out")"
+            [ -n "$image" ] && [ -n "$sha" ] || { echo "::error::no image/sha from build of vocdoni-node" >&2; exit 1; }
+            echo "VOCDONI_NODE_IMAGE=$image" >> "$GITHUB_ENV"
+            echo "vocdoni_node_sha=$sha" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$SAAS_REF" ]; then
+            scripts/integration-build-image.sh saas-backend "$SAAS_REF" > "$RUNNER_TEMP/saas.out"
+            image="$(sed -n 's/^image=//p' "$RUNNER_TEMP/saas.out")"
+            sha="$(sed -n 's/^sha=//p' "$RUNNER_TEMP/saas.out")"
+            [ -n "$image" ] && [ -n "$sha" ] || { echo "::error::no image/sha from build of saas-backend" >&2; exit 1; }
+            echo "SAAS_BACKEND_IMAGE=$image" >> "$GITHUB_ENV"
+            echo "saas_backend_sha=$sha" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Print resolved image digests
         # :main is tracked deliberately (see integration/README.md); a green
         # run can go red with no change in this repo. This makes a red run
         # reproducible locally.
         run: |
-          docker pull ghcr.io/vocdoni/vocdoni-node:main
-          docker pull ghcr.io/vocdoni/saas-backend:main
-          docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/vocdoni/vocdoni-node:main
-          docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/vocdoni/saas-backend:main
+          if [ -n "${VOCDONI_NODE_IMAGE:-}" ]; then
+            echo "vocdoni-node built from source: $VOCDONI_NODE_IMAGE"
+          else
+            docker pull ghcr.io/vocdoni/vocdoni-node:main
+            docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/vocdoni/vocdoni-node:main
+          fi
+          if [ -n "${SAAS_BACKEND_IMAGE:-}" ]; then
+            echo "saas-backend built from source: $SAAS_BACKEND_IMAGE"
+          else
+            docker pull ghcr.io/vocdoni/saas-backend:main
+            docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/vocdoni/saas-backend:main
+          fi
 
       - name: Start stack and bootstrap integrator key
         id: stack
@@ -93,3 +233,49 @@ jobs:
       - name: Tear down stack
         if: always()
         run: scripts/integration-stack.sh down
+
+  report:
+    name: Report to PR
+    needs: [resolve, integration]
+    if: always() && github.event_name == 'issue_comment' && needs.resolve.result != 'skipped'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post result to the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+          RESOLVE: ${{ needs.resolve.result }}
+          RESULT: ${{ needs.integration.result }}
+          CHECKOUT: ${{ needs.resolve.outputs.checkout_ref }}
+          NODE_REF: ${{ needs.resolve.outputs.vocdoni_node_ref }}
+          SAAS_REF: ${{ needs.resolve.outputs.saas_backend_ref }}
+          NODE_SHA: ${{ needs.integration.outputs.vocdoni_node_sha }}
+          SAAS_SHA: ${{ needs.integration.outputs.saas_backend_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/report.md"
+          # One line per upstream: ':main image' when unpinned, 'ref → sha' when pinned.
+          upstream() {
+            if [ -n "$2" ]; then
+              echo "- $1: $2 → ${3:-not built}"
+            else
+              echo "- $1: :main image"
+            fi
+          }
+          {
+            if [ "$RESOLVE" != success ]; then
+              echo "Integration run: **rejected**. The \`/integration\` command was not accepted, see the run log."
+            else
+              echo "Integration run: **$RESULT**"
+            fi
+            echo
+            echo "- SDK: ${CHECKOUT:-not resolved}"
+            upstream vocdoni-node "$NODE_REF" "$NODE_SHA"
+            upstream saas-backend "$SAAS_REF" "$SAAS_SHA"
+            echo "- Run: $RUN_URL"
+          } > "$body"
+          gh pr comment "$PR" -R "$REPO" --body-file "$body"

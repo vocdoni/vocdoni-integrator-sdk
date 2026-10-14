@@ -37,12 +37,11 @@ what CI does. Tear it down afterwards with:
 scripts/integration-stack.sh down
 ```
 
-The stack pins `ghcr.io/vocdoni/saas-backend:main`. Override it to run against
-an unmerged backend branch:
-
-```bash
-SAAS_BACKEND_IMAGE=ghcr.io/vocdoni/saas-backend:pr-641 pnpm test:integration:stack
-```
+The stack pins `ghcr.io/vocdoni/vocdoni-node:main` and
+`ghcr.io/vocdoni/saas-backend:main`. Override either with `VOCDONI_NODE_IMAGE`
+or `SAAS_BACKEND_IMAGE` to run against an unmerged build. Neither upstream
+publishes per-commit images, so build one from source; see
+[Pinning upstream commits](#pinning-upstream-commits).
 
 To drive the stack and the suite as separate steps (e.g. to reuse the same
 stack across repeated test runs), use `scripts/integration-stack.sh up` to
@@ -53,6 +52,34 @@ export those and run `pnpm test:integration` directly. If port `8080` (or
 `up` funds the integrator wallet with `INTEGRATION_WALLET_CENTS` (default
 €100,000). Each run spends €325 of it and nothing refunds it, so a reused stack
 lasts about 300 runs.
+
+## Pinning upstream commits
+
+Comment on a pull request to run the suite against `vocdoni-node` and/or
+`saas-backend` built from source at a given ref:
+
+```text
+/integration vocdoni-node=1a2b3c4 saas-backend=feat/wallets
+```
+
+- Each key is optional; a bare `/integration` uses the published `:main` images.
+- A ref can be a commit SHA (short or full), a branch or a tag.
+- Only users with write access can trigger it. The PR head is pinned when the
+  comment is made, so later pushes do not change what runs.
+- Images are built from source, so allow ~10+ extra minutes.
+- The result is posted back to the PR as a comment with the SHAs and the run link.
+- The comment trigger runs the workflow file from `main`, so changes to it only
+  take effect once merged.
+- The Actions tab's "Run workflow" takes the same refs as the `vocdoni_node_ref`
+  and `saas_backend_ref` inputs.
+
+Locally, build an image and point the stack at it:
+
+```bash
+VOCDONI_NODE_IMAGE=$(scripts/integration-build-image.sh vocdoni-node <ref> | sed -n 's/^image=//p') pnpm test:integration:stack
+```
+
+Use `SAAS_BACKEND_IMAGE` and `saas-backend` the same way.
 
 ## What it covers
 
