@@ -63,7 +63,8 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
 ```
 
 - Each key is optional; a bare `/integration` uses the published `:main` images.
-- A ref can be a commit SHA (short or full), a branch or a tag.
+- A ref can be a commit SHA (short or full, 7-40 hex), a branch, a tag, or
+  `#<PR number>` (its current head commit, e.g. `saas-backend=#760`).
 - Only users with write access can trigger it; comments from anyone else are
   ignored silently.
 - The run tests the PR's merge commit, as the `pull_request` check does, as it
@@ -73,8 +74,27 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
 - The result is posted back to the PR as a comment with the SHAs and the run link.
 - The comment trigger runs the workflow file from `main`, so changes to it only
   take effect once merged.
-- The Actions tab's "Run workflow" takes the same refs as the `vocdoni_node_ref`
-  and `saas_backend_ref` inputs.
+
+### One-shot or sticky
+
+- A comment with any SHA runs once.
+- A comment whose refs are all branches, tags or PRs sticks: every push to the
+  PR re-resolves those refs and builds them again, until `/integration reset`.
+  A later sticky comment replaces the earlier one.
+- A bare `/integration` is one-shot and does not change the sticky state.
+- `/integration reset` clears the sticky state, and takes no other token.
+- Only sticky refs from owners, members and collaborators count. Other comments
+  are ignored for this purpose.
+- Pushes to the upstream PR do not re-run this check. Push to the SDK PR, re-run
+  the check, or comment again.
+- The `pull_request` check runs the workflow from the PR's merge commit, so once
+  this is on `main` open PRs pick it up on their next push, unless they conflict with `main`.
+
+### Actions tab
+
+The "Run workflow" form takes `vocdoni_node_ref`, `saas_backend_ref` (same forms
+as above) and `integrator_sdk_ref`: the SDK commit, branch or `#PR` to test.
+Leave it empty to test the branch picked in "Use workflow from".
 
 Locally, build an image and point the stack at it:
 

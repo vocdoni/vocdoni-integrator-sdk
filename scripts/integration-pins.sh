@@ -5,12 +5,18 @@
 # Usage:
 #   printf '%s' "$COMMENT_BODY" | scripts/integration-pins.sh
 #
-# Example first line: /integration vocdoni-node=1a2b3c4 saas-backend=feat/wallets
+# Example first line: /integration vocdoni-node=1a2b3c4 saas-backend=#760
+#   or: /integration reset
+# A ref is a commit SHA (7-40 hex), a branch or tag, or #<PR number>.
+# sticky=true when refs are given and none is a SHA: the refs are re-resolved
+# on every push until `/integration reset`. A comment with any SHA runs once.
 #
 # Env: none. Input: the comment body on stdin.
 # Output (stdout, exit 0):
 #   vocdoni_node_ref=<ref or empty>
 #   saas_backend_ref=<ref or empty>
+#   sticky=true|false
+#   reset=true|false
 # Errors go to stderr with exit 1. The ref grammar blocks leading '-' and '..',
 # so a ref can never be read by git or docker as an option or a path escape.
 set -euo pipefail
@@ -30,10 +36,18 @@ fi
 tokens=()
 read -ra tokens <<<"${line#/integration}" || true
 
+if [ "${#tokens[@]}" -gt 0 ] && [ "${tokens[0]}" = reset ]; then
+  [ "${#tokens[@]}" = 1 ] || fail "'reset' takes no other tokens"
+  printf 'vocdoni_node_ref=\nsaas_backend_ref=\nsticky=false\nreset=true\n'
+  exit 0
+fi
+
 node_ref=""
 saas_ref=""
 seen_node=0
 seen_saas=0
+sticky_refs=0
+sha_refs=0
 for tok in ${tokens[@]+"${tokens[@]}"}; do
   if [[ "$tok" != *=* ]]; then
     fail "'$tok' is not key=ref"
@@ -56,9 +70,22 @@ for tok in ${tokens[@]+"${tokens[@]}"}; do
       ;;
   esac
   [ -n "$ref" ] || fail "empty ref for '$key'"
-  if ! [[ "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || [[ "$ref" == *..* ]]; then
+  if [[ "$ref" =~ ^#[0-9]{1,9}$ ]]; then
+    sticky_refs=$((sticky_refs + 1))
+  elif [[ "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] && [[ "$ref" != *..* ]]; then
+    if [[ "$ref" =~ ^[0-9A-Fa-f]{7,40}$ ]]; then
+      sha_refs=$((sha_refs + 1))
+    else
+      sticky_refs=$((sticky_refs + 1))
+    fi
+  else
     fail "invalid ref '$ref' for '$key'"
   fi
 done
 
-printf 'vocdoni_node_ref=%s\nsaas_backend_ref=%s\n' "$node_ref" "$saas_ref"
+sticky=false
+if [ "$sticky_refs" -gt 0 ] && [ "$sha_refs" = 0 ]; then
+  sticky=true
+fi
+
+printf 'vocdoni_node_ref=%s\nsaas_backend_ref=%s\nsticky=%s\nreset=false\n' "$node_ref" "$saas_ref" "$sticky"

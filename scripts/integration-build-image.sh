@@ -4,7 +4,7 @@
 # per-commit images, so this is the only way to get one.
 #
 # Usage:
-#   scripts/integration-build-image.sh <vocdoni-node|saas-backend> <ref>
+#   scripts/integration-build-image.sh <vocdoni-node|saas-backend> <ref|#PR>
 #
 # Output (stdout; everything else goes to stderr):
 #   image=integrator-sdk-integration/<repo>:<sha>
@@ -26,7 +26,7 @@ case "$repo" in
     exit 1
     ;;
 esac
-if ! [[ "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || [[ "$ref" == *..* ]]; then
+if ! [[ "$ref" =~ ^#[0-9]{1,9}$ || "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || [[ "$ref" == *..* ]]; then
   echo "ERROR: invalid ref '$ref'" >&2
   exit 1
 fi
@@ -34,14 +34,25 @@ fi
 dir="$(mktemp -d)"
 trap 'rm -rf "$dir"' EXIT
 
-# Resolves the ref through the GitHub API, which takes a branch, tag or short/full
-# SHA (fork PR heads included), then shallow-fetches exactly that commit.
+# Resolves the ref through the GitHub API, then shallow-fetches exactly that commit.
+# A #N ref reads the PR's head SHA; a branch, tag or short/full SHA goes via commits.
 auth=()
 if [ -n "${GH_TOKEN:-}" ]; then
   auth=(-H "Authorization: Bearer $GH_TOKEN")
 fi
 body="$dir/resolve.txt"
-if curl -fsSL ${auth[@]+"${auth[@]}"} -H 'Accept: application/vnd.github.sha' \
+if [[ "$ref" == \#* ]]; then
+  command -v jq >/dev/null || {
+    echo "ERROR: jq is required to resolve '$ref'" >&2
+    exit 1
+  }
+  if curl -fsSL ${auth[@]+"${auth[@]}"} -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/vocdoni/$repo/pulls/${ref:1}" -o "$body"; then
+    sha="$(jq -r '.head.sha // empty' "$body")"
+  else
+    sha=""
+  fi
+elif curl -fsSL ${auth[@]+"${auth[@]}"} -H 'Accept: application/vnd.github.sha' \
   "https://api.github.com/repos/vocdoni/$repo/commits/$ref" -o "$body"; then
   sha="$(cat "$body")"
 else
