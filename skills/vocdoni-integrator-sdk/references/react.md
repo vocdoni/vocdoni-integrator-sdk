@@ -429,6 +429,8 @@ voter count — same as it already does for budget/quadratic amounts.
 // Not yet documented — check packages/react-components/src/components/ for the current API
 ```
 
+Default slots render every metadata text (election, question, choice and organization descriptions) as plain text with line breaks, never as HTML, because any account can write it. To show Markdown or HTML, override the slot and sanitize the output (for example, react-markdown without raw HTML, or DOMPurify).
+
 ---
 
 ## Complete minimal voting UI
