@@ -17,6 +17,20 @@ When updating skills:
 - Update the relevant `references/*.md` file for detailed API docs.
 - Update or add a `recipes/*.ts` file when the change affects a runnable example.
 
+## Integration Tests Against Unmerged Upstream Changes
+
+The integration suite (`.github/workflows/integration.yml`) runs on every PR against the published `:main` images of `vocdoni/vocdoni-node` and `vocdoni/saas-backend`. When a change here depends on upstream work that is not merged yet, that run fails or proves nothing.
+
+**Rule: when a PR depends on an unmerged `saas-backend` or `vocdoni-node` change, open the PR with its usual description (linking the upstream PR), then post a separate PR comment with the `/integration` command pointing at that upstream PR, e.g. `/integration saas-backend=#760`.** The command does nothing in the PR description; only a comment triggers it. That comment holds the command alone, with no signature or other text.
+
+- Each key (`vocdoni-node=`, `saas-backend=`) is optional. A ref is a SHA, branch, tag or `#PR`. The images are built from source, so the run takes longer.
+- A comment whose refs are all branches, tags or PRs is **sticky**: every later push to the PR re-runs against those refs at their current heads. Any SHA makes the comment a one-shot run. `/integration reset` goes back to the `:main` images.
+- Only users with write access can trigger it. The result is posted back as a PR comment, not as a PR check.
+- Pushes to the upstream PR do not re-run anything here. Push to this PR or comment again.
+- Do not treat a green pinned run as ready to merge: the SDK PR should merge only after the upstream change it needs is merged and deployed.
+
+See `integration/README.md` ("Pinning upstream commits") for the details.
+
 ## Downstream Repositories
 
 The SDK has consumers outside this repo that do not update themselves. Changing public API surface here leaves them stale until someone tells them, so suggest the follow-up to the user. Do not open issues or PRs in other repos without asking: suggest them, and let the user decide.

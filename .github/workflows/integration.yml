@@ -364,13 +364,28 @@ jobs:
           NODE_SHA: ${{ needs.integration.outputs.vocdoni_node_sha }}
           SAAS_SHA: ${{ needs.integration.outputs.saas_backend_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
         run: |
           set -euo pipefail
           body="$RUNNER_TEMP/report.md"
+          # Refs and SHAs are printed as full URLs: a bare #N or SHA would link to this repo.
           # One line per upstream: ':main image' when unpinned, 'ref → sha' when pinned.
           upstream() {
-            if [ -n "$2" ]; then
-              echo "- $1: $2 → ${3:-not built}"
+            local base="https://github.com/vocdoni/$1" ref="$2" sha="$3" ref_link sha_link
+            if [[ "$ref" =~ ^#([0-9]+)$ ]]; then
+              ref_link="$base/pull/${BASH_REMATCH[1]}"
+            elif [[ "$ref" =~ ^[0-9A-Fa-f]{7,40}$ ]]; then
+              ref_link="$base/commit/$ref"
+            else
+              ref_link="[\`$ref\`]($base/tree/$ref)"
+            fi
+            if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              sha_link="$base/commit/$sha"
+            else
+              sha_link='not built'
+            fi
+            if [ -n "$ref" ]; then
+              echo "- $1: $ref_link → $sha_link"
             else
               echo "- $1: :main image"
             fi
@@ -387,8 +402,8 @@ jobs:
             else
               echo "Integration run: **$RESULT**"
               echo
-              if [ -n "$CHECKOUT" ] && [ -n "$HEAD_SHA" ]; then
-                echo "- SDK: merge of $HEAD_SHA ($CHECKOUT)"
+              if [[ "$CHECKOUT" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "- SDK: merge of $SERVER_URL/$REPO/commit/$HEAD_SHA ($SERVER_URL/$REPO/commit/$CHECKOUT)"
               else
                 echo "- SDK: not resolved"
               fi
