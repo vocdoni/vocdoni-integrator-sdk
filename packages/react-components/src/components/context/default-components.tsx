@@ -1,4 +1,4 @@
-import { FormEvent, HTMLAttributes } from 'react'
+import { FormEvent, Fragment, HTMLAttributes } from 'react'
 import { HR } from '../shared/HR'
 import { linkifyIpfs } from '../shared/ipfs'
 import { ComponentsDefinition } from './types'
@@ -10,9 +10,22 @@ const ActionButton = ({ label, loading, ...props }: any) => (
   </button>
 )
 
-const TrustedHtml = ({ html, ...rest }: HTMLAttributes<HTMLDivElement> & { html?: string }) => {
-  if (!html) return null
-  return <div {...rest} dangerouslySetInnerHTML={{ __html: html }} />
+// Metadata is untrusted (any account can write it), so it renders as text only.
+// A slot that wants Markdown or HTML must override it and sanitize the output.
+const PlainText = ({ text, ...rest }: HTMLAttributes<HTMLDivElement> & { text?: string }) => {
+  const value = text?.trim()
+  if (!value) return null
+  const lines = value.split(/\r\n|\r|\n/)
+  return (
+    <div {...rest}>
+      {lines.map((line, index) => (
+        <Fragment key={index}>
+          {index > 0 ? <br /> : null}
+          {line}
+        </Fragment>
+      ))}
+    </div>
+  )
 }
 
 const getTitle = (title: string | Record<string, string> | undefined): string => {
@@ -26,7 +39,7 @@ export const defaultComponents: ComponentsDefinition = {
   ElectionTitle: ({ title, ...props }) => <h1 {...props}>{title}</h1>,
   ElectionDescription: ({ description, ...props }) => (
     <div {...props}>
-      <TrustedHtml html={description} />
+      <PlainText text={description} />
     </div>
   ),
   ElectionSchedule: ({ text, ...props }) => <p {...props}>{text}</p>,
@@ -56,7 +69,7 @@ export const defaultComponents: ComponentsDefinition = {
       data-invalid={invalid ? 'true' : undefined}
     >
       <label>{title}</label>
-      <TrustedHtml html={description} />
+      <PlainText text={description} />
       {fields}
       {tip}
     </section>
@@ -111,7 +124,7 @@ export const defaultComponents: ComponentsDefinition = {
         <span data-choice-body={dataAttrs?.['data-choice-body']} data-compact={compact ? '' : undefined}>
           {label}
         </span>
-        <TrustedHtml html={description} />
+        <PlainText text={description} />
       </label>
     )
   },
@@ -158,7 +171,7 @@ export const defaultComponents: ComponentsDefinition = {
         <span data-choice-body={dataAttrs?.['data-choice-body']} data-compact={compact ? '' : undefined}>
           {label}
         </span>
-        <TrustedHtml html={description} />
+        <PlainText text={description} />
         <select
           id={`rank-${choice.value}`}
           value={position ?? ''}
@@ -234,7 +247,7 @@ export const defaultComponents: ComponentsDefinition = {
               <strong>{choice.title}</strong>
               {/* Empty for a question whose results could not be decoded. */}
               {choice.votes ? ` ${choice.votes} (${choice.percent})` : null}
-              <TrustedHtml html={choice.description} />
+              <PlainText text={choice.description} />
               {choice.image ? <img src={linkifyIpfs(choice.image)} alt={choice.title} /> : null}
             </div>
           ))}
@@ -389,7 +402,7 @@ export const defaultComponents: ComponentsDefinition = {
   OrganizationName: ({ name, ...props }) => <h1 {...props}>{name}</h1>,
   OrganizationDescription: ({ description, ...props }) => (
     <div {...props}>
-      <TrustedHtml html={description} />
+      <PlainText text={description} />
     </div>
   ),
   OrganizationAvatar: ({ src, alt, ...props }) => (src ? <img {...props} src={linkifyIpfs(src)} alt={alt} /> : null),

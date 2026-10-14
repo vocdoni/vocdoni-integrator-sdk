@@ -23,6 +23,7 @@ On top of the components it ships:
 
 - **A component slot system** (`ComponentsProvider`, `composeComponents`, `defineComponent`)
   that lets you override any built-in component with your own, without forking.
+  Default slots show descriptions as plain text, never HTML; to render Markdown or HTML, override the slot and sanitize the output.
 - **i18n** — a localization layer for all the bundled UI.
 - **Helpers** — pagination, a confirmation dialog (`ConfirmProvider` / `useConfirm`) and
   election-normalization utilities. Components that need a confirmation dialog
