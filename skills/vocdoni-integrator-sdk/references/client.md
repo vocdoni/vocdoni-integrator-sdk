@@ -122,7 +122,7 @@ const res0 = await client.elections.authStep0(processId, {
 })
 // A 'password' auth field takes the member password as its CLIENT HASH, never the
 // plaintext: lowercase_hex(SHA-256("vocdoni-member-password:" + "0x" + lowercase org
-// address without any 0x + ":" + trimmed password)). See AuthRequest.password in
+// address without any 0x + ":" + trim(password).normalize("NFC"))). See AuthRequest.password in
 // @vocdoni/api-types for the test vector. A wrong one fails like an unknown voter (40029).
 // res0.authToken — verified immediately if question.census.twoFaFields is empty (auth-only)
 //               — pending verification otherwise (proceed to step 1)

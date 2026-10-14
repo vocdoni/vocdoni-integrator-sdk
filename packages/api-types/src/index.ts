@@ -925,13 +925,16 @@ export interface AuthRequest {
    *
    * ```
    * lowercase_hex(SHA-256(UTF-8(
-   *   "vocdoni-member-password:" + canonicalAddress(orgAddress) + ":" + trim(password))))
+   *   "vocdoni-member-password:" + canonicalAddress(orgAddress) + ":" + trim(password).normalize("NFC"))))
    * canonicalAddress(a) = "0x" + lowercase(a without any leading "0x")
    * ```
    *
    * `orgAddress` is the organization's address in any form (`0x`-prefixed and
    * checksummed as organization reads return it, or bare lowercase hex as
    * process reads return `orgAddress`): the canonical form is what is hashed.
+   *
+   * Normalizing to NFC makes accented passwords typed or pasted in different Unicode forms hash the same.
+   *
    * Test vector: organization `0x00000000000000000000000000000000000000AA`
    * (or `00000000000000000000000000000000000000aa`) and password `s3cret` hash
    * to `2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e`.
