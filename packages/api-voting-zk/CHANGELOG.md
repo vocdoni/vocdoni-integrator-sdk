@@ -1,5 +1,15 @@
 # @vocdoni/api-voting-zk
 
+## 1.0.4
+
+### Patch Changes
+
+- Updated dependencies [d4b49e7]
+- Updated dependencies [87e1df7]
+- Updated dependencies [95afadb]
+  - @vocdoni/api-types@2.3.0
+  - @vocdoni/api-voting@1.2.3
+
 ## 1.0.3
 
 ### Patch Changes

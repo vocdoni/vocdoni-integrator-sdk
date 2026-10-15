@@ -1,5 +1,16 @@
 # @vocdoni/react-components
 
+## 3.2.0
+
+### Minor Changes
+
+- d4b49e7: `ElectionSchedule` now shows the real end of a process that was ended early (`endedAt ?? endDate`), and the `ElectionResults` secret-until-the-end placeholder shows the real end of the secret questions. `endedAt` is typed on the process and on each question.
+- 81e69c3: Add `resolveEndDate(process)` (`endedAt ?? endDate`, ignoring an unparseable `endedAt` or one before `startDate`) and `questionsEndedAt(questions)` (the latest `endedAt` once every question has one) to `@vocdoni/api-client`, so consumers outside the React components can show when a vote really stopped. `ElectionSchedule` and `ElectionResults` now use them, and `@vocdoni/react-components` re-exports both. This adds `@vocdoni/api-client` (>= 2.4.0) as a peer dependency of `@vocdoni/react-components`; it is already required by `@vocdoni/react-providers`.
+
+### Patch Changes
+
+- 709028e: Default slots now render descriptions as plain text instead of injecting them as HTML, fixing a stored XSS where election, question, choice and organization metadata could run script. Markdown or HTML in those descriptions now shows as literal text; override the slot to render it, with sanitization.
+
 ## 3.1.1
 
 ### Patch Changes
