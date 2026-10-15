@@ -163,8 +163,13 @@ export interface CensusInfo {
  * Member-data fields a CSP census can authenticate on. Listed in the process
  * census ({@link CensusSpec}); an auth-only census (no 2FA) is one with only
  * `authFields` set.
+ *
+ * `'password'` is the member password ({@link OrgMember.password}). It never
+ * identifies a member on its own: the other fields find the participant and the
+ * password is checked afterwards, so a census needs at least one other auth
+ * field or a 2FA field next to it.
  */
-export type OrgMemberAuthField = 'name' | 'surname' | 'memberNumber' | 'nationalId' | 'birthDate'
+export type OrgMemberAuthField = 'name' | 'surname' | 'memberNumber' | 'nationalId' | 'birthDate' | 'password'
 /** Contact fields used for the 2FA OTP challenge. */
 export type OrgMemberTwoFaField = 'email' | 'phone'
 
@@ -912,6 +917,32 @@ export interface AuthRequest {
   birthDate?: string
   email?: string
   phone?: string
+  /**
+   * The member password, required when the census `authFields` include
+   * `'password'`. Never the plaintext: the client hash, 64 lowercase hex
+   * characters, the same value the member's {@link OrgMember.password} was set
+   * with:
+   *
+   * ```
+   * lowercase_hex(SHA-256(UTF-8(
+   *   "vocdoni-member-password:" + canonicalAddress(orgAddress) + ":" + trim(password).normalize("NFC"))))
+   * canonicalAddress(a) = "0x" + lowercase(a without any leading "0x")
+   * ```
+   *
+   * `orgAddress` is the organization's address in any form (`0x`-prefixed and
+   * checksummed as organization reads return it, or bare lowercase hex as
+   * process reads return `orgAddress`): the canonical form is what is hashed.
+   *
+   * Normalizing to NFC makes accented passwords typed or pasted in different Unicode forms hash the same.
+   *
+   * Test vector: organization `0x00000000000000000000000000000000000000AA`
+   * (or `00000000000000000000000000000000000000aa`) and password `s3cret` hash
+   * to `2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e`.
+   *
+   * A wrong password fails like an unknown participant (code 40029); a value
+   * that is not 64 lowercase hex characters is rejected with code 40005.
+   */
+  password?: string
 }
 
 /** Auth step 1 — confirm the 2FA challenge. Not used by auth-only censuses. */
@@ -1252,8 +1283,15 @@ export interface OrgMember {
    * CSP voter routes. Defaults to `1`; only a weighted census uses it.
    */
   weight?: string
-  /** Write-only: hashed by the backend and never returned. */
+  /**
+   * Write-only client hash of the member password (see {@link AuthRequest.password}
+   * for the formula): never the plaintext, which the backend rejects with a 400.
+   * Stored argon2-hashed and never returned. On an update, `''` clears it and
+   * leaving it out keeps it.
+   */
   password?: string
+  /** Read-only: whether the member has a password. Ignored on writes. */
+  hasPassword?: boolean
   other?: Record<string, unknown>
 }
 
