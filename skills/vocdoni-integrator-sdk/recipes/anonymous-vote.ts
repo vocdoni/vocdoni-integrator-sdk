@@ -6,8 +6,8 @@
  * BLINDED message instead: it authorizes the ballot without ever seeing it, and
  * cannot recognise the signature when it later appears on chain.
  *
- * This is a blind signature, NOT zero-knowledge. `EnvelopeType.Anonymous` stays
- * false and this has nothing to do with `@vocdoni/api-voting-zk`.
+ * This is a blind signature, NOT zero-knowledge: `EnvelopeType.Anonymous` stays
+ * false.
  *
  * What changes versus `recipes/single-choice-vote.ts`:
  *   - `elections.sign()` → `signBlindCspBallots()` (two rounds, batched, all
