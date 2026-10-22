@@ -881,8 +881,8 @@ export function ElectionProvider({
       let vs: VoterState
       try {
         vs = await resolveVoterState(client, election, await session.check(), session.owner, session.authToken!)
-      } catch {
-        throw new Error(COULD_NOT_VERIFY)
+      } catch (err) {
+        throw new Error(COULD_NOT_VERIFY, { cause: err })
       }
       if (vs.unverified) throw new Error(COULD_NOT_VERIFY)
       applyVoterState(vs)

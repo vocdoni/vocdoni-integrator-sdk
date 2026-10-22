@@ -395,7 +395,11 @@ describe('ElectionProvider — verified vote status', () => {
     await connect(result)
     await waitFor(() => expect(result.current.isAbleToVote).toBe(true))
     down = true
-    await expect(result.current.vote([[0]])).rejects.toThrow('Could not verify your voting status; try again')
+    const err = await result.current.vote([[0]]).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe('Could not verify your voting status; try again')
+    // The underlying check() failure is kept for the integrator to inspect.
+    expect((err as Error).cause).toBeInstanceOf(Error)
     expect(signCalls.count).toBe(0)
     expect(batches).toHaveLength(0)
   })
