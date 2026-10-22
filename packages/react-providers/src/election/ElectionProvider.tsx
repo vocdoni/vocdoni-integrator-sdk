@@ -553,23 +553,28 @@ export function ElectionProvider({
   const relay = useCallback(
     async (
       items: RelayItem[],
+      // true once the caller's result no longer applies (the connect effect was
+      // cancelled): the relay still settles, but writes no more vote state.
+      isStale: () => boolean = () => false,
     ): Promise<{
       succeeded: Array<{ questionId: string; voteId: string }>
       failed: Array<{ questionId: string; error: unknown }>
     }> => {
       const anonymous = !!election?.census?.anonymous
       const owner = session.owner
-      const setStatus = (ids: string[], st: QuestionVoteStatus) =>
+      const setStatus = (ids: string[], st: QuestionVoteStatus) => {
+        if (isStale()) return
         setVoteStatus((prev) => {
           const next = { ...prev }
           for (const id of ids) next[id] = st
           return next
         })
+      }
       const allIds = items.map((it) => it.question.id)
       // Every item's tx is stored (when there is an owner to store it under):
       // a batch that was refused or never answered leaves them all pending.
       const keepPending = () => {
-        if (!owner) return
+        if (!owner || isStale()) return
         setPendingVotes((prev) => ({ ...prev, ...Object.fromEntries(allIds.map((id) => [id, true as const])) }))
       }
 
@@ -577,7 +582,7 @@ export function ElectionProvider({
       // while the job is pending — mirror every poll into voteStatus. A failed
       // entry stays `confirming`: it is verified on chain before it is final.
       const applyOutcomes = (votes: VoteJobResult[] | undefined) => {
-        if (!votes) return
+        if (!votes || isStale()) return
         setVoteStatus((st) => {
           const next = { ...st }
           votes.forEach((v, idx) => {
@@ -734,12 +739,14 @@ export function ElectionProvider({
         'failed',
       )
       // A failed question keeps its stored tx (when there is an owner to store it under).
-      setPendingVotes((prev) => {
-        const next = { ...prev }
-        for (const s of succeeded) delete next[s.questionId]
-        if (owner) for (const f of failed) next[f.questionId] = true
-        return next
-      })
+      if (!isStale()) {
+        setPendingVotes((prev) => {
+          const next = { ...prev }
+          for (const s of succeeded) delete next[s.questionId]
+          if (owner) for (const f of failed) next[f.questionId] = true
+          return next
+        })
+      }
       return { succeeded, failed }
     },
     [election, session, client, voteOptions],
@@ -812,7 +819,7 @@ export function ElectionProvider({
         setVoting(true)
         setVoteStatus((prev) => ({ ...prev, ...Object.fromEntries(items.map((it) => [it.question.id, 'submitting'])) }))
         try {
-          const { succeeded } = await relay(items)
+          const { succeeded } = await relay(items, () => cancelled)
           if (!cancelled) applyRelayResult(vs, succeeded)
         } catch {
           // statuses are already `failed`; the entries stay for the next try

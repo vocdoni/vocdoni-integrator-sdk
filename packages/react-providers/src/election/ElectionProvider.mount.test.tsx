@@ -157,6 +157,27 @@ describe('ElectionProvider — pending votes on connect', () => {
     expect(listPendingVotes(UPSTREAM)[0]).toMatchObject({ txPayload: STORED_TX })
   })
 
+  it.each([
+    ['lands', 202],
+    ['is refused', 400],
+  ])('clearing the session while a re-send runs leaves no vote state behind when the relay %s', async (_name, status) => {
+    useProcess()
+    savePendingVote(UPSTREAM, { owner: OWNER, nullifier: NULLIFIER, txPayload: STORED_TX, savedAt: 1 })
+    const { batches } = mockRelay({ delayMs: 80, status })
+    mockCheck(() => batches.length > 0 && status === 202)
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    await waitFor(() => expect(result.current.voting).toBe(true))
+    act(() => result.current.clearVoter())
+    await waitFor(() => expect(result.current.voting).toBe(false))
+    expect(batches).toEqual([[STORED_TX]])
+    expect(result.current.connected).toBe(false)
+    expect(result.current.voteStatus).toEqual({})
+    expect(result.current.pendingVotes).toEqual({})
+    expect(result.current.hasVoted).toBe(false)
+  })
+
   it('drops every stored entry once the process is over', async () => {
     useProcess({ status: 'ENDED' })
     savePendingVote(UPSTREAM, { owner: 'anyone', nullifier: NULLIFIER, txPayload: STORED_TX, savedAt: 1 })
