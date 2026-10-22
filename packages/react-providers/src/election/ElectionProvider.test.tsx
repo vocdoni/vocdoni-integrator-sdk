@@ -1,9 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { CAbundle, ProofCA_Type, SignedTx, Tx } from '@vocdoni/proto/vochain'
-import { blindMessageFromBundle, fromHex } from '@vocdoni/api-voting'
+import { blindMessageFromBundle, fromHex, strip0x, voteNullifier } from '@vocdoni/api-voting'
 import type { VotingProcessResponse } from '@vocdoni/api-types'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 // The chain's side of the blind check — test-only, same helper the api-voting
 // crypto tests are anchored on.
 import {
@@ -105,6 +105,33 @@ function countSignConsumption() {
   return calls
 }
 
+/**
+ * Overrides the batch sign to sign every ballot while recording the ballots
+ * (`{ upstreamId, address }`) in request order.
+ */
+function captureSignedBallots() {
+  const signed: Array<{ upstreamId: string; address: string }> = []
+  server.use(
+    http.post(`http://localhost/processes/:processId/sign-batch`, async ({ request }) => {
+      const body = (await request.json()) as { ballots: Array<{ upstreamId: string; address: string }> }
+      signed.push(...body.ballots)
+      return HttpResponse.json({
+        signatures: body.ballots.map((b) => ({
+          upstreamId: b.upstreamId,
+          signature: MOCK_CSP_SIGNATURE,
+          weight: MOCK_WEIGHT_HEX,
+        })),
+      })
+    }),
+  )
+  return signed
+}
+
+/** The vote id of a ballot confirmed on chain without a job result: its nullifier, bare hex. */
+const nullifierOf = ({ upstreamId, address }: { upstreamId: string; address: string }) =>
+  strip0x(voteNullifier(address, upstreamId))
+
+beforeEach(() => sessionStorage.clear())
 
 describe('ElectionProvider', () => {
   it('starts loading then resolves the election', async () => {
@@ -1101,8 +1128,8 @@ describe('ElectionProvider', () => {
   it('reconciles a lost relay response against the voter state instead of reporting failure', async () => {
     // The POST /votes response is lost at the network level AFTER the backend
     // accepted and enqueued the batch: the votes land on chain, but the client
-    // never learns the jobId. The provider must reconcile through check() +
-    // sign-info before declaring failure.
+    // never learns the jobId. The provider must reconcile against the on-chain
+    // state before declaring failure; the vote id is the stored nullifier.
     let relayReached = false
     server.use(
       http.post(`http://localhost/votes`, () => {
@@ -1121,14 +1148,8 @@ describe('ElectionProvider', () => {
           })),
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign-info`, () =>
-        HttpResponse.json({
-          consumed: relayReached
-            ? mockProcess.questions.map((q) => ({ questionId: q.id, nullifier: `reconciled-${q.id}` }))
-            : [],
-        }),
-      ),
     )
+    const signed = captureSignedBallots()
 
     const { result } = renderHook(useVoter, { wrapper: reconcilingWrapper })
     await waitFor(() => expect(result.current.election.election).not.toBeNull())
@@ -1140,9 +1161,9 @@ describe('ElectionProvider', () => {
       voteId = await result.current.election.vote([[0]])
     })
 
-    expect(voteId).toBe('reconciled-q-0')
+    expect(voteId).toBe(nullifierOf(signed[0]))
     expect(result.current.election.voteStatus).toEqual({ 'q-0': 'confirmed' })
-    expect(result.current.election.voteIds).toEqual({ 'q-0': 'reconciled-q-0' })
+    expect(result.current.election.voteIds).toEqual({ 'q-0': nullifierOf(signed[0]) })
     expect(result.current.election.hasVoted).toBe(true)
   })
 
@@ -1227,12 +1248,8 @@ describe('ElectionProvider', () => {
           ],
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign-info`, () =>
-        HttpResponse.json({
-          consumed: relayReached ? [{ questionId: 'q-0', nullifier: 'reconciled-q-0' }] : [],
-        }),
-      ),
     )
+    const signed = captureSignedBallots()
 
     const { result } = renderHook(useVoter, { wrapper: reconcilingWrapper })
     await waitFor(() => expect(result.current.election.election).not.toBeNull())
@@ -1246,16 +1263,16 @@ describe('ElectionProvider', () => {
 
     expect(thrown).toBeInstanceOf(PartialVoteError)
     const partial = thrown as PartialVoteError
-    expect(partial.succeeded).toEqual([{ questionId: 'q-0', voteId: 'reconciled-q-0' }])
+    expect(partial.succeeded).toEqual([{ questionId: 'q-0', voteId: nullifierOf(signed[0]) }])
     expect(partial.failed.map((f) => f.questionId)).toEqual(['q-1'])
     expect(result.current.election.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'failed' })
-    expect(result.current.election.voteIds).toEqual({ 'q-0': 'reconciled-q-0' })
+    expect(result.current.election.voteIds).toEqual({ 'q-0': nullifierOf(signed[0]) })
   })
 
-  it('exonerates a job-reported envelope failure when the vote is actually on chain', async () => {
+  it('confirms a job-reported envelope failure when the vote is actually on chain', async () => {
     // The relay job reports q-1 failed ("nullifier already exists" — e.g. a
-    // duplicate relay), but the voter state proves the vote IS on chain. The
-    // job verdict must be reconciled against check() before surfacing failure.
+    // duplicate relay), but the on-chain state (check().hasVoted) proves the
+    // vote IS there. The job verdict is verified before surfacing failure.
     const UPSTREAM_A = 'aa'.repeat(32)
     const UPSTREAM_B = 'bb'.repeat(32)
     let relayReached = false
@@ -1310,17 +1327,8 @@ describe('ElectionProvider', () => {
           ],
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign-info`, () =>
-        HttpResponse.json({
-          consumed: relayReached
-            ? [
-                { questionId: 'q-0', nullifier: 'nullifier-job-0' },
-                { questionId: 'q-1', nullifier: 'nullifier-job-1' },
-              ]
-            : [],
-        }),
-      ),
     )
+    const signed = captureSignedBallots()
 
     const { result } = renderHook(useVoter, { wrapper: reconcilingWrapper })
     await waitFor(() => expect(result.current.election.election).not.toBeNull())
@@ -1334,7 +1342,7 @@ describe('ElectionProvider', () => {
 
     expect(voteId).toBe('nullifier-job-0')
     expect(result.current.election.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'confirmed' })
-    expect(result.current.election.voteIds).toEqual({ 'q-0': 'nullifier-job-0', 'q-1': 'nullifier-job-1' })
+    expect(result.current.election.voteIds).toEqual({ 'q-0': 'nullifier-job-0', 'q-1': nullifierOf(signed[1]) })
     expect(result.current.election.hasVoted).toBe(true)
   })
 
@@ -1419,14 +1427,8 @@ describe('ElectionProvider', () => {
           })),
         }),
       ),
-      http.post(`http://localhost/processes/:processId/sign-info`, () =>
-        HttpResponse.json({
-          consumed: relayReached
-            ? mockProcess.questions.map((q) => ({ questionId: q.id, nullifier: `slowjob-${q.id}` }))
-            : [],
-        }),
-      ),
     )
+    const signed = captureSignedBallots()
 
     const { result } = renderHook(useVoter, { wrapper: reconcilingWrapper })
     await waitFor(() => expect(result.current.election.election).not.toBeNull())
@@ -1438,7 +1440,7 @@ describe('ElectionProvider', () => {
       voteId = await result.current.election.vote([[0]])
     })
 
-    expect(voteId).toBe('slowjob-q-0')
+    expect(voteId).toBe(nullifierOf(signed[0]))
     expect(result.current.election.voteStatus).toEqual({ 'q-0': 'confirmed' })
     expect(result.current.election.hasVoted).toBe(true)
   })
