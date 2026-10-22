@@ -233,6 +233,8 @@ election.questions
 
 **2FA census**: `auth0()` sends the challenge; call `auth1(otp)` to confirm. `connected` becomes `true` after `auth1`.
 
+A successful `auth0()` replaces the current session: an already connected voter is disconnected (`authToken` null, vote state reset) until the new identity's `auth1()` completes (auth-only census: at once), so the previous voter's token is never used for the new identity.
+
 ```tsx
 // Auth-only flow
 await auth0({ memberNumber: '42' })

@@ -400,6 +400,58 @@ describe('ElectionProvider — verified vote status', () => {
     expect(listPendingVotes(UPSTREAM_A)).toContainEqual(theirs)
   })
 
+  it('re-identifying as another voter (2-step) drops the previous token: no check or re-send on the mixed session', async () => {
+    useTwoQuestions(true)
+    // Each participant gets its own token, so a check() names whose session it ran on.
+    server.use(
+      http.post('http://localhost/processes/:processId/auth/0', async ({ request }) => {
+        const { memberNumber } = (await request.json()) as { memberNumber: string }
+        return HttpResponse.json({ authToken: `t-${memberNumber}` })
+      }),
+    )
+    const checkTokens: string[] = []
+    server.use(
+      http.post('http://localhost/processes/:processId/check', async ({ request }) => {
+        checkTokens.push(((await request.json()) as { authToken: string }).authToken)
+        return HttpResponse.json({
+          belongsToProcess: true,
+          weight: MOCK_WEIGHT_HEX,
+          questions: [q('q-0', UPSTREAM_A, { hasSigned: true }), q('q-1', UPSTREAM_B, { hasSigned: true })],
+        })
+      }),
+    )
+    // Voter B's tx, stored earlier in this tab. On A's check (anonymous: owner + hasSigned) it would read as B's own.
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('{"memberNumber":"6"}'))
+    const ownerB = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+    const nullifierB = '0x' + '6b'.repeat(32)
+    savePendingVote(UPSTREAM_A, { owner: ownerB, nullifier: nullifierB, txPayload: 'b-tx', savedAt: 1 })
+    const { batches } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+    mockVerify(() => [])
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(checkTokens.every((t) => t === 'confirmed-t-5')).toBe(true)
+    checkTokens.length = 0
+
+    await act(async () => {
+      await result.current.auth0({ memberNumber: '6' })
+    })
+    await act(() => new Promise((r) => setTimeout(r, 50)))
+    expect(result.current.connected).toBe(false)
+    expect(result.current.isInCensus).toBe(false)
+    expect(checkTokens).toEqual([])
+    expect(batches).toEqual([])
+
+    await act(async () => {
+      await result.current.auth1(['123456'])
+    })
+    await waitFor(() => expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'signed' }))
+    expect(checkTokens.length).toBeGreaterThan(0)
+    expect(checkTokens.every((t) => t === 'confirmed-t-6')).toBe(true)
+    expect(batches).toEqual([['b-tx']])
+    expect(result.current.pendingVotes).toEqual({})
+  })
+
   it('AC12: a check() failure inside vote() throws "could not verify" without signing or relaying', async () => {
     let down = false
     mockCheck(() => [q('q-0', mockProcess.questions[0].upstreamId)], () => down)

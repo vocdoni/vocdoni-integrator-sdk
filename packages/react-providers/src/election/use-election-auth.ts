@@ -158,8 +158,11 @@ export function useVoterSession(
       if (!id || !process) throw new Error('Election is not loaded yet — cannot authenticate')
       const res = await client.elections.authStep0(id, participant)
       if (!res.authToken) throw new Error('Process auth step 0 did not return a token')
-      // Set in the same tick as the token below, so no render sees a connected
-      // session with the previous voter's owner.
+      // A new identification replaces the session: drop the previous voter's
+      // token first, so no render (and no ElectionProvider check or re-send)
+      // sees the new owner paired with the old voter's token. The session stays
+      // disconnected until auth1 (or, auth-only, the token set below).
+      setAuthToken(null)
       setOwner(await ownerHash(participant))
       if (isAuthOnly) {
         // No challenge step: the step-0 token is already verified.

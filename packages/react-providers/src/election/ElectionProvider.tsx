@@ -828,7 +828,7 @@ export function ElectionProvider({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.connected, session.owner, election?.id, status])
+  }, [session.authToken, session.owner, election?.id, status])
 
   const castVotes = useCallback(
     async (encodedBallots: number[][], memos?: (string | undefined)[]): Promise<string> => {

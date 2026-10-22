@@ -10,6 +10,7 @@
 - `QuestionVoteStatus` gains `'unconfirmed'` (signed, not on chain, nothing stored in this tab) and `'signed'` (anonymous census, not confirmable from this tab); both are also set on connect. `vote()` throws the new `UnconfirmedVoteError` when only such questions are left.
 - `isAbleToVote` also requires some eligible question that is not signed yet or is pending a re-send.
 - A vote id recovered without a job result is the vote's nullifier (bare hex), derived locally, instead of the sign-info lookup.
+- A successful `auth0()` now drops the previous voter's token: a connected session reads disconnected (vote state reset) until the new identity's `auth1()` completes, instead of staying connected as the previous voter in between.
 - The unknown-outcome reconciliation polls on-chain evidence and its default window grows from 8 to 48 polls (× 2.5 s), to cover the backend's retry and mined waits.
 
 **New**
