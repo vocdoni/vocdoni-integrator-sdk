@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds a vocdoni upstream image from source at a given ref, for running the
 # integration stack against an unpublished commit. Neither upstream publishes
-# per-commit images, so this is the only way to get one.
+# per-commit images, so this is the only way to get one. saas-backend is private and is
+# cloned over SSH: with SAAS_BACKEND_DEPLOY_KEY in CI, with your own SSH key otherwise.
 #
 # Usage:
 #   scripts/integration-build-image.sh <vocdoni-node|saas-backend> <ref|#PR>
@@ -31,13 +32,17 @@ if ! [[ "$ref" =~ ^#[0-9]{1,9}$ || "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ 
   exit 1
 fi
 
+if [ "$repo" = saas-backend ] && [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${SAAS_BACKEND_DEPLOY_KEY:-}" ]; then
+  echo "ERROR: SAAS_BACKEND_DEPLOY_KEY is empty: saas-backend is private. Fork PRs get no secrets, so a maintainer's /integration comment must run it." >&2
+  exit 1
+fi
+
 dir="$(mktemp -d)"
 trap 'rm -rf "$dir"' EXIT
 
-# Resolves the ref with git alone, then shallow-fetches exactly that commit. saas-backend is
-# private and reached over SSH: with SAAS_BACKEND_DEPLOY_KEY (its read-only deploy key) in CI,
-# with the caller's own SSH access otherwise. A throwaway repo fetches every branch, tag and PR
-# head without trees or blobs, so rev-parse can resolve a #N, branch, tag or short/full SHA.
+# Full SHAs are fetched as they are. Other refs resolve in a throwaway bare repo that holds
+# every branch, tag and PR head (no trees or blobs), so a short SHA only resolves if one of
+# them reaches it. saas-backend is private: SSH with SAAS_BACKEND_DEPLOY_KEY in CI, your own key otherwise.
 url="https://github.com/vocdoni/$repo.git"
 if [ "$repo" = saas-backend ]; then
   url="git@github.com:vocdoni/$repo.git"
@@ -45,18 +50,29 @@ if [ "$repo" = saas-backend ]; then
     printf '%s\n' "$SAAS_BACKEND_DEPLOY_KEY" > "$dir/deploy_key"
     chmod 600 "$dir/deploy_key"
     echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$dir/known_hosts"
-    export GIT_SSH_COMMAND="ssh -i $dir/deploy_key -o IdentitiesOnly=yes -o UserKnownHostsFile=$dir/known_hosts"
+    export GIT_SSH_COMMAND="ssh -i '$dir/deploy_key' -o IdentitiesOnly=yes -o UserKnownHostsFile='$dir/known_hosts'"
   fi
 fi
 refs="$dir/refs"
-git init --quiet "$refs" >&2
-git -C "$refs" fetch --quiet --filter=tree:0 --update-head-ok "$url" \
-  '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' '+refs/pull/*/head:refs/pull/*' >&2
-rev="$ref"
-if [[ "$ref" == \#* ]]; then
-  rev="refs/pull/${ref:1}"
+sha=""
+if [[ "$ref" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+  sha="$(printf '%s' "$ref" | tr '[:upper:]' '[:lower:]')"
+else
+  git init --quiet --bare "$refs" >&2
+  git -C "$refs" fetch --quiet --filter=tree:0 "$url" \
+    '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' '+refs/pull/*/head:refs/pull/*' >&2
+  if [[ "$ref" =~ ^#[0-9]+$ ]]; then
+    sha="$(git -C "$refs" rev-parse --verify --quiet "refs/pull/${ref:1}^{commit}" || true)"
+  else
+    sha="$(git -C "$refs" rev-parse --verify --quiet "refs/heads/$ref^{commit}" || true)"
+    if [ -z "$sha" ]; then
+      sha="$(git -C "$refs" rev-parse --verify --quiet "refs/tags/$ref^{commit}" || true)"
+    fi
+    if [ -z "$sha" ] && [[ "$ref" =~ ^[0-9A-Fa-f]{7,39}$ ]]; then
+      sha="$(git -C "$refs" rev-parse --verify --quiet "$ref^{commit}" || true)"
+    fi
+  fi
 fi
-sha="$(git -C "$refs" rev-parse --verify --quiet "$rev^{commit}" || true)"
 if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
   echo "ERROR: could not resolve '$ref' in vocdoni/$repo" >&2
   exit 1

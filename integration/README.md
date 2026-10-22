@@ -65,6 +65,8 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
 - Each key is optional; a bare `/integration` uses the published `:main` images.
 - A ref can be a commit SHA (short or full, 7-40 hex), a branch, a tag, or
   `#<PR number>` (its current head commit, e.g. `saas-backend=#760`).
+- A short SHA only resolves when a current branch, tag or PR head of the upstream
+  reaches it; use the full SHA for commits from deleted branches or force-pushed PR iterations.
 - Only users with write access can trigger it; comments from anyone else are
   ignored silently.
 - The run tests the PR's merge commit, as the `pull_request` check does, as it
@@ -106,6 +108,15 @@ image=$(scripts/integration-build-image.sh vocdoni-node <ref> | sed -n 's/^image
 The `up` step prints the two images it is using, so a run shows what it tested.
 
 Use `SAAS_BACKEND_IMAGE` and `saas-backend` the same way.
+
+saas-backend is private, so building it locally needs your own SSH access to
+`vocdoni/saas-backend`. If the `ghcr.io/vocdoni/saas-backend` package is private
+too, run `docker login ghcr.io` before pulling it.
+
+CI needs the `SAAS_BACKEND_DEPLOY_KEY` repo secret (a read-only deploy key on
+saas-backend) and read access to that package for this repo. Fork PR pushes
+get no secrets, so they cannot build a pinned saas-backend; a maintainer's
+`/integration` comment can.
 
 ## What it covers
 
