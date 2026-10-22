@@ -101,6 +101,35 @@ export interface ElectionAuthContextValue {
 export const ElectionAuthContext = createContext<ElectionAuthContextValue | undefined>(undefined)
 
 /**
+ * The session as `ElectionProvider` sees it: the public value plus the voter's
+ * `owner` hash, which binds the tab's pending-vote entries to this voter.
+ */
+export interface VoterSession extends ElectionAuthContextValue {
+  /**
+   * sha256 hex of the canonical (sorted-key JSON) auth0 participant payload,
+   * so the same person re-identifying in this tab gets the same value. Null
+   * before auth0, after `clear()`, or where Web Crypto is unavailable
+   * (insecure context) — the pending-vote store is then not used.
+   */
+  owner: string | null
+}
+
+/** sha256 hex of the participant's canonical JSON; null without Web Crypto. */
+async function ownerHash(participant: AuthRequest): Promise<string | null> {
+  const subtle = globalThis.crypto?.subtle
+  if (!subtle) return null
+  const canonical = JSON.stringify(
+    Object.fromEntries(Object.entries(participant).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))),
+  )
+  try {
+    const digest = await subtle.digest('SHA-256', new TextEncoder().encode(canonical))
+    return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+  } catch {
+    return null
+  }
+}
+
+/**
  * Builds the CSP session for a voting process. Internal to `ElectionProvider`,
  * which provides the resulting value through {@link ElectionAuthContext}; the
  * process read is shared with the caller instead of fetched again.
@@ -108,8 +137,9 @@ export const ElectionAuthContext = createContext<ElectionAuthContextValue | unde
 export function useVoterSession(
   id: string | undefined,
   process: VotingProcessResponse | null,
-): ElectionAuthContextValue {
+): VoterSession {
   const { client } = useClient()
+  const [owner, setOwner] = useState<string | null>(null)
   const [pendingToken, setPendingToken] = useState<string | null>(null)
   const [authToken, setAuthToken] = useState<string | null>(null)
   const [weight, setWeight] = useState<number | null>(null)
@@ -128,6 +158,9 @@ export function useVoterSession(
       if (!id || !process) throw new Error('Election is not loaded yet — cannot authenticate')
       const res = await client.elections.authStep0(id, participant)
       if (!res.authToken) throw new Error('Process auth step 0 did not return a token')
+      // Set in the same tick as the token below, so no render sees a connected
+      // session with the previous voter's owner.
+      setOwner(await ownerHash(participant))
       if (isAuthOnly) {
         // No challenge step: the step-0 token is already verified.
         setAuthToken(res.authToken)
@@ -232,13 +265,15 @@ export function useVoterSession(
   )
 
   const clear = useCallback(() => {
+    setOwner(null)
     setPendingToken(null)
     setAuthToken(null)
     setWeight(null)
   }, [])
 
-  return useMemo<ElectionAuthContextValue>(
+  return useMemo<VoterSession>(
     () => ({
+      owner,
       authToken,
       connected: !!authToken,
       weight,
@@ -250,7 +285,7 @@ export function useVoterSession(
       signBatch,
       clear,
     }),
-    [authToken, weight, auth0, auth1, resend, check, sign, signBatch, clear],
+    [owner, authToken, weight, auth0, auth1, resend, check, sign, signBatch, clear],
   )
 }
 
