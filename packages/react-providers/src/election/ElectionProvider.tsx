@@ -780,9 +780,10 @@ export function ElectionProvider({
   }, [election, status])
 
   // Resolve the voter's state once the session is connected: membership,
-  // per-question state, the vote ids of what is on chain. The disconnect
-  // branch also resets the vote state, so clearing the session from
-  // useElectionAuth() propagates here.
+  // per-question state, the vote ids of what is on chain. Then re-send the
+  // pending questions once, through the same relay as vote(), with no
+  // signing. The disconnect branch also resets the vote state, so clearing the
+  // session from useElectionAuth() propagates here.
   useEffect(() => {
     if (!session.connected || !election) {
       setIsInCensus(false)
@@ -803,6 +804,22 @@ export function ElectionProvider({
         const vs = await resolveVoterState(client, election, checked, session.owner, session.authToken!)
         if (cancelled) return
         applyVoterState(vs)
+
+        const items = pendingItems(vs)
+        // Skipped when a vote() (or the other StrictMode run) already relays.
+        if (items.length === 0 || status !== 'ONGOING' || castInFlightRef.current) return
+        castInFlightRef.current = true
+        setVoting(true)
+        setVoteStatus((prev) => ({ ...prev, ...Object.fromEntries(items.map((it) => [it.question.id, 'submitting'])) }))
+        try {
+          const { succeeded } = await relay(items)
+          if (!cancelled) applyRelayResult(vs, succeeded)
+        } catch {
+          // statuses are already `failed`; the entries stay for the next try
+        } finally {
+          castInFlightRef.current = false
+          setVoting(false)
+        }
       })
       .catch(() => {
         // ineligible / network error — leave membership as not-in-census
