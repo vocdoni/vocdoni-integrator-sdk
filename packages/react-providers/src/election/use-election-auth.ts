@@ -1,5 +1,6 @@
 import type {
   AuthRequest,
+  CspProofType,
   ProcessCheckResponse,
   SignFailureCode,
   VotingProcessResponse,
@@ -23,6 +24,8 @@ export interface ElectionSignResult {
   signature: string
   /** Hex-encoded census weight the CSP signed with. */
   weight?: string
+  /** Proof type the CSP named for the signature (see `cspProofOptions`). */
+  proofType?: CspProofType
 }
 
 /** One question's ballot in a {@link ElectionAuthContextValue.signBatch} call. */
@@ -44,6 +47,14 @@ export interface ElectionSignBatchResult {
   signature?: string
   /** Weight the CSP authorized — pass it back as `cspWeight`, unchanged. */
   weight?: string
+  /**
+   * Proof type the CSP named for the signature, with the weight key and
+   * certificate of an `ECDSA_BLIND` one. `cspProofOptions` turns them into the
+   * `buildVoteTransaction` options.
+   */
+  proofType?: CspProofType
+  weightKey?: string
+  weightCertificate?: string
   code?: SignFailureCode
   error?: string
 }
@@ -90,8 +101,10 @@ export interface ElectionAuthContextValue {
    * the plain batch sign. Either way the results come back in request order,
    * with per-question failures reported inline rather than thrown.
    *
-   * Anonymous results must be spent as `ProofCA_Type.ECDSA_BLIND_PIDSALTED`
-   * with `cspWeight` set to the returned `weight`.
+   * Spend each result as the proof `cspProofOptions(result, fallback)` names,
+   * with `cspWeight` set to the returned `weight`; the fallback is
+   * `ProofCA_Type.ECDSA_BLIND_PIDSALTED` for an anonymous census and
+   * `ProofCA_Type.ECDSA_PIDSALTED` otherwise.
    */
   signBatch(ballots: ElectionSignBatchBallot[]): Promise<ElectionSignBatchResult[]>
   /** Clear all auth/voter state. */
@@ -179,7 +192,7 @@ export function useVoterSession(
       }
       const res = await client.elections.sign(id, { authToken, electionId, payload: address })
       if (!res.signature) throw new Error('Process sign did not return a signature')
-      return { signature: res.signature, weight: res.weight }
+      return { signature: res.signature, weight: res.weight, proofType: res.proofType }
     },
     [client, id, authToken, process],
   )
@@ -221,6 +234,9 @@ export function useVoterSession(
           electionId: b.electionId,
           signature: signed?.signature,
           weight: signed?.weight,
+          proofType: signed?.proofType,
+          weightKey: signed?.weightKey,
+          weightCertificate: signed?.weightCertificate,
           code: signed?.code,
           error: signed?.signature
             ? undefined
