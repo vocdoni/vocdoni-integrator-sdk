@@ -94,15 +94,20 @@ function mockSignAndRelay(job: (txs: string[]) => object | 'pending' = () => ({}
   return { signed, batches, signCalls }
 }
 
-/** A relay_votes job body whose per-envelope outcomes are `statuses`. */
-const jobOf = (statuses: Array<'completed' | 'failed'>) => ({
+/**
+ * A relay_votes job body whose per-envelope outcomes are `statuses`. With
+ * `nullifiers`, each entry carries that nullifier (and, completed, it as the
+ * vote id, as Vochain does); otherwise placeholders.
+ */
+const jobOf = (statuses: Array<'completed' | 'failed'>, nullifiers?: string[]) => ({
   status: statuses.every((s) => s === 'completed') ? 'completed' : 'failed',
   result: {
-    votes: statuses.map((st, i) =>
-      st === 'completed'
-        ? { processId: 'p', nullifier: `n-${i}`, status: st, voteID: `vote-${i}` }
-        : { processId: 'p', nullifier: `n-${i}`, status: st, error: 'could not submit signed tx: API error: 502 ()' },
-    ),
+    votes: statuses.map((st, i) => {
+      const nullifier = nullifiers?.[i] ?? `n-${i}`
+      return st === 'completed'
+        ? { processId: 'p', nullifier, status: st, voteID: nullifiers ? nullifier : `vote-${i}` }
+        : { processId: 'p', nullifier, status: st, error: 'could not submit signed tx: API error: 502 ()' }
+    }),
   },
 })
 
@@ -170,12 +175,18 @@ describe('ElectionProvider — verified vote status', () => {
       q('q-0', UPSTREAM_A, { hasSigned: relayed > 0, hasVoted: relayed > 0 }),
       q('q-1', UPSTREAM_B, { hasSigned: relayed > 0, hasVoted: q1OnChain }),
     ])
+    // The job reports each relayed envelope's real nullifier: the first batch
+    // is in signing order, so a tx's index there names its signed ballot.
+    const nullifiersOf = (txs: string[]) => txs.map((tx) => strip0x(nullifierOf(signed[batches[0].indexOf(tx)])))
     const { signed, batches, signCalls } = mockSignAndRelay((txs) => {
       relayed++
       // First batch: the proxy 502s envelope 1. Second batch (the re-send) lands.
-      if (batches.length === 1) return jobOf(['completed', 'failed'])
+      if (batches.length === 1) return jobOf(['completed', 'failed'], nullifiersOf(txs))
       q1OnChain = true
-      return jobOf(txs.map(() => 'completed'))
+      return jobOf(
+        txs.map(() => 'completed'),
+        nullifiersOf(txs),
+      )
     })
     mockSignInfo(() => (relayed > 0 ? signed.map((b, i) => ({ questionId: `q-${i}`, nullifier: strip0x(nullifierOf(b)) })) : []))
 
@@ -190,6 +201,7 @@ describe('ElectionProvider — verified vote status', () => {
     expect(thrown).toBeInstanceOf(PartialVoteError)
     expect((thrown as PartialVoteError).failed.map((f) => f.questionId)).toEqual(['q-1'])
     expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'failed' })
+    expect(result.current.voteIds['q-0']).toBe(strip0x(nullifierOf(signed[0])))
     expect(result.current.hasVoted).toBe(false)
     expect(result.current.pendingVotes).toEqual({ 'q-1': true })
     expect(result.current.isAbleToVote).toBe(true)
@@ -206,6 +218,8 @@ describe('ElectionProvider — verified vote status', () => {
     expect(signCalls.count).toBe(1)
     expect(batches[1]).toEqual([batches[0][1]])
     expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'confirmed' })
+    // The backend's nullifier for the re-sent envelope is the one derived locally.
+    expect(result.current.voteIds['q-1']).toBe(strip0x(nullifierOf(signed[1])))
     expect(result.current.hasVoted).toBe(true)
     expect(result.current.pendingVotes).toEqual({})
     expect(listPendingVotes(UPSTREAM_B)).toEqual([])
