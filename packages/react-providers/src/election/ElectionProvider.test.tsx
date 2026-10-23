@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { CAbundle, ProofCA_Type, SignedTx, Tx } from '@vocdoni/proto/vochain'
-import { blindMessageFromBundle, fromHex } from '@vocdoni/api-voting'
+import { blindMessageFromBundle, encodeCaBundle, fromHex, toHex } from '@vocdoni/api-voting'
 import type { VotingProcessResponse } from '@vocdoni/api-types'
 import { describe, expect, it } from 'vitest'
 // The chain's side of the blind check — test-only, same helper the api-voting
@@ -10,6 +10,7 @@ import {
   deserializeBlindSignature,
   verify as verifyBlindSignature,
 } from '../../../api-voting/src/blind-secp256k1.testkit'
+import { mockV3Csp, publicKeyPoint } from '../../../api-voting/src/csp-v3.testkit'
 import {
   MOCK_CSP_SIGNATURE,
   MOCK_WEIGHT_HEX,
@@ -286,6 +287,104 @@ describe('ElectionProvider', () => {
         mockBlindCensusKey(mockProcess.questions[0].upstreamId),
       ),
     ).toBe(true)
+  })
+
+  it('votes an OFF_CHAIN_CA_V3_BLIND election with the proof type and certificate the CSP returns', async () => {
+    server.use(
+      http.get(`http://localhost/processes/:id`, ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          census: { ...mockProcess.census, anonymous: true },
+        }),
+      ),
+      http.post(`http://localhost/processes/:processId/blind-point`, async ({ request }) => {
+        const body = (await request.json()) as { electionIds: string[] }
+        return HttpResponse.json({
+          points: body.electionIds.map((upstreamId) => ({
+            upstreamId,
+            tokenR: mockV3Csp.point(upstreamId),
+            weight: MOCK_WEIGHT_HEX,
+          })),
+        })
+      }),
+      http.post(`http://localhost/processes/:processId/blind-sign`, async ({ request }) => {
+        const body = (await request.json()) as { ballots: { upstreamId: string; blindedMessage: string }[] }
+        return HttpResponse.json({
+          signatures: body.ballots.map(({ upstreamId, blindedMessage }) => ({
+            upstreamId,
+            weight: MOCK_WEIGHT_HEX,
+            proofType: 'ECDSA_BLIND',
+            ...mockV3Csp.blindSign(upstreamId, blindedMessage, MOCK_WEIGHT_HEX),
+          })),
+        })
+      }),
+    )
+    const txPayloads = captureBatchVotes()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.election?.census?.anonymous).toBe(true))
+    await connect(result)
+    await waitFor(() => expect(result.current.election.isAbleToVote).toBe(true))
+
+    await act(async () => {
+      await result.current.election.vote([[0]])
+    })
+
+    expect(txPayloads).toHaveLength(1)
+    const tx = Tx.decode(SignedTx.decode(fromHex(txPayloads[0])).tx)
+    if (tx.payload?.$case !== 'vote') throw new Error('expected a vote payload')
+    const proof = tx.payload.vote.proof?.payload
+    if (proof?.$case !== 'ca') throw new Error('expected a CA proof')
+
+    expect(proof.ca.type).toBe(ProofCA_Type.ECDSA_BLIND)
+    const weightKey = new Uint8Array(proof.ca.weightCertificate!.weightKey)
+    expect(new Uint8Array(proof.ca.weightCertificate!.signature)).toHaveLength(65)
+    const bundle = new Uint8Array(CAbundle.encode(proof.ca.bundle!).finish())
+    expect(
+      verifyBlindSignature(
+        blindMessageFromBundle(bundle),
+        deserializeBlindSignature(new Uint8Array(proof.ca.signature!)),
+        publicKeyPoint(weightKey),
+      ),
+    ).toBe(true)
+  })
+
+  it('votes an OFF_CHAIN_CA_V3_ECDSA election as an ECDSA proof', async () => {
+    server.use(
+      http.post(`http://localhost/processes/:processId/sign-batch`, async ({ request }) => {
+        const body = (await request.json()) as { ballots: { upstreamId: string; address: string }[] }
+        return HttpResponse.json({
+          signatures: body.ballots.map(({ upstreamId, address }) => ({
+            upstreamId,
+            weight: MOCK_WEIGHT_HEX,
+            proofType: 'ECDSA',
+            signature: mockV3Csp.signBundle(
+              upstreamId,
+              toHex(encodeCaBundle({ processId: upstreamId, address, weight: MOCK_WEIGHT_HEX })),
+            ),
+          })),
+        })
+      }),
+    )
+    const txPayloads = captureBatchVotes()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.election).not.toBeNull())
+    await connect(result)
+    await waitFor(() => expect(result.current.election.isAbleToVote).toBe(true))
+
+    await act(async () => {
+      await result.current.election.vote([[0]])
+    })
+
+    expect(txPayloads).toHaveLength(1)
+    const tx = Tx.decode(SignedTx.decode(fromHex(txPayloads[0])).tx)
+    if (tx.payload?.$case !== 'vote') throw new Error('expected a vote payload')
+    const proof = tx.payload.vote.proof?.payload
+    if (proof?.$case !== 'ca') throw new Error('expected a CA proof')
+    expect(proof.ca.type).toBe(ProofCA_Type.ECDSA)
+    expect(proof.ca.weightCertificate).toBeUndefined()
   })
 
   it('resolves per-question results from the results endpoint', async () => {

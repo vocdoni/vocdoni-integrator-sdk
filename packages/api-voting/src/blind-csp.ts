@@ -3,6 +3,7 @@ import type {
   BlindPointResponse,
   BlindSignRequest,
   BlindSignResponse,
+  CspProofType,
   SignFailureCode,
 } from '@vocdoni/api-types'
 import { bytesToNumberBE, numberToBytesBE } from '@noble/curves/abstract/utils'
@@ -90,6 +91,16 @@ export interface BlindCspResult {
   signature?: string
   /** Weight the CSP authorized — feed it back as `cspWeight`, unchanged. */
   weight?: string
+  /**
+   * Proof type the CSP named for the signature, on success: `ECDSA_BLIND` on an
+   * `OFF_CHAIN_CA_V3_BLIND` election, `ECDSA_BLIND_PIDSALTED` on a legacy one,
+   * absent from a CSP that predates per-election keys.
+   */
+  proofType?: CspProofType
+  /** Hex weight key, on an `ECDSA_BLIND` success. */
+  weightKey?: string
+  /** Hex certificate of `weightKey`, on an `ECDSA_BLIND` success. */
+  weightCertificate?: string
   code?: SignFailureCode
   error?: string
 }
@@ -101,9 +112,10 @@ export interface BlindCspResult {
  * Two rounds: the CSP issues a blind point per election, the client blinds the
  * CA bundle it will later put on chain, the CSP signs bytes it cannot read, the
  * client unblinds. What comes back is a `ProofCA` signature to pass to
- * `buildVoteTransaction` with `proofType: ProofCA_Type.ECDSA_BLIND_PIDSALTED`
- * and `cspWeight` set to the returned `weight` — the weight is baked into the
- * key salt, so altering it invalidates the signature.
+ * `buildVoteTransaction` with the options `cspProofOptions(result,
+ * ProofCA_Type.ECDSA_BLIND_PIDSALTED)` returns and `cspWeight` set to the
+ * returned `weight` — the weight picks the signing key, so altering it
+ * invalidates the signature.
  *
  * The blinding factors never leave this function, which is the whole point: the
  * CSP cannot link the authorization it granted to the ballot that appears on
@@ -198,6 +210,9 @@ export async function signBlindCspBallots(opts: SignBlindCspBallotsOptions): Pro
             upstreamId: signed.upstreamId,
             signature: toHex(serializeBlindSignature(unblind(bytesToNumberBE(fromHex(signed.signature)), secret))),
             weight: pointsById.get(signed.upstreamId)?.weight,
+            proofType: signed.proofType,
+            weightKey: signed.weightKey,
+            weightCertificate: signed.weightCertificate,
           }
         : {
             upstreamId: signed.upstreamId,

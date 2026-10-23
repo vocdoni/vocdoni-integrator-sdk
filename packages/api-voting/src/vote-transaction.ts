@@ -2,6 +2,7 @@ import type { EncryptionKey } from '@vocdoni/api-types'
 import { CAbundle, Proof, ProofCA, ProofCA_Type, SignedTx, Tx, VoteEnvelope } from '@vocdoni/proto/vochain'
 import { keccak_256 } from '@noble/hashes/sha3'
 import { randomBytes, utf8ToBytes } from '@noble/hashes/utils'
+import type { WeightCertificate } from './csp-proof'
 import { EphemeralSigner } from './ephemeral-signer'
 import { fromHex, strip0x, toHex } from './hex'
 import { buildVotePackage } from './vote-package'
@@ -22,7 +23,8 @@ export interface BuildVoteTransactionOptions {
   /**
    * CSP signature (hex): from the sign endpoints for a plain census, or the
    * unblinded 96-byte blind signature (`signBlindCspBallots`) for an anonymous
-   * one — pair the latter with `proofType: ECDSA_BLIND_PIDSALTED`.
+   * one. Spend it as the proof type the CSP returned with it
+   * (`cspProofOptions`).
    */
   cspSignature: string
   /**
@@ -33,8 +35,17 @@ export interface BuildVoteTransactionOptions {
   cspWeight?: string
   /** Election encryption keys, for secretUntilTheEnd elections. */
   encryptionKeys?: EncryptionKey[]
-  /** CSP proof type. Defaults to ECDSA_PIDSALTED (the SaaS CSP signer). */
+  /**
+   * CSP proof type. Defaults to ECDSA_BLIND when `weightCertificate` is set,
+   * and to ECDSA_PIDSALTED otherwise.
+   */
   proofType?: ProofCA_Type
+  /**
+   * Certificate of the key that blind-signed the ballot, returned by the CSP
+   * with an `ECDSA_BLIND` signature (an `OFF_CHAIN_CA_V3_BLIND` election). Only
+   * valid with that proof type.
+   */
+  weightCertificate?: WeightCertificate
   /**
    * Optional free-text note attached to the vote (e.g. an open "Other"
    * answer). The chain caps it at {@link MAX_MEMO_BYTES} UTF-8 bytes —
@@ -96,9 +107,14 @@ export function buildVoteTransaction(opts: BuildVoteTransactionOptions): string 
     cspSignature,
     cspWeight,
     encryptionKeys,
-    proofType = ProofCA_Type.ECDSA_PIDSALTED,
+    weightCertificate,
+    proofType = weightCertificate ? ProofCA_Type.ECDSA_BLIND : ProofCA_Type.ECDSA_PIDSALTED,
     memo,
   } = opts
+
+  if (weightCertificate && proofType !== ProofCA_Type.ECDSA_BLIND) {
+    throw new Error('A weight certificate is only valid on an ECDSA_BLIND proof')
+  }
 
   let memoBytes: Uint8Array | undefined
   if (memo !== undefined) {
@@ -118,6 +134,10 @@ export function buildVoteTransaction(opts: BuildVoteTransactionOptions): string 
         type: proofType,
         signature: fromHex(cspSignature),
         bundle: buildCaBundle({ processId, address: signer.address, weight: cspWeight }),
+        weightCertificate: weightCertificate && {
+          weightKey: fromHex(weightCertificate.weightKey),
+          signature: fromHex(weightCertificate.signature),
+        },
       }),
     },
   })
