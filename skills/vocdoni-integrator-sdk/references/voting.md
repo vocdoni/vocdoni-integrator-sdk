@@ -60,6 +60,8 @@ await client.elections.vote({ txPayload })
 | `encryptionKeys` | `EncryptionKey[]` | no | Required when `question.secretUntilTheEnd` is `true`; see "Encrypted elections" below for how keys are sourced |
 | `proofType` | `ProofCA_Type` | no | Defaults to `ECDSA_PIDSALTED` (correct for every non-anonymous SaaS CSP process). Pass `ECDSA_BLIND_PIDSALTED` for an anonymous census — see "Anonymous voting" below |
 | `memo` | `string` | no | Free-text note attached to the vote (e.g. an open "Other" answer). Max 256 UTF-8 **bytes** (`MAX_MEMO_BYTES`, validated client-side; throws when over). ⚠️ Always cleartext on the envelope — never put sensitive text here, even on `secretUntilTheEnd` elections (only the vote package is encrypted) |
+| `metadataHash` | `string` | no | `question.metadataHash` (hex SHA-256 of the question's metadata document) from the same process/question read the ballot was rendered from; omit when absent. The chain refuses a vote whose hash differs from the election's current one, so a ballot whose text changed after the voter read it cannot be cast. Must be 32 bytes (`METADATA_HASH_BYTES`; throws otherwise). On refusal, `isStaleMetadataError(err)` from `@vocdoni/api-client` is true: reload the process, show the voter the new text, rebuild the vote |
+| `parentMetadataHash` | `string` | no | The PROCESS-level `metadataHash` (`election.metadataHash`), the hash of the parent election every question links to, which holds the process title/description/header/streamUri. Same read, same rules as `metadataHash` (32 bytes, omit when absent, refused when stale). Pass it on every question's vote |
 
 ---
 
