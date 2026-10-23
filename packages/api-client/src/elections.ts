@@ -13,6 +13,7 @@ import type {
   CreateVotingProcessResponse,
   ElectionListParams,
   EnqueuedResponse,
+  JobStatusResponse,
   LocalizedInput,
   MultiLangString,
   ProcessCheckResponse,
@@ -34,6 +35,7 @@ import type {
   ValidateProcessCensusRequest,
   ValidateProcessCensusResponse,
   VotingProcessListResponse,
+  VotingProcessMetadata,
   VotingProcessQuestionRequest,
   VotingProcessResponse,
   VotingProcessResultsResponse,
@@ -45,6 +47,13 @@ import { normalizeQuestionChoiceMeta } from './choice-meta'
 import { normalizeQuestionStatus, normalizeVotingProcess } from './election-status'
 import { handleError } from './errors'
 import { JobsClient, type WaitForJobOptions } from './jobs'
+
+/**
+ * Default wait of {@link ElectionsClient.updateProcessMetadataAndWait}: 16
+ * minutes. The metadata transactions can sit in the mempool for up to its TTL
+ * (about 15 minutes) before landing or expiring, plus a margin.
+ */
+export const METADATA_UPDATE_TIMEOUT_MS = 16 * 60 * 1000
 
 /** True when a publish response is the async enqueued form (vs. already published). */
 function isEnqueued(res: PublishProcessResponse | EnqueuedResponse): res is EnqueuedResponse {
@@ -312,6 +321,65 @@ export class ElectionsClient {
     if (!isEnqueued(res)) return res
     const job = await this.jobs.waitFor(res.jobId, opts)
     return { address: job.result?.address ?? '', status: job.result?.status ?? '' }
+  }
+
+  /**
+   * Read the text of a process (title, description, header, stream URI and
+   * each question's and choice's text) via `GET /processes/{id}/metadata`.
+   */
+  async getProcessMetadata(processId: string): Promise<VotingProcessMetadata> {
+    return this.fetch<VotingProcessMetadata>(`/processes/${processId}/metadata`).catch(handleError)
+  }
+
+  /**
+   * Replace the text of a process via `PUT /processes/{id}/metadata`
+   * (Manager/Admin). The body must match the process shape exactly — same
+   * number of questions, same number of choices per question — or the API
+   * answers 400.
+   *
+   * A draft is updated in place and this resolves to `undefined`. A published
+   * process is updated on chain (one transaction per changed question plus the
+   * parent election, so votes attest the new metadata hash): this resolves to
+   * the enqueued `set_process_metadata` job, or use
+   * {@link updateProcessMetadataAndWait}. Those transactions can stay pending
+   * for up to the mempool TTL, so poll with a timeout of at least
+   * {@link METADATA_UPDATE_TIMEOUT_MS}, not `jobs.waitFor`'s 60 s default.
+   */
+  async updateProcessMetadata(
+    processId: string,
+    metadata: VotingProcessMetadata,
+  ): Promise<EnqueuedResponse | undefined> {
+    const res = await this.fetch<Partial<EnqueuedResponse> | undefined>(`/processes/${processId}/metadata`, {
+      method: 'PUT',
+      body: metadata,
+    }).catch(handleError)
+    return typeof res?.jobId === 'string' ? { jobId: res.jobId } : undefined
+  }
+
+  /**
+   * {@link updateProcessMetadata}, waiting for the on-chain update of a
+   * published process (a `set_process_metadata` job) to complete. Resolves to
+   * the completed job, whose `result.questions` (and `result.parent`) report
+   * each election's new metadata, or to `undefined` for a draft updated in
+   * place. Throws `JobFailedError` if the job fails; the failed job carries the
+   * same per-election outcomes.
+   *
+   * Waits up to {@link METADATA_UPDATE_TIMEOUT_MS} by default, as the
+   * transactions can stay pending for up to the mempool TTL; `opts.timeoutMs`
+   * overrides it.
+   */
+  async updateProcessMetadataAndWait(
+    processId: string,
+    metadata: VotingProcessMetadata,
+    opts?: WaitForJobOptions,
+  ): Promise<JobStatusResponse | undefined> {
+    const res = await this.updateProcessMetadata(processId, metadata)
+    if (!res) return undefined
+    return this.jobs.waitFor(res.jobId, {
+      expectType: 'set_process_metadata',
+      timeoutMs: METADATA_UPDATE_TIMEOUT_MS,
+      ...opts,
+    })
   }
 
   /**

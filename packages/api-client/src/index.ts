@@ -16,7 +16,7 @@ export {
   type EndDates,
 } from './election-status'
 export { VocdoniApiClient } from './client'
-export { ElectionsClient, ProcessesCspClient } from './elections'
+export { ElectionsClient, METADATA_UPDATE_TIMEOUT_MS, ProcessesCspClient } from './elections'
 export { VocdoniApiError } from './errors'
 export { JobsClient, JobFailedError, type WaitForJobOptions } from './jobs'
 export { OrganizationsClient } from './organizations'
