@@ -504,7 +504,7 @@ When multiple keys are present they are applied in ascending `index` order (inne
 When the process's census has `anonymous: true`, the CSP signs a message it
 cannot read, so it cannot link the authorization it granted to the ballot that
 lands on chain. This is a **blind signature, not ZK** — `EnvelopeType.Anonymous`
-stays `false` and `@vocdoni/api-voting-zk` is a different path entirely.
+stays `false`.
 
 `signBlindCspBallots()` replaces `elections.sign()` and does both rounds plus
 the blinding/unblinding:

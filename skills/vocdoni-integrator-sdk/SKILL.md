@@ -14,7 +14,6 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | `@vocdoni/api-types` | Shared TypeScript interfaces — no runtime code |
 | `@vocdoni/api-client` | HTTP client wrapping the SaaS REST API ⚠️ surface in flux |
 | `@vocdoni/api-voting` | CSP auth, vote envelope, ballot encryption, vote-tx signing |
-| `@vocdoni/api-voting-zk` | ZK/anonymous voting: SIK derivation, Groth16 proofs, circuit fetching |
 | `@vocdoni/react-providers` | Headless React context providers and hooks |
 | `@vocdoni/react-components` | Unstyled React UI components built on react-providers |
 
@@ -31,7 +30,6 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | Cast a vote on an anonymous (blind CSP) census | `references/voting.md` | `recipes/anonymous-vote.ts` |
 | Add voting to a React app | `references/react.md` | — |
 | Manage election lifecycle (pause/end/cancel) | `references/react.md` + `references/client.md` | — |
-| ZK/anonymous voting | `references/zk-voting.md` | — |
 
 ## The vote flow in one minute
 
@@ -148,7 +146,7 @@ console.log('nullifier:', job.result?.voteID)
 - **The vote tx is signed by an ephemeral key, not the voter's wallet.** `EphemeralSigner` generates a fresh secp256k1 keypair per vote; the CSP signs its Ethereum address. This decouples the voter's identity from the on-chain signature.
 - **Relaying is async.** `elections.vote()` returns a `jobId`. Poll `jobs.waitFor(jobId)` to get the vote nullifier (`voteID`). The `VotingClient.vote()` method returns the jobId; the React `useElection().vote()` awaits the full job for each question.
 - **One nullifier per question, not per process.** A voter who answered N questions holds N vote ids. Read them all from `useElection().voteIds` (`Record<questionId, string>`) — the older single `voteId` is deprecated and only ever shows one. Server-side, `elections.signInfo(id, { authToken })` returns the same set as `consumed[]`.
-- **An anonymous census is unlinkable, not ZK.** `census.anonymous: true` makes the CSP blind-sign — it never sees the ephemeral address, so it cannot link voter → vote. `EnvelopeType.Anonymous` stays **false**; this is a blind signature, not a zk-SNARK (that is `@vocdoni/api-voting-zk`, a separate path). Consequence: `signInfo().consumed[]` carries **no `address` and no `nullifier`** for such a process — both fields are optional now. Vote ids come only from the relay job, so they are lost on reload and `useElection().voteIds` cannot be recovered cross-session.
+- **An anonymous census is unlinkable, not ZK.** `census.anonymous: true` makes the CSP blind-sign — it never sees the ephemeral address, so it cannot link voter → vote. `EnvelopeType.Anonymous` stays **false**; this is a blind signature, not a zk-SNARK. Consequence: `signInfo().consumed[]` carries **no `address` and no `nullifier`** for such a process — both fields are optional now. Vote ids come only from the relay job, so they are lost on reload and `useElection().voteIds` cannot be recovered cross-session.
 
 ## A note on api-client stability
 
