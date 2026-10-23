@@ -172,8 +172,10 @@ jobs:
     # cleared `/integration reset` builds nothing, so it skips this job as well.
     if: ${{ !cancelled() && needs.resolve.outputs.reset != 'true' && (needs.resolve.result == 'success' || (needs.resolve.result == 'skipped' && github.event_name != 'issue_comment')) }}
     runs-on: ubuntu-latest
-    # Runs on every PR, unconditionally. It uses no secrets and touches no
-    # private images, so fork PRs need no skip condition either.
+    # Runs on every PR, unconditionally. Pinned saas-backend builds need the
+    # SAAS_BACKEND_DEPLOY_KEY secret, which fork pull_request runs don't get: a fork
+    # PR with a sticky saas-backend pin fails until a maintainer's /integration comment
+    # runs it. Unpinned runs use no secrets.
     #
     # Measured cost on a real runner: ~3.5 min end to end (12s image pulls, 29s
     # to a booted-and-bootstrapped stack, 144s suite) — close enough to the
@@ -197,6 +199,7 @@ jobs:
       cancel-in-progress: true
     permissions:
       contents: read
+      packages: read # pull ghcr.io/vocdoni/saas-backend
     outputs:
       vocdoni_node_sha: ${{ steps.pins.outputs.vocdoni_node_sha }}
       saas_backend_sha: ${{ steps.pins.outputs.saas_backend_sha }}
@@ -209,23 +212,23 @@ jobs:
           ref: ${{ needs.resolve.outputs.checkout_ref }}
           persist-credentials: false
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # Trusted: on issue_comment github.sha is main, so the build script never comes
+      # from a fork's PR merge commit. On pull_request it is the merge commit, but
+      # fork runs get no secrets there.
+      - name: Checkout trusted scripts
+        uses: actions/checkout@v4
         with:
-          node-version: 22
-          cache: pnpm
+          ref: ${{ github.sha }}
+          path: .trusted
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
+      # Keep this step and the image pull below ahead of any step that runs PR code
+      # (pnpm install runs install scripts): they handle the deploy key and the ghcr.io token.
       - name: Build pinned images
         id: pins
         if: needs.resolve.outputs.vocdoni_node_ref != '' || needs.resolve.outputs.saas_backend_ref != ''
         env:
-          GH_TOKEN: ${{ github.token }}
+          SAAS_BACKEND_DEPLOY_KEY: ${{ secrets.SAAS_BACKEND_DEPLOY_KEY }}
           NODE_REF: ${{ needs.resolve.outputs.vocdoni_node_ref }}
           SAAS_REF: ${{ needs.resolve.outputs.saas_backend_ref }}
         run: |
@@ -235,7 +238,7 @@ jobs:
           build() {
             local repo="$1" ref="$2" env_var="$3" output="$4"
             local image sha
-            scripts/integration-build-image.sh "$repo" "$ref" > "$RUNNER_TEMP/$repo.out" 2> "$RUNNER_TEMP/$repo.log" || return 1
+            .trusted/scripts/integration-build-image.sh "$repo" "$ref" > "$RUNNER_TEMP/$repo.out" 2> "$RUNNER_TEMP/$repo.log" || return 1
             image="$(sed -n 's/^image=//p' "$RUNNER_TEMP/$repo.out")"
             sha="$(sed -n 's/^sha=//p' "$RUNNER_TEMP/$repo.out")"
             [ -n "$image" ] && [ -n "$sha" ] || return 1
@@ -268,11 +271,17 @@ jobs:
           done
           [ "$failed" = 0 ]
 
-      - name: Print resolved image digests
+      - name: Pull images and print digests
         # :main is tracked deliberately (see integration/README.md); a green
         # run can go red with no change in this repo. This makes a red run
-        # reproducible locally.
+        # reproducible locally. The ghcr.io login lasts only for this step.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
         run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
           if [ -n "${VOCDONI_NODE_IMAGE:-}" ]; then
             echo "vocdoni-node built from source: $VOCDONI_NODE_IMAGE"
           else
@@ -285,6 +294,18 @@ jobs:
             docker pull ghcr.io/vocdoni/saas-backend:main
             docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/vocdoni/saas-backend:main
           fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Summarize tested refs
         env:
