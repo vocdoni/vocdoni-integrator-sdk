@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   voting: false,
   connected: true,
   isInCensus: true,
+  voteStatus: {} as Record<string, string>,
 }))
 vi.mock('@vocdoni/react-providers', () => ({ useElection: () => state }))
 
@@ -34,6 +35,7 @@ function setVoter(over: Partial<typeof state>) {
       voting: false,
       connected: true,
       isInCensus: true,
+      voteStatus: {},
     },
     over,
   )
@@ -170,6 +172,23 @@ describe('VoteButton', () => {
         'title',
         'You are not eligible to vote in this process',
       )
+    })
+
+    it('says a signed vote that never reached the ledger cannot be re-sent from here', () => {
+      setVoter({ isAbleToVote: false, voteStatus: { 'q-0': 'unconfirmed' } })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute(
+        'title',
+        'Your vote was authorized but did not reach the ledger, and this device cannot send it again. Please contact the organizer.',
+      )
+    })
+
+    it('says an anonymous vote is authorized, without claiming it is lost', () => {
+      setVoter({ isAbleToVote: false, voteStatus: { 'q-0': 'signed' } })
+      renderWithComponents(<VoteButton />, slots)
+      const title = screen.getByTestId('vote').getAttribute('title')
+      expect(title).toBe('Your vote was already authorized. It cannot be confirmed from this device.')
+      expect(title).not.toMatch(/reach|ledger|chain/)
     })
 
     it('reports the vote already cast ahead of any other voter state', () => {

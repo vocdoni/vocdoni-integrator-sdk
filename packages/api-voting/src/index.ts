@@ -35,6 +35,7 @@ export {
   type VoteApiClient,
 } from './voting-client'
 export { strip0x, ensure0x, fromHex, toHex } from './hex'
+export { voteNullifier } from './nullifier'
 // Re-exported so callers can tag a proof without depending on @vocdoni/proto
 // themselves. It is an enum, so it exists at runtime: a package that imports it
 // from proto directly gets protobufjs inlined into its bundle for one integer.
