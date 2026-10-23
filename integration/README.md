@@ -64,7 +64,8 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
 
 - Each key is optional; a bare `/integration` uses the published `:main` images.
 - A ref can be a commit SHA (short or full, 7-40 hex), a branch, a tag, or
-  `#<PR number>` (its current head commit, e.g. `saas-backend=#760`).
+  `#<PR number>` (its current head commit, e.g. `saas-backend=#760`). A bare PR number
+  works too (`saas-backend=760`); a branch or tag named only with 1-6 digits can't be pinned by name.
 - A short SHA only resolves when a current branch, tag or PR head of the upstream
   reaches it; use the full SHA for commits from deleted branches or force-pushed PR iterations.
 - Only users with write access can trigger it; comments from anyone else are

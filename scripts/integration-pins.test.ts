@@ -53,6 +53,24 @@ describe('integration-pins.sh', () => {
       expectOk('/integration vocdoni-node=#1 saas-backend=#999999999', '#1', '#999999999', true)
     })
 
+    it('a bare PR number is output as #N and is sticky', () => {
+      expectOk('/integration saas-backend=795', '', '#795', true)
+      expectOk('/integration vocdoni-node=1 saas-backend=999999', '#1', '#999999', true)
+    })
+
+    it('leading zeros are dropped from a PR number', () => {
+      expectOk('/integration saas-backend=0795', '', '#795', true)
+      expectOk('/integration saas-backend=#0795', '', '#795', true)
+    })
+
+    it('a 7-digit all-numeric ref is a one-shot SHA', () => {
+      expectOk('/integration vocdoni-node=1234567', '1234567', '', false)
+    })
+
+    it('a bare PR number mixed with a SHA is one-shot', () => {
+      expectOk('/integration vocdoni-node=1a2b3c4 saas-backend=795', '1a2b3c4', '#795', false)
+    })
+
     it('a branch with a #PR is sticky', () => {
       expectOk('/integration vocdoni-node=main saas-backend=#760', 'main', '#760', true)
     })
@@ -118,6 +136,13 @@ describe('integration-pins.sh', () => {
       expectError('/integration vocdoni-node=#abc')
       expectError('/integration vocdoni-node=#1/2')
       expectError('/integration vocdoni-node=#1234567890')
+    })
+
+    it('rejects PR number 0, bare or with #', () => {
+      expectError('/integration vocdoni-node=0')
+      expectError('/integration vocdoni-node=00')
+      expectError('/integration vocdoni-node=#0')
+      expectError('/integration vocdoni-node=#000')
     })
 
     it('rejects reset with any other token', () => {

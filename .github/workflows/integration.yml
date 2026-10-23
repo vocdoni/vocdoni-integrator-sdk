@@ -19,12 +19,12 @@ on:
   workflow_dispatch:
     inputs:
       vocdoni_node_ref:
-        description: 'vocdoni-node commit SHA, branch, tag or #PR to build from source (empty = :main image)'
+        description: 'vocdoni-node commit SHA, branch, tag, #PR or bare PR number to build from source (empty = :main image)'
         type: string
         required: false
         default: ''
       saas_backend_ref:
-        description: 'saas-backend commit SHA, branch, tag or #PR to build from source (empty = :main image)'
+        description: 'saas-backend commit SHA, branch, tag, #PR or bare PR number to build from source (empty = :main image)'
         type: string
         required: false
         default: ''
