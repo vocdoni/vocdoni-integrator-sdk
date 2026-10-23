@@ -118,8 +118,12 @@ const question = await client.elections.getQuestion(processId, questionId)
 // Auth step 0 — identify the voter.
 // Pass all fields the census requires (see question.census.authFields)
 const res0 = await client.elections.authStep0(processId, {
-  memberNumber: '42',      // or: name, surname, birthDate, nationalId, email, phone
+  memberNumber: '42',      // or: name, surname, birthDate, nationalId, email, phone, password
 })
+// A 'password' auth field takes the member password as its CLIENT HASH, never the
+// plaintext: lowercase_hex(SHA-256("vocdoni-member-password:" + "0x" + lowercase org
+// address without any 0x + ":" + trim(password).normalize("NFC"))). See AuthRequest.password in
+// @vocdoni/api-types for the test vector. A wrong one fails like an unknown voter (40029).
 // res0.authToken — verified immediately if question.census.twoFaFields is empty (auth-only)
 //               — pending verification otherwise (proceed to step 1)
 
@@ -367,6 +371,8 @@ const org = await client.organizations.createManaged({ name: 'Acme', type: 'comp
 // CSP voter routes. A new member without one weighs 1. A JSON number is rejected
 // with a 400. Weights only count in a census created with `weighted: true`,
 // which needs a plan that allows weighted voting.
+// Member `password` is write-only and takes the same client hash as auth step 0
+// (never the plaintext, which is a 400); reads report `hasPassword` instead.
 const members = [{ memberNumber: '1', name: 'Alice', weight: '2' }]
 const { jobId } = await client.organizations.addMembers(org.address, members, { async: true })
 if (jobId) await client.jobs.waitFor(jobId) // progress in job.result.added/total/progress

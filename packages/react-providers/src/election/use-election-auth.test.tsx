@@ -105,6 +105,26 @@ describe('useElectionAuth', () => {
       expect(result.current.auth.weight).toBe(42)
     })
 
+    it('posts the member password client hash with the other auth fields', async () => {
+      useAuthOnlyCensus()
+      let body: unknown
+      server.use(
+        http.post('http://localhost/processes/:id/auth/0', async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ authToken: 'csp-step0-token' })
+        }),
+      )
+      const { result } = renderHook(useHooks, { wrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+
+      const password = '2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e'
+      await act(async () => {
+        await result.current.auth.auth0({ memberNumber: '5', password })
+      })
+      expect(body).toEqual({ memberNumber: '5', password })
+      expect(result.current.auth.connected).toBe(true)
+    })
+
     it('clear() resets the session AND the election voter state', async () => {
       useAuthOnlyCensus()
       const { result } = renderHook(useHooks, { wrapper })
