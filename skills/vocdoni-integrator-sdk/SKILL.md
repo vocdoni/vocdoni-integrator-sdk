@@ -54,7 +54,9 @@ reads `chainId` and the questions directly:
                                                questions in ONE call (client.elections.signBatch; the
                                                single-question POST /processes/{id}/sign still exists)
    [repeat steps 5–6 for each votable question]
-5. buildVoteTransaction(...)                 → build + sign the protobuf tx locally
+5. buildVoteTransaction(...)                 → build + sign the protobuf tx locally; pass the
+                                               question's metadataHash and the process's as
+                                               parentMetadataHash (stale → isStaleMetadataError)
 6. POST /vote                                → relay tx → jobId
    GET  /jobs/{jobId}                        → poll until completed → voteID (nullifier)
 ```
