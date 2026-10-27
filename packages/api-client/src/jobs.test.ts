@@ -1,3 +1,4 @@
+import type { QuestionJobResult } from '@vocdoni/api-types'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../mocks/server'
 import { VocdoniApiClient } from './client'
@@ -155,5 +156,29 @@ describe('jobs.waitFor', () => {
 
     expect(job.status).toBe('completed')
     expect(seen).toEqual(['pending:pending', 'completed:completed'])
+  })
+
+  it('returns per-question census outcomes typed on result.questions', async () => {
+    server.use(
+      http.get(`${BASE_URL}/jobs/census-1`, () =>
+        HttpResponse.json({
+          jobId: 'census-1',
+          status: 'completed',
+          type: 'set_process_census',
+          result: {
+            questions: [
+              { questionId: 'q-0', status: 'completed' },
+              { questionId: 'q-1', noOp: true },
+            ],
+          },
+        }),
+      ),
+    )
+
+    const job = await client.jobs.waitFor('census-1', { intervalMs: 1 })
+    const questions: QuestionJobResult[] = job.result?.questions ?? []
+    expect(questions).toHaveLength(2)
+    expect(questions[0]).toMatchObject({ questionId: 'q-0', status: 'completed' })
+    expect(questions[1].noOp).toBe(true)
   })
 })

@@ -329,7 +329,8 @@ const { participants } = await client.elections.participants(mongoId, {
 
 // Admin: append org members to a PUBLISHED process's census (append-only;
 // drafts 409 — edit those via update()). jobId tracks the async on-chain
-// maxCensusSize bump when one is needed.
+// maxCensusSize bump when one is needed; absent when no election can grow
+// (only READY/PAUSED questions are resized), so skip waitFor then.
 const { added, jobId } = await client.elections.addCensusMembers(mongoId, ['m-1', 'm-2'])
 if (jobId) await client.jobs.waitFor(jobId)
 
@@ -431,6 +432,8 @@ const job = await client.jobs.get(jobId)
 //   { processId, nullifier, status, voteID?, error? }. The job completes only when EVERY
 //   envelope landed and fails otherwise — a failed job still carries the array.
 // job.result?.added/total/progress — import counters (org_members / census_participants jobs)
+// job.result?.questions — set_process_status/set_process_census: per-question { questionId, status?, error?, noOp? }
+//   in target order; noOp = no tx sent. A census job fails if any resize failed; the rest still apply.
 // job.errors — error detail lines (e.g. "line 3: invalid email" on imports)
 
 // Poll until terminal state

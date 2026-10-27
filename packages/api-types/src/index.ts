@@ -850,6 +850,18 @@ export interface VoteJobResult {
   error?: string
 }
 
+/**
+ * One question's outcome in a `set_process_status` or `set_process_census` job,
+ * in target order. On a census update, `noOp: true` means no tx was sent because
+ * the election was no longer open on chain or already had the room.
+ */
+export interface QuestionJobResult {
+  questionId: string
+  status?: JobStatus
+  error?: string
+  noOp?: boolean
+}
+
 /** Unified job result — each field is only populated by the job types that produce it. */
 export interface JobResult {
   address?: string
@@ -870,6 +882,12 @@ export interface JobResult {
    * (also present on a failed job) for the per-vote truth.
    */
   votes?: VoteJobResult[]
+  /**
+   * Per-question outcomes of status-change and census-update jobs, in target
+   * order. A census-update job fails if any resize failed; the others still
+   * apply and the job error names each failed question.
+   */
+  questions?: QuestionJobResult[]
   /** Members/census rows imported so far — produced by member/census import jobs. */
   added?: number
   /** Total rows to import — produced by member/census import jobs. */
@@ -1200,9 +1218,12 @@ export interface ProcessParticipantsResponse {
 /**
  * Response of `PUT /processes/{id}/census` — the number of members added to
  * the census synchronously, plus the async job id that raises each published
- * election's `maxCensusSize` on-chain (absent when no on-chain update was
- * needed). Only published processes can have their census extended; drafts are
- * edited through `PUT /processes/{id}` instead (409 otherwise).
+ * election's `maxCensusSize` on-chain. `jobId` is absent when no election can
+ * grow: only READY/PAUSED questions are resized, so e.g. a process whose
+ * elections already ended returns 200 with no job. Callers must skip
+ * `jobs.waitFor` when `jobId` is absent. Only published processes can have their
+ * census extended; drafts are edited through `PUT /processes/{id}` instead (409
+ * otherwise).
  */
 export interface UpdateProcessCensusResponse {
   jobId?: string

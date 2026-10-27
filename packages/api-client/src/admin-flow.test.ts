@@ -661,6 +661,16 @@ describe('admin / integrator client methods', () => {
       expect(res.jobId).toBe('cjob-1')
       expect(body).toEqual({ memberIds: ['m-1', 'm-2'] })
     })
+
+    it('returns no jobId when no election can grow', async () => {
+      server.use(
+        http.put(`${BASE_URL}/processes/p1/census`, () => HttpResponse.json({ added: 1 })),
+      )
+
+      const res = await client.elections.addCensusMembers('p1', ['m-1'])
+      expect(res.jobId).toBeUndefined()
+      expect(res.added).toBe(1)
+    })
   })
 
   describe('elections.publishAndWait', () => {
