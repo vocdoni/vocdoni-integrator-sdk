@@ -160,11 +160,11 @@ export interface CensusInfo {
 }
 
 /**
- * Member-data fields a CSP census can authenticate on. Listed in the process
- * census ({@link CensusSpec}); an auth-only census (no 2FA) is one with only
- * `authFields` set.
+ * Member-data fields a CSP census can authenticate on ({@link CensusSpec}); an auth-only
+ * census (no 2FA) sets only `authFields`. `'password'` never identifies a member on its
+ * own, so a census needs another auth or 2FA field next to it.
  */
-export type OrgMemberAuthField = 'name' | 'surname' | 'memberNumber' | 'nationalId' | 'birthDate'
+export type OrgMemberAuthField = 'name' | 'surname' | 'memberNumber' | 'nationalId' | 'birthDate' | 'password'
 /** Contact fields used for the 2FA OTP challenge. */
 export type OrgMemberTwoFaField = 'email' | 'phone'
 
@@ -912,6 +912,17 @@ export interface AuthRequest {
   birthDate?: string
   email?: string
   phone?: string
+  /**
+   * Client hash of the member password (64 lowercase hex, never the plaintext), required
+   * when the census `authFields` include `'password'`; the same value {@link OrgMember.password}
+   * was set with: `lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + "0x" +
+   * lowercase(orgAddress without any "0x") + ":" + trim(password).normalize("NFC"))))`.
+   * NFC makes accented passwords hash alike whichever Unicode form they were typed in.
+   * Test vector: org `0x00000000000000000000000000000000000000AA` and `s3cret` hash to
+   * `2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e`.
+   * A wrong password fails like an unknown participant (40029); a malformed hash is 40005.
+   */
+  password?: string
 }
 
 /** Auth step 1 — confirm the 2FA challenge. Not used by auth-only censuses. */
@@ -1252,8 +1263,13 @@ export interface OrgMember {
    * CSP voter routes. Defaults to `1`; only a weighted census uses it.
    */
   weight?: string
-  /** Write-only: hashed by the backend and never returned. */
+  /**
+   * Write-only client hash of the member password ({@link AuthRequest.password}); plaintext
+   * is a 400. Stored argon2-hashed, never returned; on update `''` clears it, omitting keeps it.
+   */
   password?: string
+  /** Read-only: whether the member has a password. Ignored on writes. */
+  hasPassword?: boolean
   other?: Record<string, unknown>
 }
 
