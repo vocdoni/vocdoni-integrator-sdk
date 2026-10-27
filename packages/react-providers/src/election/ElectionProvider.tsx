@@ -5,7 +5,14 @@ import type {
   VotingProcessResponse,
   VotingProcessResultsResponse,
 } from '@vocdoni/api-types'
-import { buildVoteTransaction, EphemeralSigner, MAX_MEMO_BYTES, ProofCA_Type } from '@vocdoni/api-voting'
+import {
+  buildVoteTransaction,
+  cspProofOptions,
+  EphemeralSigner,
+  MAX_MEMO_BYTES,
+  ProofCA_Type,
+  type CspProofOptions,
+} from '@vocdoni/api-voting'
 import { useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import {
   createContext,
@@ -449,10 +456,12 @@ export function ElectionProvider({
           address: signers[k].address,
         })),
       )
-      // An anonymous census gets a blind CSP signature, which the chain
-      // verifies against the blind-salted census key rather than as a plain
-      // ECDSA signature over the bundle.
-      const proofType = election.census?.anonymous ? ProofCA_Type.ECDSA_BLIND_PIDSALTED : undefined
+      // The CSP names the proof type of each signature (it depends on the
+      // census origin of each question's election). A CSP that names none signs
+      // the salted types: blind for an anonymous census, ECDSA otherwise.
+      const fallbackProofType = election.census?.anonymous
+        ? ProofCA_Type.ECDSA_BLIND_PIDSALTED
+        : ProofCA_Type.ECDSA_PIDSALTED
 
       // A CSP signature is one-shot: signBatch() has already consumed every
       // authorization it granted. Throwing here would discard the successful
@@ -474,6 +483,16 @@ export function ElectionProvider({
           setVoteStatus((st) => ({ ...st, [question.id]: 'failed' }))
           return
         }
+        // a result whose proof fields are inconsistent cannot become a valid
+        // vote; it fails this question like a refused signature does.
+        let proof: CspProofOptions
+        try {
+          proof = cspProofOptions(result, fallbackProofType)
+        } catch (error) {
+          signFailures.push({ questionId: question.id, error })
+          setVoteStatus((st) => ({ ...st, [question.id]: 'failed' }))
+          return
+        }
         signed.push({
           question,
           i,
@@ -484,7 +503,7 @@ export function ElectionProvider({
             signer: signers[k],
             cspSignature: result.signature,
             cspWeight: result.weight,
-            proofType,
+            ...proof,
             encryptionKeys: question.secretUntilTheEnd ? question.encryptionKeys : undefined,
             memo: memos?.[i],
           }),

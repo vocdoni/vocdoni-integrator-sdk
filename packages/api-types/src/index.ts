@@ -940,6 +940,8 @@ export interface AuthResponse {
   signature?: string
   /** Hex-encoded census weight. */
   weight?: string
+  /** Proof type to build with `signature` — present on the sign response. */
+  proofType?: CspProofType
 }
 
 export interface AuthResendRequest {
@@ -1011,6 +1013,18 @@ export type SignFailureCode =
   | 'blind_request_missing'
   | 'invalid_blinded_message'
 
+/**
+ * The `ProofCA.Type` name of the proof a CSP signature is spent as. The CSP
+ * picks it per ballot from the election's census origin:
+ *
+ * - `ECDSA`: an `OFF_CHAIN_CA_V3_ECDSA` election, signed by its own key.
+ * - `ECDSA_BLIND`: an `OFF_CHAIN_CA_V3_BLIND` election; the result also carries
+ *   `weightKey` and `weightCertificate`, which go in `ProofCA.weightCertificate`.
+ * - `ECDSA_PIDSALTED` / `ECDSA_BLIND_PIDSALTED`: an election on the
+ *   `OFF_CHAIN_CA` / `OFF_CHAIN_CA_V2` origins, signed by the salted CSP key.
+ */
+export type CspProofType = 'ECDSA' | 'ECDSA_PIDSALTED' | 'ECDSA_BLIND' | 'ECDSA_BLIND_PIDSALTED'
+
 /** One ballot of a {@link SignBatchRequest}. */
 export interface SignBatchBallot {
   /** Vochain election id of the question (64-hex). */
@@ -1043,6 +1057,18 @@ export interface SignBatchResult {
   signature?: string
   /** Hex-encoded census weight the ballot was signed with, on success. */
   weight?: string
+  /** Proof type to build with `signature`, on success. */
+  proofType?: CspProofType
+  /**
+   * Hex compressed public key (33 bytes) that blind-signed the ballot, on an
+   * `ECDSA_BLIND` success.
+   */
+  weightKey?: string
+  /**
+   * Hex 65-byte certificate of `weightKey` for this election and weight, signed
+   * by the election's census root key, on an `ECDSA_BLIND` success.
+   */
+  weightCertificate?: string
   code?: SignFailureCode
   error?: string
 }

@@ -10,6 +10,12 @@ export {
   type CaBundleOptions,
 } from './vote-transaction'
 export {
+  cspProofOptions,
+  type CspProofFields,
+  type CspProofOptions,
+  type WeightCertificate,
+} from './csp-proof'
+export {
   signBlindCspBallots,
   type BlindCspApiClient,
   type BlindCspEndpoints,
