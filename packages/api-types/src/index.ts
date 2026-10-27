@@ -160,14 +160,9 @@ export interface CensusInfo {
 }
 
 /**
- * Member-data fields a CSP census can authenticate on. Listed in the process
- * census ({@link CensusSpec}); an auth-only census (no 2FA) is one with only
- * `authFields` set.
- *
- * `'password'` is the member password ({@link OrgMember.password}). It never
- * identifies a member on its own: the other fields find the participant and the
- * password is checked afterwards, so a census needs at least one other auth
- * field or a 2FA field next to it.
+ * Member-data fields a CSP census can authenticate on ({@link CensusSpec}); an auth-only
+ * census (no 2FA) sets only `authFields`. `'password'` never identifies a member on its
+ * own, so a census needs another auth or 2FA field next to it.
  */
 export type OrgMemberAuthField = 'name' | 'surname' | 'memberNumber' | 'nationalId' | 'birthDate' | 'password'
 /** Contact fields used for the 2FA OTP challenge. */
@@ -918,29 +913,14 @@ export interface AuthRequest {
   email?: string
   phone?: string
   /**
-   * The member password, required when the census `authFields` include
-   * `'password'`. Never the plaintext: the client hash, 64 lowercase hex
-   * characters, the same value the member's {@link OrgMember.password} was set
-   * with:
-   *
-   * ```
-   * lowercase_hex(SHA-256(UTF-8(
-   *   "vocdoni-member-password:" + canonicalAddress(orgAddress) + ":" + trim(password).normalize("NFC"))))
-   * canonicalAddress(a) = "0x" + lowercase(a without any leading "0x")
-   * ```
-   *
-   * `orgAddress` is the organization's address in any form (`0x`-prefixed and
-   * checksummed as organization reads return it, or bare lowercase hex as
-   * process reads return `orgAddress`): the canonical form is what is hashed.
-   *
-   * Normalizing to NFC makes accented passwords typed or pasted in different Unicode forms hash the same.
-   *
-   * Test vector: organization `0x00000000000000000000000000000000000000AA`
-   * (or `00000000000000000000000000000000000000aa`) and password `s3cret` hash
-   * to `2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e`.
-   *
-   * A wrong password fails like an unknown participant (code 40029); a value
-   * that is not 64 lowercase hex characters is rejected with code 40005.
+   * Client hash of the member password (64 lowercase hex, never the plaintext), required
+   * when the census `authFields` include `'password'`; the same value {@link OrgMember.password}
+   * was set with: `lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + "0x" +
+   * lowercase(orgAddress without any "0x") + ":" + trim(password).normalize("NFC"))))`.
+   * NFC makes accented passwords hash alike whichever Unicode form they were typed in.
+   * Test vector: org `0x00000000000000000000000000000000000000AA` and `s3cret` hash to
+   * `2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e`.
+   * A wrong password fails like an unknown participant (40029); a malformed hash is 40005.
    */
   password?: string
 }
@@ -1284,10 +1264,8 @@ export interface OrgMember {
    */
   weight?: string
   /**
-   * Write-only client hash of the member password (see {@link AuthRequest.password}
-   * for the formula): never the plaintext, which the backend rejects with a 400.
-   * Stored argon2-hashed and never returned. On an update, `''` clears it and
-   * leaving it out keeps it.
+   * Write-only client hash of the member password ({@link AuthRequest.password}); plaintext
+   * is a 400. Stored argon2-hashed, never returned; on update `''` clears it, omitting keeps it.
    */
   password?: string
   /** Read-only: whether the member has a password. Ignored on writes. */
