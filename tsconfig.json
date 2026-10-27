@@ -4,7 +4,6 @@
     { "path": "packages/api-types" },
     { "path": "packages/api-client" },
     { "path": "packages/api-voting" },
-    { "path": "packages/api-voting-zk" },
     { "path": "packages/react-providers" },
     { "path": "packages/react-components" }
   ]
