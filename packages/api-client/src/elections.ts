@@ -266,8 +266,11 @@ export class ElectionsClient {
    * Append existing org members to a published process's census via
    * `PUT /processes/{id}/census` (members already present are skipped). When
    * the census grows past the on-chain `maxCensusSize`, the returned `jobId`
-   * tracks the async on-chain bump — wait for it with `jobs.waitFor`. Fails
-   * with 409 for drafts (edit those through {@link update} instead).
+   * tracks the async on-chain bump — wait for it with `jobs.waitFor`. `jobId` is
+   * absent when no election can grow (only READY/PAUSED questions are resized),
+   * so skip `jobs.waitFor` then. Per-question outcomes land in the job's
+   * `result.questions`. Fails with 409 for drafts (edit those through
+   * {@link update} instead).
    */
   async addCensusMembers(id: string, memberIds: string[]): Promise<UpdateProcessCensusResponse> {
     return this.fetch<UpdateProcessCensusResponse>(`/processes/${id}/census`, {
