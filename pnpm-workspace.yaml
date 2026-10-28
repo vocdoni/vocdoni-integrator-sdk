@@ -3,6 +3,7 @@ packages:
 
 overrides:
   '@types/react': 19.x
+  'brace-expansion@>=2.0.0 <2.1.7': ^2.1.7
   react: ^19.0.0
   react-dom: ^19.0.0
   'react-router@<7.18.2': ^7.18.2
