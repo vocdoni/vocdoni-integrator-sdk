@@ -158,13 +158,19 @@ const {
                  //   per-question failures reported inline ({code, error}) rather than thrown.
   // voting
   isInCensus,    // boolean — true if voter belongs to this process's census
-  voterQuestions,// ProcessQuestionStatus[] — per-question canVote/hasVoted (empty until connected)
-  hasVoted,      // boolean — true once EVERY question is voted (or right after vote())
-  isAbleToVote,  // boolean — connected && isInCensus && !hasVoted
+  voterQuestions,// ProcessQuestionStatus[] — per-question canVote/hasVoted/hasSigned (empty until connected);
+                 //   hasVoted = on chain (an anonymous question verified via /votes/verify reads true)
+  hasVoted,      // boolean — true once EVERY question is on chain
+  pendingVotes,  // Record<questionId, true> — signed txs stored in this tab, not on chain yet;
+                 //   re-sent on connect and by the next vote(); render those questions read-only
+  isAbleToVote,  // boolean — connected && isInCensus && !hasVoted && some eligible question is
+                 //   not signed yet or pending a re-send
   vote,          // (encodedBallots: number[][]) => Promise<string> — per-question ballots
-  voting,        // boolean — true while vote() is in flight (success OR error settles it)
-  voteStatus,    // Record<questionId, 'signing'|'submitting'|'confirming'|'confirmed'|'failed'>
-                 //   per-question progress of the current/last vote() call (already-voted → 'confirmed')
+                 //   (a pending question's ballot is ignored: its stored tx is re-sent)
+  voting,        // boolean — true while vote() or the re-send on connect is in flight
+  voteStatus,    // Record<questionId, 'signing'|'submitting'|'confirming'|'confirmed'|'failed'
+                 //   |'unconfirmed'|'signed'> — per-question progress of the current/last vote()
+                 //   (already-voted → 'confirmed'); 'unconfirmed'/'signed' also set on connect
   voteIds,       // Record<questionId, string> — EVERY vote id (nullifier) the voter holds
   voteId,        // string | null — DEPRECATED: only ever one of them; read voteIds
   clearVoter,    // () => void — clears the auth session and vote state
@@ -185,9 +191,34 @@ question id; the legacy `voteId` exposes just the first and is deprecated.
 
 **Exception — anonymous census.** A process whose `census.anonymous` is `true`
 returns no nullifiers from `sign-info`, because the CSP blind-signs and never
-learns the address. There is nothing to recover after a reload there: `voteIds`
-holds only what the current session's `vote()` produced. `hasVoted` and
-`voterQuestions` still work — those come from `check()`.
+learns the address, and `check()` never reports `hasVoted` there. The provider
+keeps each confirmed nullifier in the tab's `sessionStorage` and re-verifies it
+on connect (`client.elections.verifyVotes`), so a reload of the same tab
+recovers `hasVoted` and `voteIds`. A new tab or device has nothing to verify:
+the question reads `signed` (authorized, not confirmable from here).
+
+### Verified vote status and the pending-vote store
+
+A question counts as voted only on on-chain evidence: the relay job said
+`completed`, `check()` reports `hasVoted` (plain census), or
+`POST /votes/verify` confirms the stored nullifier (anonymous census).
+`hasSigned` alone never confirms anything. Every signed tx is written to
+`sessionStorage` under `vocdoni.pendingVote.<upstreamId>.<nullifier>` before it
+is relayed, as `{ owner, nullifier, txPayload?, savedAt, confirmedAt? }`, where
+`owner` is the sha256 of the voter's canonical `auth0()` payload. So:
+
+- a relay that fails or never answers leaves the question `failed` and in
+  `pendingVotes`; the next `vote()` — or the next connect in the same tab —
+  re-sends the same bytes (no new CSP signature; idempotent on chain);
+- a question signed but not on chain with nothing stored reads `unconfirmed`
+  (plain census) or `signed` (anonymous), cannot be voted again, and makes
+  `vote()` throw `UnconfirmedVoteError` (`questions: {questionId, status}[]`)
+  once nothing else is left;
+- entries of another voter in the same tab are never relayed, verified or
+  deleted; `clearVoter()` keeps the entries; a process `ENDED`/`RESULTS`/
+  `CANCELED` drops them; the store dies with the tab;
+- a backend without `hasSigned` keeps the old behaviour: `hasVoted` is trusted
+  as on chain and `verifyVotes` is never called.
 
 ```tsx
 const { election, voteIds } = useElection()
@@ -201,6 +232,8 @@ election.questions
 **Auth-only census** (no 2FA): `election?.census?.twoFaFields` is empty/absent. `auth0()` sets `connected = true` immediately; skip `auth1`.
 
 **2FA census**: `auth0()` sends the challenge; call `auth1(otp)` to confirm. `connected` becomes `true` after `auth1`.
+
+A successful `auth0()` replaces the current session: an already connected voter is disconnected (`authToken` null, vote state reset) until the new identity's `auth1()` completes (auth-only census: at once), so the previous voter's token is never used for the new identity.
 
 ```tsx
 // Auth-only flow
@@ -221,11 +254,11 @@ await auth1('123456')
 Casting is **phased** so a failure can never half-vote silently:
 
 1. **Pre-flight** — every question is validated up front (`upstreamId` present; `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
-2. **Resume check** — a fresh `elections.check()` marks questions already voted; they are skipped, so calling `vote()` again after a failure completes the remaining questions instead of dying on a double-vote.
-3. **Sign + build** — every remaining question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch` → `POST /processes/{id}/sign-batch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure.
-4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. If, on chain, some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`, and refreshes `voterQuestions`/`hasVoted` to the on-chain truth. Catch it and offer a retry — the next `vote()` call resumes.
+2. **Resume check** — a fresh `elections.check()` (plus `verifyVotes` for an anonymous census) decides each question: on chain → skipped; pending → its stored tx is reused; `unconfirmed`/`signed` → left alone; otherwise signed below. If that check fails, `vote()` throws `Could not verify your voting status; try again` without signing or relaying anything.
+3. **Sign + build** — every open question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch` → `POST /processes/{id}/sign-batch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure. Each built tx is stored (see above) before the relay.
+4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. A job-reported failure, a missing outcome, a lost relay response or a job wait that times out is verified on chain before it is reported (a lost response or a timeout is polled for up to `voteOptions.reconcile`, default 48 × 2.5 s); a verification that itself fails reports the question `failed` with the error `could not confirm the vote on chain yet` — unknown, not rejected. If some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`; `hasVoted` turns true only when every question is on chain. Catch it and offer a retry — the next `vote()` call re-sends the stored txs.
 
-Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx built, batch not yet sent) → `confirming` (enqueued, awaiting the chain) → `confirmed` | `failed`.
+Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx built, batch not yet sent) → `confirming` (enqueued, awaiting the chain) → `confirmed` | `failed`. `unconfirmed` and `signed` are terminal for this tab.
 
 Use `@vocdoni/ballot` to encode ballots before calling `vote()`:
 
@@ -332,7 +365,7 @@ Key election components (all from `@vocdoni/react-components`):
 | `<ElectionSchedule />` | Start/end dates (end is `endedAt ?? endDate`, so an early-ended vote shows when it really stopped; a custom slot gets only `text`, so compute it with `resolveEndDate(election)`, re-exported from `@vocdoni/react-components`) |
 | `<ElectionStatusBadge />` | Status chip (ONGOING, PAUSED, ENDED…) |
 | `<ElectionQuestions />` | Full question + choices form (calls `vote()` on submit); renders a failed cast as a form-level `QuestionsError` |
-| `<VoteButton />` | Submit button; auto-disabled when `!isAbleToVote`, when `status !== 'ONGOING'`, or while a vote is in flight. Passes the slot a `tooltip` naming why it is disabled ("Voting opens on Sep 29, 2026, 9:00 AM", "Voting not open yet" without a start date, "Voting is paused", "Voting has ended", "Voting was canceled", "You have already voted", "Identify first to vote", "You are not eligible to vote in this process") — the default slot renders it as the button's `title`, which is a minimal reference only — a disabled button takes no keyboard focus and touch devices never reveal `title`, so a production slot should render the reason as visible helper text tied to the button with `aria-describedby`. A consumer-passed `disabled` carries no tooltip. Strings live under `vote.disabled.*` in the `react-components` i18n namespace; `vote.disabled.upcoming_date_format` is the date-fns pattern of the dated one. |
+| `<VoteButton />` | Submit button; auto-disabled when `!isAbleToVote`, when `status !== 'ONGOING'`, or while a vote is in flight. Passes the slot a `tooltip` naming why it is disabled ("Voting opens on Sep 29, 2026, 9:00 AM", "Voting not open yet" without a start date, "Voting is paused", "Voting has ended", "Voting was canceled", "You have already voted", "Identify first to vote", "You are not eligible to vote in this process", and — when a question is `unconfirmed` or `signed` — `vote.disabled.unconfirmed` / `vote.disabled.signed`) — the default slot renders it as the button's `title`, which is a minimal reference only — a disabled button takes no keyboard focus and touch devices never reveal `title`, so a production slot should render the reason as visible helper text tied to the button with `aria-describedby`. A consumer-passed `disabled` carries no tooltip. Strings live under `vote.disabled.*` in the `react-components` i18n namespace; `vote.disabled.upcoming_date_format` is the date-fns pattern of the dated one. |
 | `<VoteWeight />` | Voter's census weight |
 | `<ElectionResults />` | Results histogram; respects `secretUntilTheEnd`; renders the abstain row only when it is meaningful |
 | `<Voted />` | The voter's vote ids — one line per voted question |
@@ -367,8 +400,12 @@ The message keeps the chain's own reason, which the backend relays verbatim as e
 envelope's `error` — it is the only account of why a vote did not count. A whole-batch
 failure reads `errors.vote_failed` ("Your vote could not be cast: …"), a
 `PartialVoteError` reads `errors.vote_partial` (how many questions were recorded, the
-distinct reasons, and that submitting again retries the rest), and a failure with no
-message reads `errors.vote_failed_unknown`.
+distinct reasons, and that submitting again retries the rest), a failure with no
+message reads `errors.vote_failed_unknown`, and an unknown outcome (`could not confirm`)
+reads `errors.vote_unconfirmed`. `<ElectionQuestions />` replaces the fields of a
+question in `pendingVotes` with `vote.pending_resend`, and of an `unconfirmed`/`signed`
+one with the matching `vote.disabled.*` text, through the `QuestionsError` slot
+(`variant='field'`, `data-question-id`); those questions get a placeholder ballot.
 
 Consequently `useQuestionsForm().vote(values)` resolves `false` on a failed cast rather
 than rejecting — same as when the voter cancels the confirmation, and the same contract

@@ -571,8 +571,11 @@ Rules that bite if ignored:
   round-2 response is lost in flight the outcome is unknown — check the voter
   state instead of re-signing blind.
 - **No nullifier.** `elections.signInfo()` reports no `address` and no
-  `nullifier` for an anonymous census, by design — vote ids exist only for the
-  session that cast them.
+  `nullifier` for an anonymous census, by design. Derive it yourself while you
+  still hold the signer: `voteNullifier(signer.address, upstreamId)` (the Go
+  `state.GenerateNullifier`), and confirm the vote with
+  `client.elections.verifyVotes([nullifier])` — `check()` never reports
+  `hasVoted` for an anonymous census.
 
 The primitives (`blind`, `unblind`, `decompressBlindPoint`,
 `serializeBlindSignature`, `blindMessageFromBundle`) are exported for anyone

@@ -49,7 +49,8 @@ reads `chainId` and the questions directly:
    GET  /processes/{id}/results              → public live per-question tallies (optional, for results view)
 2. POST /processes/{id}/auth/0               → auth step 0 (identify the voter)
    POST /processes/{id}/auth/1               → auth step 1 (confirm 2FA — skip if auth-only census)
-3. POST /processes/{id}/check                → belongsToProcess + per-question {questionId, upstreamId, canVote, hasVoted}
+3. POST /processes/{id}/check                → belongsToProcess + per-question {questionId, upstreamId, canVote, hasVoted, hasSigned?}
+                                               (hasVoted = on chain; hasSigned = the CSP authorized it)
 4. POST /processes/{id}/sign-batch           → CSP signs a fresh ephemeral address per question — ALL
                                                questions in ONE call (client.elections.signBatch; the
                                                single-question POST /processes/{id}/sign still exists)
@@ -107,9 +108,10 @@ const chainId = process.chainId!
 // 1. Auth (auth-only census — no 2FA step; else follow with authStep1)
 const { authToken } = await client.elections.authStep0(processId, { memberNumber: '42' })
 
-// 2. Check — per-question {questionId, upstreamId, canVote, hasVoted} in one call
+// 2. Check — per-question {questionId, upstreamId, canVote, hasVoted, hasSigned?} in one call.
+// hasVoted = on chain; hasSigned = already authorized (a second signature is refused).
 const { belongsToProcess, questions } = await client.elections.check(processId, { authToken })
-const q = questions.find((s) => s.canVote && !s.hasVoted)
+const q = questions.find((s) => s.canVote && !s.hasVoted && !s.hasSigned)
 if (!belongsToProcess || !q?.upstreamId) throw new Error('Cannot vote')
 
 // 3. Display data — public single-question read (choices, ballotProtocol, encryptionKeys)
@@ -148,7 +150,8 @@ console.log('nullifier:', job.result?.voteID)
 - **The vote tx is signed by an ephemeral key, not the voter's wallet.** `EphemeralSigner` generates a fresh secp256k1 keypair per vote; the CSP signs its Ethereum address. This decouples the voter's identity from the on-chain signature.
 - **Relaying is async.** `elections.vote()` returns a `jobId`. Poll `jobs.waitFor(jobId)` to get the vote nullifier (`voteID`). The `VotingClient.vote()` method returns the jobId; the React `useElection().vote()` awaits the full job for each question.
 - **One nullifier per question, not per process.** A voter who answered N questions holds N vote ids. Read them all from `useElection().voteIds` (`Record<questionId, string>`) — the older single `voteId` is deprecated and only ever shows one. Server-side, `elections.signInfo(id, { authToken })` returns the same set as `consumed[]`.
-- **An anonymous census is unlinkable, not ZK.** `census.anonymous: true` makes the CSP blind-sign — it never sees the ephemeral address, so it cannot link voter → vote. `EnvelopeType.Anonymous` stays **false**; this is a blind signature, not a zk-SNARK (that is `@vocdoni/api-voting-zk`, a separate path). Consequence: `signInfo().consumed[]` carries **no `address` and no `nullifier`** for such a process — both fields are optional now. Vote ids come only from the relay job, so they are lost on reload and `useElection().voteIds` cannot be recovered cross-session.
+- **An anonymous census is unlinkable, not ZK.** `census.anonymous: true` makes the CSP blind-sign — it never sees the ephemeral address, so it cannot link voter → vote. `EnvelopeType.Anonymous` stays **false**; this is a blind signature, not a zk-SNARK (that is `@vocdoni/api-voting-zk`, a separate path). Consequence: `signInfo().consumed[]` carries **no `address` and no `nullifier`** for such a process — both fields are optional now — and `check()` reports `hasVoted: false` for everyone (only `hasSigned`). The only proof a vote is on chain is its nullifier, `voteNullifier(signer.address, upstreamId)` from `@vocdoni/api-voting`, checked with `client.elections.verifyVotes([nullifier])` (`POST /votes/verify`, public). `ElectionProvider` keeps each confirmed anonymous nullifier in the tab's `sessionStorage`, so a reload of the same tab still reads `hasVoted`; a new tab or device reads the question as `signed`.
+- **`hasVoted` means "on chain", `hasSigned` means "the CSP authorized it".** A vote can be signed and never land (a relay lost to a proxy 502). `ElectionProvider` reports a question voted only on on-chain evidence, stores every signed tx in the tab's `sessionStorage` (`vocdoni.pendingVote.<upstreamId>.<nullifier>`) before relaying it, and re-sends that same tx — never a new signature — on the next `vote()` or on connect. A backend without `hasSigned` keeps the old behaviour (`hasVoted` = signed, trusted as on chain).
 
 ## A note on api-client stability
 

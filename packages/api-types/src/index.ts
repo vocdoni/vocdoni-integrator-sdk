@@ -821,6 +821,39 @@ export interface RelayVotesRequest {
   votes: RelayVoteRequest[]
 }
 
+/** Body of `POST /votes/verify` — at most 100 nullifiers (hex, with or without `0x`). */
+export interface VerifyVotesRequest {
+  nullifiers: string[]
+}
+
+/**
+ * One nullifier's outcome in {@link VerifyVotesResponse}. Everything beyond
+ * `verified` comes from the on-chain vote and is absent when it was not found.
+ */
+export interface VerifiedVote {
+  /** The nullifier that was checked, echoed back as bare lowercase hex. */
+  nullifier: string
+  /** Whether the chain has a vote with this nullifier. */
+  verified: boolean
+  /** On-chain election id the vote belongs to (hex). */
+  processId?: string
+  /** Block the vote was registered in. */
+  blockHeight?: number
+  /** When the vote was registered on chain (RFC 3339). */
+  date?: string
+  /** Hash of the transaction that carried the vote (hex). */
+  txHash?: string
+}
+
+/**
+ * Response of `POST /votes/verify` — one entry per requested nullifier, in
+ * request order. An unknown nullifier is `verified: false`; a chain that cannot
+ * be reached fails the whole call instead.
+ */
+export interface VerifyVotesResponse {
+  votes: VerifiedVote[]
+}
+
 // ─── Jobs (async transaction outcomes) ─────────────────────────────────────────
 
 export type JobStatus = 'pending' | 'completed' | 'failed'
@@ -980,8 +1013,19 @@ export interface ProcessQuestionStatus {
   upstreamId?: string
   /** Whether the voter is eligible for this question (eligibility subset). */
   canVote: boolean
-  /** Whether the voter has already consumed this question's election. */
+  /**
+   * Whether the voter's vote for this question is on chain. A backend without
+   * {@link hasSigned} reports "the CSP signed" here instead. An anonymous census
+   * always reports `false` on a backend with `hasSigned`: verify its nullifier
+   * through `POST /votes/verify`.
+   */
   hasVoted: boolean
+  /**
+   * Whether the CSP authorized (signed) a vote for this question. It may not be
+   * on chain: compare with {@link hasVoted}. The only signal for an anonymous
+   * census. Absent on a backend that predates it.
+   */
+  hasSigned?: boolean
 }
 
 /**
@@ -1186,14 +1230,17 @@ export type ProcessParticipantLookupField = 'email' | 'phone' | 'memberNumber' |
 
 /**
  * One question's voted status for a matched participant — `hasVoted` is true
- * when the member has consumed that question's on-chain election. Questions
- * not yet published (no `upstreamId`) are omitted from the list.
+ * when the member's vote is on chain, `hasSigned` when the CSP authorized it.
+ * Questions not yet published (no `upstreamId`) are omitted from the list.
  */
 export interface ProcessParticipantQuestionVote {
   questionId: string
   /** Vochain election id of the question (64-hex). */
   upstreamId?: string
+  /** Whether the member's vote is on chain. */
   hasVoted: boolean
+  /** Whether the CSP authorized a vote for the member. Absent on older backends. */
+  hasSigned?: boolean
 }
 
 /** A matched org member that is also a participant of the process census. */

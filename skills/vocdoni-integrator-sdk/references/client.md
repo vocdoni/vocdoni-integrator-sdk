@@ -139,7 +139,11 @@ await client.elections.resend(processId, { authToken, email: 'voter@example.com'
 // Voter status — census membership, weight and PER-QUESTION eligibility in one
 // call. Ineligibility is belongsToProcess=false with HTTP 200, not an error.
 const { belongsToProcess, questions, weight } = await client.elections.check(processId, { authToken })
-// questions[i] — { questionId, upstreamId, canVote, hasVoted }
+// questions[i] — { questionId, upstreamId, canVote, hasVoted, hasSigned? }
+// hasVoted = the vote is on chain; hasSigned = the CSP authorized it (may not be
+// on chain). An anonymous census always reports hasVoted=false: verify its
+// nullifier with verifyVotes(). A backend that predates hasSigned omits it and
+// reports "signed" as hasVoted.
 
 // Get CSP signature over an ephemeral voter address, per question.
 // A question's signing slot is consumed on success — it cannot be signed twice.
@@ -325,7 +329,7 @@ const { participants } = await client.elections.participants(mongoId, {
   value: '42',
 })
 // participants[i] — { memberId, name?, surname?, email?, memberNumber?,
-//                     questions: [{ questionId, upstreamId?, hasVoted }] }
+//                     questions: [{ questionId, upstreamId?, hasVoted, hasSigned? }] }
 
 // Admin: append org members to a PUBLISHED process's census (append-only;
 // drafts 409 — edit those via update()). jobId tracks the async on-chain
@@ -355,6 +359,14 @@ const { jobId } = await client.elections.vote({ txPayload })
 // rejection relays nothing — this closes the half-voted window of relaying a
 // multi-question process envelope by envelope. One job covers the batch.
 const { jobId } = await client.elections.voteBatch({ votes: [{ txPayload }, ...] })
+
+// Is a vote on chain? POST /votes/verify (public), at most 100 nullifiers, one
+// entry per nullifier in request order (echoed as bare lowercase hex). Unknown
+// → verified=false; an unreachable chain throws (500) instead of "not voted".
+// The nullifier of a vote you cast: voteNullifier(signer.address, upstreamId)
+// from @vocdoni/api-voting.
+const { votes } = await client.elections.verifyVotes([nullifier])
+// votes[i] — { nullifier, verified, processId?, blockHeight?, date?, txHash? }
 ```
 
 ---
@@ -549,7 +561,7 @@ interface QuestionResults {
 // Voter status for a process (client.elections.check)
 interface ProcessCheckResponse {
   belongsToProcess: boolean
-  questions: ProcessQuestionStatus[]  // { questionId, upstreamId?, canVote, hasVoted }
+  questions: ProcessQuestionStatus[]  // { questionId, upstreamId?, canVote, hasVoted, hasSigned? }
   weight?: string                     // hex census weight
 }
 

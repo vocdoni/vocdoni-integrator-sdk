@@ -33,6 +33,7 @@ import type {
   UserWeightResponse,
   ValidateProcessCensusRequest,
   ValidateProcessCensusResponse,
+  VerifyVotesResponse,
   VotingProcessListResponse,
   VotingProcessQuestionRequest,
   VotingProcessResponse,
@@ -504,6 +505,19 @@ export class ElectionsClient {
     return this.fetch<RelayVoteResponse>('/votes', {
       method: 'POST',
       body: payload,
+    }).catch(handleError)
+  }
+
+  /**
+   * Check vote nullifiers against the chain (`POST /votes/verify`, public) —
+   * at most 100 per call. One entry per nullifier, in request order, echoed as
+   * bare lowercase hex. An unknown nullifier is `verified: false`; a chain the
+   * backend cannot reach throws (500) rather than report "not voted".
+   */
+  async verifyVotes(nullifiers: string[]): Promise<VerifyVotesResponse> {
+    return this.fetch<VerifyVotesResponse>('/votes/verify', {
+      method: 'POST',
+      body: { nullifiers },
     }).catch(handleError)
   }
 }
