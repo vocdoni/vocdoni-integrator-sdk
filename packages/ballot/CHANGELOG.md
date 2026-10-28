@@ -1,5 +1,14 @@
 # @vocdoni/ballot
 
+## 1.3.2
+
+### Patch Changes
+
+- Updated dependencies [5dd0cf4]
+- Updated dependencies [9d81ed8]
+- Updated dependencies [cd15073]
+  - @vocdoni/api-types@2.4.0
+
 ## 1.3.1
 
 ### Patch Changes
