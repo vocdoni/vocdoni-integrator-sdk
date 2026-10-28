@@ -1,6 +1,6 @@
 {
   "name": "@vocdoni/react-providers",
-  "version": "3.0.4",
+  "version": "4.0.0",
   "license": "GPL-3.0-or-later",
   "description": "Headless React providers and hooks for the Vocdoni Integrator SDK",
   "keywords": [

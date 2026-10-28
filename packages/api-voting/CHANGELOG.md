@@ -1,5 +1,18 @@
 # @vocdoni/api-voting
 
+## 1.3.0
+
+### Minor Changes
+
+- cd15073: Add `voteNullifier(address, electionId)`: the Vochain vote nullifier, `0x` + keccak256(address ‖ electionId), identical to Go `state.GenerateNullifier`. Accepts bare or 0x-prefixed hex in any case.
+
+### Patch Changes
+
+- Updated dependencies [5dd0cf4]
+- Updated dependencies [9d81ed8]
+- Updated dependencies [cd15073]
+  - @vocdoni/api-types@2.4.0
+
 ## 1.2.3
 
 ### Patch Changes

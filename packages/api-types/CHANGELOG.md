@@ -1,5 +1,16 @@
 # @vocdoni/api-types
 
+## 2.4.0
+
+### Minor Changes
+
+- 5dd0cf4: Census updates report per question. `QuestionJobResult` is new and `JobResult` gains `questions`, the per-question outcomes of `set_process_status` and `set_process_census` jobs in target order. On a census update, `noOp: true` means no transaction was sent because the election was no longer open on chain or already had the room, and a job fails if any attempted resize failed while the other resizes still apply. `UpdateProcessCensusResponse` and `elections.addCensusMembers` document that `jobId` is absent when no election can grow (only READY/PAUSED questions are resized), so callers must skip `jobs.waitFor` then.
+- 9d81ed8: Member passwords as a voter credential. `OrgMemberAuthField` gains `'password'`, so a process census can require the member password next to its other auth fields, and `AuthRequest` gains `password` for auth step 0. `OrgMember` gains the read-only `hasPassword`, since reads never return the password itself.
+
+  The password always travels as a client hash, never as plaintext: `lowercase_hex(SHA-256("vocdoni-member-password:" + canonicalAddress(orgAddress) + ":" + trim(password).normalize("NFC")))`, where `canonicalAddress` is `0x` plus the lowercase address without any `0x`. The `AuthRequest.password` JSDoc has the full rule and a test vector. Use the same value for `OrgMember.password` when setting a member's password and for `AuthRequest.password` when the member logs in.
+
+- cd15073: Add `hasSigned?: boolean` to `ProcessQuestionStatus` and `ProcessParticipantQuestionVote`, and document `hasVoted` as "the vote is on chain" (a backend without `hasSigned` still reports "the CSP signed" there). Add `VerifyVotesRequest`, `VerifyVotesResponse` and `VerifiedVote` for `POST /votes/verify`.
+
 ## 2.3.0
 
 ### Minor Changes
