@@ -54,6 +54,18 @@ except Exception:
 " 2>/dev/null || true
 }
 
+# Reads a response body on stdin; exit 0 when it is a JSON object carrying an API error `code`.
+is_api_error_body() {
+  python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if isinstance(d, dict) and "code" in d else 1)
+'
+}
+
 # True (exit 0) if nothing is listening on 127.0.0.1:$1. Uses bash's built-in
 # /dev/tcp pseudo-device so no extra tooling (lsof, nc...) is required on
 # either a laptop or a GitHub runner.
@@ -180,7 +192,8 @@ cmd_up() {
   wallet_path="/organizations/$INTEGRATOR_ORG_ADDRESS/wallet"
   wallet_status=$(curl -sS -m 10 -o "$wallet_body" -w '%{http_code}' \
     -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL$wallet_path" || echo "000")
-  if [ "$wallet_status" = 404 ]; then
+  # A plain-text 404 is a route the backend does not have; a JSON 404 (with an API error code) is a real answer.
+  if [ "$wallet_status" = 404 ] && ! is_api_error_body <"$wallet_body"; then
     wallet_path=/wallet
     wallet_status=$(curl -sS -m 10 -o "$wallet_body" -w '%{http_code}' \
       -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL$wallet_path" || echo "000")
@@ -190,6 +203,10 @@ cmd_up() {
   case "$wallet_status" in
     200) ;;
     404)
+      if printf '%s' "$WALLET_JSON" | is_api_error_body; then
+        echo "ERROR: GET $INTEGRATION_API_URL$wallet_path answered 404 with an API error (body: $WALLET_JSON) — the integrator organization is not known to the api. This is NOT a seed problem for the wallet check; check the api logs." >&2
+        exit 1
+      fi
       # Wallets arrived in saas-backend#706; an older SAAS_BACKEND_IMAGE has nothing to fund.
       echo "   GET /organizations/<org>/wallet and GET /wallet are both 404: this saas-backend has no integrator wallet endpoint; skipping the check" >&2
       ;;

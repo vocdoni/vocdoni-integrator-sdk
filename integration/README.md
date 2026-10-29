@@ -172,30 +172,33 @@ asserted here rather than only the two named question types.
 ## Pay-per-process billing (`payg.itest.ts`)
 
 Covers the saas-backend#819 billing surface through the integrator key, with no
-Stripe: the integrator wallet read (`getWallet`), draft add-ons and their echo, the
-per-draft price quote, the managed org's spend cap (set, listed, and a publish refused
-with `40183` before any debit), and the public `/pricing` calculator. It publishes
-nothing that spends money and cleans up its managed org at the end.
+Stripe: the integrator wallet read (`getWallet`), draft add-ons and their echo,
+the per-draft price quote, the managed org's spend cap (set, listed, and a
+publish refused with `40183` before any debit), and the public `/pricing`
+calculator. It publishes nothing that spends money and cleans up its managed org
+at the end.
 
 Against a backend that predates #819 the wallet route answers 404, and the suite
 skips every test with a console note instead of failing. Set
-`INTEGRATION_ORG_ADDRESS` to the key's integrator org; without it the suite skips.
+`INTEGRATION_ORG_ADDRESS` to the key's integrator org; without it the suite
+skips.
 
 ## Configuration
 
-| Env var               | Default                            | Purpose                       |
-| --------------------- | ---------------------------------- | ----------------------------- |
-| `INTEGRATION_API_URL` | `https://saas-api-dev.vocdoni.net` | Target API base URL           |
-| `INTEGRATION_API_KEY` | — (suite skips without it)         | Integrator API key (`vsk_…`)  |
+| Env var                   | Default                              | Purpose                          |
+| ------------------------- | ------------------------------------ | -------------------------------- |
+| `INTEGRATION_API_URL`     | `https://saas-api-dev.vocdoni.net`   | Target API base URL              |
+| `INTEGRATION_API_KEY`     | — (suite skips without it)           | Integrator API key (`vsk_…`)     |
 | `INTEGRATION_ORG_ADDRESS` | — (`payg.itest.ts` skips without it) | The key's integrator org (`0x…`) |
 
 The key's organization must be an **integrator** with scopes `managed:write` +
 `members:write` + `voting:write`, and quota for ≥5 processes / ≥11 on-chain
-elections / ≥300 census size, and its prepaid wallet must hold ≥€330 per run: each of
-the 5 processes has a 100-voter census, above the free tier, so publishing it
-debits the €66 base price (100 × €0.66) from the integrator's wallet. The census is
-auth-only, so no email 2FA is charged; an integrator with email 2FA pays €0.01 more per
-voter (€1 for 100). An empty wallet answers `402 insufficient integrator wallet balance`. The suite creates real on-chain
-elections and casts 40 real votes, so expect it to take ~6 minutes. (The disposable stack
-above provisions all of that for you — this only applies when pointing
-`INTEGRATION_API_URL` at a shared environment.)
+elections / ≥300 census size, and its prepaid wallet must hold ≥€330 per run:
+each of the 5 processes has a 100-voter census, above the free tier, so
+publishing it debits the €66 base price (100 × €0.66) from the integrator's
+wallet. The census is auth-only, so no email 2FA is charged; an integrator with
+email 2FA pays €0.01 more per voter (€1 for 100). An empty wallet answers `402
+insufficient integrator wallet balance`. The suite creates real on-chain
+elections and casts 40 real votes, so expect it to take ~6 minutes. (The
+disposable stack above provisions all of that for you — this only applies when
+pointing `INTEGRATION_API_URL` at a shared environment.)

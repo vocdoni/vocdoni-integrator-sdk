@@ -7,12 +7,9 @@ import {
 } from '@vocdoni/api-client'
 import { apiKey, integratorOrgAddress, makeAdminClient, makeClient } from './helpers'
 
-// Pay-per-process billing (saas-backend#819), driven with the integrator API
-// key only: no Stripe, so nothing here moves money. The wallet is read, never
-// topped up; the one publish is refused by the managed org's spend cap before
-// any debit. Needs INTEGRATION_ORG_ADDRESS (the key's integrator org, exported
-// by scripts/integration-stack.sh). A backend that predates #819 answers 404 to
-// GET /organizations/{integrator}/wallet, so every test skips rather than fails.
+// Pay-per-process billing (saas-backend#819) via the integrator key. No Stripe,
+// and the one publish is refused by the spend cap before any debit. Skips on
+// backends that predate #819 (wallet route 404).
 const suite = apiKey ? describe : describe.skip
 
 const MEMBER_NUMBERS = ['1', '2', '3']
@@ -46,6 +43,18 @@ suite('pay-per-process billing (saas-backend#819, live)', () => {
     ...(withAddOns ? { addOns: { signedCertificate: true } } : {}),
   })
 
+  // listManaged is paginated: walk the pages until the managed org shows up.
+  const findManaged = async () => {
+    let page: number | null = 1
+    while (page !== null) {
+      const res = await admin.organizations.listManaged(page)
+      const row = res.organizations.find((o) => o.address.toLowerCase() === managed.toLowerCase())
+      if (row) return row
+      page = res.pagination?.nextPage ?? null
+    }
+    return undefined
+  }
+
   beforeAll(async () => {
     if (!integratorOrgAddress) {
       console.warn('[payg] INTEGRATION_ORG_ADDRESS is not set: skipping pay-per-process billing')
@@ -56,7 +65,8 @@ suite('pay-per-process billing (saas-backend#819, live)', () => {
       await admin.organizations.getWallet(integratorOrgAddress)
       paygBackend = true
     } catch (err) {
-      if (err instanceof VocdoniApiError && err.status === 404) {
+      // A plain-text 404 is a route the backend lacks; a coded one is a real error.
+      if (err instanceof VocdoniApiError && err.status === 404 && err.code === undefined) {
         console.warn('[payg] backend predates saas-backend#819 (wallet route is 404): skipping')
         return
       }
@@ -138,12 +148,19 @@ suite('pay-per-process billing (saas-backend#819, live)', () => {
 
   it('caps the managed org spend and refuses a publish past it', async ({ skip }) => {
     if (!paygBackend) skip()
+    // Re-arm the paid add-on: an earlier failed test may have left the draft without it.
+    await admin.elections.update(draftId, draftBody(true))
+    const { totalCents } = await admin.elections.getPrice(draftId)
+    // Without a price above the cap, publishing would not test the cap; refuse to publish.
+    if (!(totalCents > 100)) {
+      throw new Error(`draft is priced ${totalCents} cents, not above the 100 cent cap: not publishing`)
+    }
+
     const capped = await admin.organizations.updateManaged(managed, { spendCapCents: 100 })
     expect(capped.spendCapCents).toBe(100)
     expect(capped.spentCents).toBe(0)
 
-    const listed = await admin.organizations.listManaged()
-    const row = listed.organizations.find((o) => o.address.toLowerCase() === managed.toLowerCase())
+    const row = await findManaged()
     expect(row, 'managed org missing from listManaged').toBeDefined()
     expect(row!.spendCapCents).toBe(100)
     expect(row!.spentCents).toBe(0)

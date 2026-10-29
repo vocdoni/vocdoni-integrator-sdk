@@ -2,11 +2,9 @@
 # Bootstraps a fresh saas-backend (booted via integration/docker-compose.ci.yml)
 # into an integrator API key usable by integration/full-flow.itest.ts.
 #
-# Steps: register a user -> read the verification code out of MailHog ->
-# verify -> log in -> create an organization with "integrator": true -> mint an
-# integrator API key for it. The flag works on both sides of saas-backend#819:
-# before it, it selects the free integrator plan integration/seed-plan.js seeds;
-# since it, the flag alone makes the org an integrator.
+# Steps: register -> read the MailHog verification code -> verify -> log in ->
+# create an org with "integrator": true (the free integrator plan before
+# saas-backend#819, the flag alone since) -> mint an integrator API key.
 #
 # Env:
 #   API   base URL of the saas-backend API (default http://localhost:8080)
