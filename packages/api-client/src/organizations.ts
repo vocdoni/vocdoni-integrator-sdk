@@ -101,7 +101,8 @@ export class OrganizationsClient {
 
   /**
    * Wallet balance and ledger via `GET /organizations/{address}/wallet`. Admin/Manager, or a
-   * `quota:read` key of that same org. 403 40181 for a managed org: its integrator's wallet pays.
+   * `quota:read` key of that same org (another org's key gets 403 40157). A managed org has
+   * no wallet (403 40181): its integrator's pays.
    */
   async getWallet(address: string, params: { page?: number; limit?: number } = {}): Promise<WalletResponse> {
     return this.fetch<WalletResponse>(`/organizations/${address}/wallet`, { params }).catch(handleError)

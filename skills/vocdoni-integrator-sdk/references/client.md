@@ -503,7 +503,8 @@ const { clientSecret, amountCents } = await client.organizations.topUpWallet(org
 
 `getWallet` is for Admin/Manager, or a `quota:read` key of that same org. `topUpWallet` is
 Admin JWT only, and the balance moves only when the webhook credits it. A managed org has no
-wallet: both answer 403 · 40181.
+wallet: both answer 403 · 40181 to a session. An API key of another org (e.g. the integrator's
+key on a managed org) gets 403 · 40157 first.
 
 **Spend caps** (integrator): `updateManaged(orgAddress, { spendCapCents })` sets the cap in
 EUR cents, and `null` lifts it. It takes an admin JWT or a `managed:write` key, and answers 404

@@ -173,6 +173,8 @@ suite('pay-per-process billing (saas-backend#819, live)', () => {
     }
     expect(isApiError(caught, ApiErrorCode.SpendCapReached), 'publish was not refused by the spend cap').toBe(true)
     if (!isApiError(caught, ApiErrorCode.SpendCapReached)) return
+    expect(caught.data, '40183 at the publish gate carries data').toBeDefined()
+    if (!caught.data) return
     expect(caught.data.capCents).toBe(100)
     expect(caught.data.spentCents).toBe(0)
     expect(caught.data.requiredCents).toBeGreaterThan(100)

@@ -46,9 +46,10 @@ publishes per-commit images, so build one from source; see
 To drive the stack and the suite as separate steps (e.g. to reuse the same
 stack across repeated test runs), use `scripts/integration-stack.sh up` to
 start it — it prints `INTEGRATION_API_URL`, `INTEGRATION_API_KEY` and
-`INTEGRATION_ORG_ADDRESS` — then export those and run `pnpm test:integration` directly. If port `8080` (or
-`8025`) is already taken locally, set `INTEGRATION_HOST_PORT` (and/or
-`INTEGRATION_MAILHOG_PORT`) to an alternate port before calling `up`.
+`INTEGRATION_ORG_ADDRESS` — then export those and run `pnpm test:integration`
+directly. If port `8080` (or `8025`) is already taken locally, set
+`INTEGRATION_HOST_PORT` (and/or `INTEGRATION_MAILHOG_PORT`) to an alternate port
+before calling `up`.
 `up` funds the integrator wallet with `INTEGRATION_WALLET_CENTS` (default
 €100,000). Each run spends €330 of it and nothing refunds it, so a reused stack
 lasts about 300 runs.
