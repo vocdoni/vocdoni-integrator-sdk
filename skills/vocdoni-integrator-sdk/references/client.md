@@ -309,6 +309,9 @@ const draftId = await client.elections.create({
 
 // Admin: publish the draft on-chain. Async — returns { jobId } to poll (or
 // { address, status } if already published). publishAndWait does the polling.
+// It waits with NO deadline by default (a publish can take ~15 min, hours with many
+// questions); pass timeoutMs or signal to bound it. Can reject with 402/409/422:
+// see "Pay-per-process billing".
 const published = await client.elections.publishAndWait(draftId)
 // published.address — on-chain address from the publish job. The per-question
 // vochain ids appear as questions[i].upstreamId on the next get(draftId).
@@ -347,6 +350,7 @@ await client.elections.validateCensus({ orgAddress, census: { authFields: ['memb
 
 // Drafts: update(id, draft) PUTs the same shape as create and resolves void
 // (re-get() for the stored shape; 409 once published). delete(id) removes it.
+// The PUT replaces the whole draft, `addOns` included: resend them on every update.
 // signInfo(id, { authToken }) → { consumed: [{ questionId, nullifier, … }] },
 // one entry per question the voter already cast.
 
@@ -404,11 +408,12 @@ const draftId = await client.elections.create({
   questions,
 })
 
-// Integrator quota/usage (also callable with a scoped API key, scope quota:read).
-const { enabled, limits, usage } = await client.organizations.getIntegratorInfo()
-// limits — { maxManagedOrgs, maxManagedProcesses, maxVotes, maxSMS, maxEmails } (0 = unlimited;
-//           omitted entirely when enabled is false)
-// usage  — { managedOrgs, managedProcesses, sentVotes, sentSMS, sentEmails }
+// Integrator status and usage (also callable with a scoped API key, scope quota:read).
+const { enabled, usage } = await client.organizations.getIntegratorInfo()
+// usage  — { managedOrgs, sentVotes, sentSMS, sentEmails }
+// No `limits` any more, and `usage.managedProcesses` is gone (both deprecated in
+// api-types): spending is bounded by the integrator's wallet and per-org spend caps.
+// See "Pay-per-process billing".
 
 // API keys (integrator-only, /integrator/organizations/{addr}/apikeys routes):
 const key = await client.organizations.createApiKey(org.address, {
@@ -421,6 +426,82 @@ const key = await client.organizations.createApiKey(org.address, {
 `OrganizationsClient` also covers groups CRUD, meta, subscription, and
 list-reads (censuses). See `packages/api-client/src/organizations.ts`
 for the full set — the live `integration/full-flow.itest.ts` drives the whole flow end to end.
+
+---
+
+## Pay-per-process billing
+
+Each process is priced from its eligible voters and its `addOns`, and paid from a
+prepaid wallet (EUR cents, VAT excluded). Drafts are free, and so is a process of up
+to 25 voters with no add-ons. Quoting never charges; only the verified Stripe webhook
+credits a wallet, and publishing or buying census headroom only debits one. Above
+50 000 voters a process is quote-only and cannot be paid self-service.
+
+```ts
+// Quote a draft: { lines, totalCents, quoteRecommended, quoteRequired, currency, paymentStatus? }
+const price = await client.elections.getPrice(draftId)
+
+// Public calculator: no auth, no draft. Branding and customUrl are priced as requested.
+const quote = await client.pricing({ voters: 1200, emailTwoFA: true })
+```
+
+**Publish refusals** (`publish` / `publishAndWait`), all `VocdoniApiError` with `code`:
+
+| Status · code | Meaning | What to do |
+|---|---|---|
+| 402 · 40178 | Standard org's wallet is short; `data` is `PaymentRequiredData` (quote + `balanceCents`, `shortfallCents`) | `checkout(id, { returnURL })`: embedded Stripe top-up for the shortfall. The webhook credits the wallet and publishes the draft |
+| 402 · 40175 | Managed org; its integrator's wallet is short; `data` `{ requiredCents, availableCents }` (may be absent) | The integrator tops up its own wallet (`topUpWallet`), then publishes again |
+| 402 · 40183 | Managed org's spend cap reached; `data` `{ capCents, spentCents, requiredCents }` | Raise or lift it with `updateManaged` |
+| 409 · 40177 | A top-up checkout is open for the draft | Pay it, or `cancelCheckout(id)` and publish again |
+| 422 · 40176 | Census above 50 000: quote-only, no payment route | Handle out of band; the API cannot take payment |
+
+```ts
+import { ApiErrorCode, isApiError } from '@vocdoni/api-client'
+
+try {
+  await client.elections.publishAndWait(draftId)
+} catch (err) {
+  if (!isApiError(err, ApiErrorCode.PaymentRequired)) throw err
+  // Standard org, wallet short: show the embedded checkout, the webhook publishes the draft
+  const { clientSecret } = await client.elections.checkout(draftId, { returnURL })
+}
+```
+
+- `checkout(id, { returnURL, locale? })` (Admin JWT only) opens or reuses a top-up for the
+  shortfall (at least €1). It answers 400 when the process is free or the wallet already
+  covers it (publish directly), 403 · 40181 for a managed org, and 409 · 40177 when the
+  draft is already paid or its last checkout is being credited.
+- `getCheckout(id)` reports the payment (`status`: `pending` | `paid` | `failed` | `refunded`,
+  404 when none). Poll it for display only; the draft's published state is what matters.
+- `cancelCheckout(id)` expires the open session. A repeat is a 404.
+- **Census growth.** A census write that grows a paid process (`addCensusMembers`, or a
+  member or group change that grows a group-backed census) answers 402 · 40178 with a
+  `CensusGrowthQuote` (`isCensusGrowthQuote(err.data)`; `dueCents` is the difference).
+  `censusCheckout(id, { censusSize, returnURL })` sells that difference: when the wallet
+  covers it, it is debited at once and `amountCents` is what was debited (`clientSecret` is
+  empty). Otherwise a top-up opens for the shortfall. An API key may only take the debit path.
+- **Draft `addOns`.** `{ signedCertificate?, customUrl?, branding? }` on `create` and
+  `update`. The 2FA add-ons come from `census.twoFaFields`, not from here. Adding
+  `branding` or `customUrl` to a draft already paid without it is 409 · 40177.
+
+**Wallet** (`client.organizations`):
+
+```ts
+const { balanceCents, history, pagination } = await client.organizations.getWallet(orgAddress, { page, limit })
+const { clientSecret, amountCents } = await client.organizations.topUpWallet(orgAddress, {
+  amountCents: 5_000, // €1 to €100 000; Stripe adds VAT on top
+  returnURL,
+})
+```
+
+`getWallet` is for Admin/Manager, or a `quota:read` key of that same org. `topUpWallet` is
+Admin JWT only, and the balance moves only when the webhook credits it. A managed org has no
+wallet: both answer 403 · 40181.
+
+**Spend caps** (integrator): `updateManaged(orgAddress, { spendCapCents })` sets the cap in
+EUR cents, and `null` lifts it. It takes an admin JWT or a `managed:write` key, and answers 404
+for an org this integrator does not manage. `listManaged()` items carry `spendCapCents` and
+`spentCents`. A debit past the cap is refused with 402 · 40183 before anything is charged.
 
 ---
 
