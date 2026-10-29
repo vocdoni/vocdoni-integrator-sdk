@@ -786,7 +786,11 @@ export interface CreateVotingProcessRequest {
   streamUri?: string
   startDate?: string
   endDate?: string
-  /** PUT replaces the stored add-ons, so an update that omits `addOns` clears them. Turning branding/customUrl on for a paid draft is refused with 409 40177. */
+  /**
+   * PUT replaces the stored add-ons: an update that omits `addOns` clears them.
+   * Turning branding/customUrl on for a draft paid without them is refused with 409 40177,
+   * unless the org already paid that add-on.
+   */
   addOns?: ProcessAddOns
   questions: VotingProcessQuestionRequest[]
 }
@@ -1492,11 +1496,14 @@ export interface SpendCapReachedData {
   requiredCents: number
 }
 
-/** The `data` each error code carries. 40175 carries it only when the balance could be read. */
+/**
+ * The `data` each error code carries. 40183 can arrive without data when the
+ * backend cannot re-read the wallet.
+ */
 export interface ApiErrorDataByCode {
-  40175: InsufficientWalletBalanceData | undefined
+  40175: InsufficientWalletBalanceData
   40178: PaymentRequiredData | CensusGrowthQuote
-  40183: SpendCapReachedData
+  40183: SpendCapReachedData | undefined
 }
 
 // ─── Organization members (memberbase) ──────────────────────────────────────────

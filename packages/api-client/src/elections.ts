@@ -314,10 +314,9 @@ export class ElectionsClient {
   }
 
   /**
-   * Publish a draft and wait for the on-chain result (`{ address, status }`). A publish can
-   * take ~15 min (hours with many questions), so `timeoutMs` defaults to `Infinity`; a
-   * `timeoutMs` or `signal` you pass still wins. May reject with 402 (40178, 40175, 40183),
-   * 409 40177 (open top-up) or 422 40176.
+   * Publish a draft and wait for the on-chain result (`{ address, status }`). A publish can take
+   * ~15 min (hours with many questions), so `timeoutMs` defaults to `Infinity`; a value you pass wins.
+   * It may reject with a 402, 409 or 422 billing error (see `ApiErrorCode`).
    */
   async publishAndWait(
     draftId: string,
@@ -361,9 +360,8 @@ export class ElectionsClient {
 
   /**
    * Buy census headroom for a paid process via `POST /processes/{id}/census/checkout`. When the wallet
-   * covers it, the difference is debited at once: `sessionId` and `clientSecret` come back empty and
-   * `amountCents` is what was debited. Otherwise (standard org) a top-up checkout opens. The only
-   * payment route an API key may call, and only when no checkout would open.
+   * covers it, the difference is debited at once: `sessionId` and `clientSecret` come back empty.
+   * The only payment route an API key may call, and only when no checkout would open.
    */
   async censusCheckout(id: string, body: ProcessCensusCheckoutRequest): Promise<ProcessCheckoutResponse> {
     return this.fetch<ProcessCheckoutResponse>(`/processes/${id}/census/checkout`, {

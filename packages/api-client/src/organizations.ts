@@ -61,7 +61,6 @@ export class OrganizationsClient {
 
   // ─── Integrator / managed organizations ───────────────────────────────────
 
-  /** `limits` and `usage.managedProcesses` are no longer returned (saas-backend#819). */
   async getIntegratorInfo(): Promise<IntegratorInfo> {
     return this.fetch<IntegratorInfo>('/integrator').catch(handleError)
   }

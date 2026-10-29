@@ -291,12 +291,14 @@ describe('payment: organizations wallet and managed spend cap', () => {
 })
 
 describe('payment: client.pricing', () => {
-  it('GETs /pricing with the calculator params, without any auth', async () => {
+  it('GETs /pricing with the calculator params and no Authorization header', async () => {
     const client = new VocdoniApiClient({ apiUrl: BASE_URL })
     let search: URLSearchParams | undefined
+    let auth: string | null | undefined
     server.use(
       http.get(`${BASE_URL}/pricing`, ({ request }) => {
         search = new URL(request.url).searchParams
+        auth = request.headers.get('Authorization')
         return HttpResponse.json({ ...price, currency: 'eur' })
       }),
     )
@@ -306,6 +308,7 @@ describe('payment: client.pricing', () => {
     expect(search?.get('emailTwoFA')).toBe('true')
     expect(search?.get('branding')).toBe('false')
     expect(search?.has('smsTwoFA')).toBe(false)
+    expect(auth).toBeNull()
     expect(res.totalCents).toBe(5000)
   })
 })
@@ -362,11 +365,11 @@ describe('payment: errors', () => {
   it('tells the census-growth quote apart from the publish-time quote', () => {
     const growth: CensusGrowthQuote = {
       processId: PROCESS_ID,
-      lines: [],
+      lines: [{ kind: 'base', description: 'Base', amountCents: 9000 }],
       totalCents: 9000,
       paidCents: 5000,
       dueCents: 4000,
-      censusSize: 60000,
+      censusSize: 600,
       currency: 'eur',
       balanceCents: 0,
       shortfallCents: 4000,
