@@ -1,5 +1,17 @@
 # @vocdoni/api-client
 
+## 2.6.0
+
+### Minor Changes
+
+- 88f1444: Pay-per-process billing methods: `elections.getPrice`, `checkout`, `getCheckout`, `cancelCheckout` and `censusCheckout`, `organizations.getWallet`, `topUpWallet` and `updateManaged`, and `client.pricing()`. `VocdoniApiError` carries the error `data`, with `isApiError` and `isCensusGrowthQuote` to narrow it. `publishAndWait` no longer times out after 60 s by default.
+
+### Patch Changes
+
+- Updated dependencies [88f1444]
+  - @vocdoni/api-types@2.5.0
+  - @vocdoni/ballot@1.3.3
+
 ## 2.5.0
 
 ### Minor Changes
