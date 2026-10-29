@@ -105,7 +105,9 @@ export class OrganizationsClient {
    * no wallet (403 40181): its integrator's pays.
    */
   async getWallet(address: string, params: { page?: number; limit?: number } = {}): Promise<WalletResponse> {
-    return this.fetch<WalletResponse>(`/organizations/${address}/wallet`, { params }).catch(handleError)
+    const wallet = await this.fetch<WalletResponse>(`/organizations/${address}/wallet`, { params }).catch(handleError)
+    // An empty ledger arrives as `history: null`.
+    return { ...wallet, history: wallet.history ?? [] }
   }
 
   /**

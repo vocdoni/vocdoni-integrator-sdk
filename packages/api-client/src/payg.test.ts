@@ -271,6 +271,18 @@ describe('payment: organizations wallet and managed spend cap', () => {
     expect(search?.toString()).toBe('')
   })
 
+  it('turns a null history (empty ledger) into an empty array', async () => {
+    server.use(
+      http.get(`${BASE_URL}/organizations/${ORG}/wallet`, () =>
+        HttpResponse.json({ balanceCents: 500, currency: 'eur', history: null, pagination: {} }),
+      ),
+    )
+
+    const res = await client.organizations.getWallet(ORG)
+    expect(res.history).toEqual([])
+    expect(res.balanceCents).toBe(500)
+  })
+
   it('POSTs the top-up to /organizations/{address}/wallet/topup', async () => {
     let body: unknown
     server.use(
