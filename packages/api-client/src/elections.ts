@@ -15,9 +15,14 @@ import type {
   EnqueuedResponse,
   LocalizedInput,
   MultiLangString,
+  ProcessCensusCheckoutRequest,
+  ProcessCheckoutRequest,
+  ProcessCheckoutResponse,
   ProcessCheckResponse,
   ProcessParticipantLookupField,
   ProcessParticipantsResponse,
+  ProcessPaymentStatusResponse,
+  ProcessPriceResponse,
   ProcessSignInfoResponse,
   PublicQuestionResponse,
   PublishProcessResponse,
@@ -225,10 +230,9 @@ export class ElectionsClient {
   }
 
   /**
-   * Update a draft process via `PUT /processes/{id}`. Takes the same flat
-   * {@link CreateVotingProcessRequest} shape as `create`. The backend answers a
-   * bare `200 OK` with no JSON body, so this resolves to void — re-{@link get}
-   * the process if you need the updated shape. Fails with 409 once published.
+   * Update a draft via `PUT /processes/{id}`, which replaces the whole draft: send
+   * `addOns` back on every update or they are cleared. Resolves to void (bare `200 OK`),
+   * so re-{@link get} for the updated shape. Fails with 409 once published.
    */
   async update(draftId: string, data: CreateVotingProcessRequest): Promise<void> {
     const body = normalizeVotingProcessRequest(data)
@@ -307,15 +311,67 @@ export class ElectionsClient {
     }).catch(handleError)
   }
 
-  /** Publish a draft and wait for the on-chain result (`{ address, status }`). */
+  /**
+   * Publish a draft and wait for the on-chain result (`{ address, status }`). A publish can take
+   * ~15 min (hours with many questions), so `timeoutMs` defaults to `Infinity`; a value you pass wins.
+   * It may reject with a 402, 409 or 422 billing error (see `ApiErrorCode`).
+   */
   async publishAndWait(
     draftId: string,
     opts?: WaitForJobOptions,
   ): Promise<PublishProcessResponse> {
     const res = await this.publish(draftId)
     if (!isEnqueued(res)) return res
-    const job = await this.jobs.waitFor(res.jobId, opts)
+    const job = await this.jobs.waitFor(res.jobId, { ...opts, timeoutMs: opts?.timeoutMs ?? Infinity })
     return { address: job.result?.address ?? '', status: job.result?.status ?? '' }
+  }
+
+  // ─── Payment ────────────────────────────────────────────────────────────────
+  // Pay-per-process billing. Quoting never charges; only the verified webhook moves money.
+
+  /** Server-side quote of a draft via `GET /processes/{id}/price`. Quoting never charges or claims anything. */
+  async getPrice(id: string): Promise<ProcessPriceResponse> {
+    return this.fetch<ProcessPriceResponse>(`/processes/${id}/price`).catch(handleError)
+  }
+
+  /**
+   * Open or reuse a wallet top-up for the shortfall (at least €1) via `POST /processes/{id}/checkout`.
+   * The verified webhook credits the wallet and publishes. 400 when the process is free or the wallet
+   * already covers it (publish directly); 403 40181 for managed orgs. JWT only.
+   */
+  async checkout(id: string, body: ProcessCheckoutRequest): Promise<ProcessCheckoutResponse> {
+    return this.fetch<ProcessCheckoutResponse>(`/processes/${id}/checkout`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
+  }
+
+  /**
+   * Poll the process payment via `GET /processes/{id}/checkout`. 404 when no payment exists, but also
+   * when the process is missing: both answer ErrProcessNotFound (code 40038), so check the process first.
+   */
+  async getCheckout(id: string): Promise<ProcessPaymentStatusResponse> {
+    return this.fetch<ProcessPaymentStatusResponse>(`/processes/${id}/checkout`).catch(handleError)
+  }
+
+  /**
+   * Cancel the open checkout via `DELETE /processes/{id}/checkout`. A repeat cancel is a 404, which is
+   * ErrProcessNotFound (code 40038) like a missing process.
+   */
+  async cancelCheckout(id: string): Promise<void> {
+    await this.fetch(`/processes/${id}/checkout`, { method: 'DELETE' }).catch(handleError)
+  }
+
+  /**
+   * Buy census headroom for a paid process via `POST /processes/{id}/census/checkout`. When the wallet
+   * covers it, the difference is debited at once: `sessionId` and `clientSecret` come back empty.
+   * The only payment route an API key may call, and only when no checkout would open.
+   */
+  async censusCheckout(id: string, body: ProcessCensusCheckoutRequest): Promise<ProcessCheckoutResponse> {
+    return this.fetch<ProcessCheckoutResponse>(`/processes/${id}/census/checkout`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
   }
 
   /**

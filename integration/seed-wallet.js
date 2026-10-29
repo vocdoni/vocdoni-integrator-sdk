@@ -1,6 +1,6 @@
-// Funds the integrator's wallet: publishing a >10-voter process debits it (saas-backend#706)
-// and only a Stripe checkout credits it. Env: ORG_ADDRESS (0x), WALLET_CENTS (euro cents).
-// Shape mirrors db.Wallet (db/types.go); integration-stack.sh asserts it via GET /wallet.
+// Funds the integrator's wallet: publishing a priced process debits it and only a Stripe
+// checkout credits it. Env: ORG_ADDRESS (0x), WALLET_CENTS (euro cents). Shape mirrors
+// db.Wallet (db/types.go); integration-stack.sh reads it back through the wallet API.
 const orgAddress = process.env.ORG_ADDRESS || ''
 const walletCents = process.env.WALLET_CENTS || ''
 if (!/^0x[0-9a-fA-F]{40}$/.test(orgAddress)) {
