@@ -179,10 +179,11 @@ publish refused with `40183` before any debit), and the public `/pricing`
 calculator. It publishes nothing that spends money and cleans up its managed org
 at the end.
 
-Against a backend that predates #819 the wallet route answers 404, and the suite
-skips every test with a console note instead of failing. Set
-`INTEGRATION_ORG_ADDRESS` to the key's integrator org; without it the suite
-skips.
+The suite creates a managed org first and finds the integrator org from
+`INTEGRATION_ORG_ADDRESS`, or else from the new org's `managedBy`. If neither
+gives an address it fails. Against a backend that predates #819 the wallet route
+answers 404, and the suite skips every test with a console note instead of
+failing.
 
 ## Configuration
 
@@ -190,7 +191,7 @@ skips.
 | ------------------------- | ------------------------------------ | -------------------------------- |
 | `INTEGRATION_API_URL`     | `https://saas-api-dev.vocdoni.net`   | Target API base URL              |
 | `INTEGRATION_API_KEY`     | — (suite skips without it)           | Integrator API key (`vsk_…`)     |
-| `INTEGRATION_ORG_ADDRESS` | — (`payg.itest.ts` skips without it) | The key's integrator org (`0x…`) |
+| `INTEGRATION_ORG_ADDRESS` | — (else `managedBy`)                 | The key's integrator org (`0x…`) |
 
 The key's organization must be an **integrator** with scopes `managed:write` +
 `members:write` + `voting:write`, and quota for ≥5 processes / ≥11 on-chain

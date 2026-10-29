@@ -140,10 +140,14 @@ describe('payment: elections.censusCheckout', () => {
 
 describe('payment: elections.update and publishAndWait', () => {
   let client: VocdoniApiClient
+  let waitForSpy: ReturnType<typeof vi.spyOn> | undefined
 
   beforeEach(() => {
     client = new VocdoniApiClient({ apiUrl: BASE_URL })
-    vi.restoreAllMocks()
+  })
+
+  afterEach(() => {
+    waitForSpy?.mockRestore()
   })
 
   it('sends addOns in the PUT body', async () => {
@@ -170,7 +174,7 @@ describe('payment: elections.update and publishAndWait', () => {
         HttpResponse.json({ jobId: 'pub-1' }),
       ),
     )
-    const waitFor = vi.spyOn(JobsClient.prototype, 'waitFor').mockResolvedValue({
+    waitForSpy = vi.spyOn(JobsClient.prototype, 'waitFor').mockResolvedValue({
       jobId: 'pub-1',
       type: 'publish_process',
       status: 'completed',
@@ -178,7 +182,7 @@ describe('payment: elections.update and publishAndWait', () => {
     } as never)
 
     const res = await client.elections.publishAndWait(PROCESS_ID)
-    expect(waitFor).toHaveBeenCalledWith('pub-1', { timeoutMs: Infinity })
+    expect(waitForSpy).toHaveBeenCalledWith('pub-1', { timeoutMs: Infinity })
     expect(res).toEqual({ address: '0xabc', status: 'ready' })
   })
 
@@ -188,7 +192,7 @@ describe('payment: elections.update and publishAndWait', () => {
         HttpResponse.json({ jobId: 'pub-2' }),
       ),
     )
-    const waitFor = vi.spyOn(JobsClient.prototype, 'waitFor').mockResolvedValue({
+    waitForSpy = vi.spyOn(JobsClient.prototype, 'waitFor').mockResolvedValue({
       jobId: 'pub-2',
       type: 'publish_process',
       status: 'completed',
@@ -197,7 +201,7 @@ describe('payment: elections.update and publishAndWait', () => {
     const signal = new AbortController().signal
 
     await client.elections.publishAndWait(PROCESS_ID, { timeoutMs: 5000, signal })
-    expect(waitFor).toHaveBeenCalledWith('pub-2', { timeoutMs: 5000, signal })
+    expect(waitForSpy).toHaveBeenCalledWith('pub-2', { timeoutMs: 5000, signal })
   })
 })
 

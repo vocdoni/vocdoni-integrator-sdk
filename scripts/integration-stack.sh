@@ -56,14 +56,7 @@ except Exception:
 
 # Reads a response body on stdin; exit 0 when it is a JSON object carrying an API error `code`.
 is_api_error_body() {
-  python3 -c '
-import sys, json
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(1)
-sys.exit(0 if isinstance(d, dict) and "code" in d else 1)
-'
+  [ -n "$(json_get "'yes' if isinstance(d, dict) and 'code' in d else ''")" ]
 }
 
 # True (exit 0) if nothing is listening on 127.0.0.1:$1. Uses bash's built-in

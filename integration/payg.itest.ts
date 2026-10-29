@@ -20,6 +20,7 @@ suite('pay-per-process billing (saas-backend#819, live)', () => {
   let admin: ReturnType<typeof makeAdminClient>
   let paygBackend = false
   let managed = ''
+  let integrator = ''
   let draftId = ''
   let groupId = ''
 
@@ -56,13 +57,23 @@ suite('pay-per-process billing (saas-backend#819, live)', () => {
   }
 
   beforeAll(async () => {
-    if (!integratorOrgAddress) {
-      console.warn('[payg] INTEGRATION_ORG_ADDRESS is not set: skipping pay-per-process billing')
-      return
-    }
     admin = makeAdminClient()
+    const org = await admin.organizations.createManaged({
+      name: `payg-${Date.now()}`,
+      type: 'company',
+    })
+    managed = org.address
+    expect(managed, 'managed org has no address').toBeTruthy()
+
+    // The key's integrator org: INTEGRATION_ORG_ADDRESS when set, else the org that manages the one just created.
+    const integratorHex = integratorOrgAddress || org.managedBy || ''
+    if (!integratorHex) {
+      throw new Error('no integrator org: set INTEGRATION_ORG_ADDRESS or make the backend return managedBy')
+    }
+    integrator = integratorHex.startsWith('0x') ? integratorHex : `0x${integratorHex}`
+
     try {
-      await admin.organizations.getWallet(integratorOrgAddress)
+      await admin.organizations.getWallet(integrator)
       paygBackend = true
     } catch (err) {
       // A plain-text 404 is a route the backend lacks; a coded one is a real error.
@@ -72,13 +83,6 @@ suite('pay-per-process billing (saas-backend#819, live)', () => {
       }
       throw err
     }
-
-    const org = await admin.organizations.createManaged({
-      name: `payg-${Date.now()}`,
-      type: 'company',
-    })
-    managed = org.address
-    expect(managed, 'managed org has no address').toBeTruthy()
 
     const added = await admin.organizations.addMembers(
       managed,
@@ -97,14 +101,14 @@ suite('pay-per-process billing (saas-backend#819, live)', () => {
   }, 180000)
 
   afterAll(async () => {
-    if (!paygBackend || !managed) return
+    if (!managed) return
     // Best effort: the org is disposable, so a failed cleanup must not fail the run.
     await admin.organizations.deleteManaged(managed).catch(() => undefined)
   })
 
   it('reads the integrator wallet: integer balanceCents and a history array', async ({ skip }) => {
     if (!paygBackend) skip()
-    const wallet = await admin.organizations.getWallet(integratorOrgAddress!)
+    const wallet = await admin.organizations.getWallet(integrator)
     expect(Number.isInteger(wallet.balanceCents)).toBe(true)
     expect(Array.isArray(wallet.history)).toBe(true)
   })

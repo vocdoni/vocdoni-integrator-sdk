@@ -348,12 +348,18 @@ export class ElectionsClient {
     }).catch(handleError)
   }
 
-  /** Poll the process payment via `GET /processes/{id}/checkout`. 404 when no payment exists. */
+  /**
+   * Poll the process payment via `GET /processes/{id}/checkout`. 404 when no payment exists, but also
+   * when the process is missing: both answer ErrProcessNotFound (code 40038), so check the process first.
+   */
   async getCheckout(id: string): Promise<ProcessPaymentStatusResponse> {
     return this.fetch<ProcessPaymentStatusResponse>(`/processes/${id}/checkout`).catch(handleError)
   }
 
-  /** Cancel the open checkout via `DELETE /processes/{id}/checkout`. A repeat cancel is a 404. */
+  /**
+   * Cancel the open checkout via `DELETE /processes/{id}/checkout`. A repeat cancel is a 404, which is
+   * ErrProcessNotFound (code 40038) like a missing process.
+   */
   async cancelCheckout(id: string): Promise<void> {
     await this.fetch(`/processes/${id}/checkout`, { method: 'DELETE' }).catch(handleError)
   }
