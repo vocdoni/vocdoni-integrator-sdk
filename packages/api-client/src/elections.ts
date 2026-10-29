@@ -230,11 +230,9 @@ export class ElectionsClient {
   }
 
   /**
-   * Update a draft process via `PUT /processes/{id}`. Takes the same flat
-   * {@link CreateVotingProcessRequest} shape as `create`. The PUT replaces the whole
-   * draft, `addOns` included: send them back on every update or they are cleared.
-   * The backend answers a bare `200 OK`, so this resolves to void; re-{@link get}
-   * for the updated shape. Fails with 409 once published.
+   * Update a draft via `PUT /processes/{id}`, which replaces the whole draft: send
+   * `addOns` back on every update or they are cleared. Resolves to void (bare `200 OK`),
+   * so re-{@link get} for the updated shape. Fails with 409 once published.
    */
   async update(draftId: string, data: CreateVotingProcessRequest): Promise<void> {
     const body = normalizeVotingProcessRequest(data)

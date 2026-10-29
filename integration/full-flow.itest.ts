@@ -45,8 +45,7 @@ import { apiKey, makeAdminClient, makeClient } from './helpers'
 // Opt-in: needs INTEGRATION_API_KEY (a `vsk_…` key whose org is an integrator
 // with scopes managed:write + members:write + voting:write, and quota for >=5
 // processes / >=11 on-chain elections / >=200 census, and a wallet holding
-// >=€330, spent per run: five 100-voter processes at the €66 base price, no
-// email 2FA since the census is auth-only). It creates real on-chain
+// >=€330, spent per run; see integration/README.md). It creates real on-chain
 // elections and casts 44 real votes, so it is excluded from the default run and
 // takes several minutes.
 const suite = apiKey ? describe : describe.skip
