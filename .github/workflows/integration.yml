@@ -337,6 +337,7 @@ jobs:
         env:
           INTEGRATION_API_URL: ${{ steps.stack.outputs.api_url }}
           INTEGRATION_API_KEY: ${{ steps.stack.outputs.api_key }}
+          INTEGRATION_ORG_ADDRESS: ${{ steps.stack.outputs.org_address }}
         run: pnpm test:integration
 
       - name: Dump container logs

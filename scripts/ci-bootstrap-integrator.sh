@@ -3,12 +3,10 @@
 # into an integrator API key usable by integration/full-flow.itest.ts.
 #
 # Steps: register a user -> read the verification code out of MailHog ->
-# verify -> log in -> create an organization -> mint an integrator API key
-# for it. The seeded plan (integration/seed-plan.js) carries
-# integratorLimits.maxManagedOrgs, which is what makes every organization
-# created against it an integrator org (Subscriptions.IsIntegrator falls back
-# to the org's plan when there is no per-org override) — no separate
-# "make this org an integrator" step is needed.
+# verify -> log in -> create an organization with "integrator": true -> mint an
+# integrator API key for it. The flag works on both sides of saas-backend#819:
+# before it, it selects the free integrator plan integration/seed-plan.js seeds;
+# since it, the flag alone makes the org an integrator.
 #
 # Env:
 #   API   base URL of the saas-backend API (default http://localhost:8080)
@@ -76,7 +74,7 @@ echo "   token=${TOKEN:0:24}..." >&2
 
 echo "== 5. create organization" >&2
 ORG_JSON=$(curl -fsS -m "$CURL_TIMEOUT" -X POST "$API/organizations" -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $TOKEN" -d '{"type":"company","website":"https://ci.example"}')
+  -H "Authorization: Bearer $TOKEN" -d '{"type":"company","website":"https://ci.example","integrator":true}')
 ORG=$(printf '%s' "$ORG_JSON" | j "['address']")
 if [ -z "$ORG" ] || [ "$ORG" = "None" ]; then
   echo "ERROR: organization creation did not return an address" >&2
