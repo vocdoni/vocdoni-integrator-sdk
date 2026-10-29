@@ -182,3 +182,61 @@ describe('jobs.waitFor', () => {
     expect(questions[1].noOp).toBe(true)
   })
 })
+
+describe('jobs.waitFor abort', () => {
+  let client: VocdoniApiClient
+
+  beforeEach(() => {
+    client = new VocdoniApiClient({ apiUrl: BASE_URL })
+  })
+
+  it('rejects with AbortError when the signal is already aborted, without polling', async () => {
+    let polls = 0
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) => {
+        polls++
+        return HttpResponse.json({ jobId: params.jobId as string, status: 'pending', type: 'relay_vote' })
+      }),
+    )
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      client.jobs.waitFor('job-1', { signal: controller.signal, timeoutMs: Infinity, intervalMs: 1 }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(polls).toBe(0)
+  })
+
+  it('rejects with AbortError when aborted while a GET is in flight, and stops polling', async () => {
+    let polls = 0
+    let markStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve
+    })
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, async ({ params }) => {
+        polls++
+        markStarted()
+        await gate
+        return HttpResponse.json({ jobId: params.jobId as string, status: 'pending', type: 'relay_vote' })
+      }),
+    )
+    const controller = new AbortController()
+
+    const pending = client.jobs.waitFor('job-1', {
+      signal: controller.signal,
+      timeoutMs: Infinity,
+      intervalMs: 1,
+    })
+    await started
+    controller.abort()
+    release()
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(polls).toBe(1)
+  })
+})
