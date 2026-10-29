@@ -10,6 +10,7 @@ import type {
   DeleteMembersResponse,
   IntegratorInfo,
   ListApiKeysResponse,
+  ManagedOrganizationInfo,
   ManagedOrganizationsResponse,
   Organization,
   OrganizationCensusesResponse,
@@ -23,10 +24,14 @@ import type {
   OrganizationSubscriptionInfo,
   OrganizationType,
   OrgMember,
+  ProcessCheckoutResponse,
   SubscriptionPlan,
   UpdateGroupRequest,
   UpdateGroupResponse,
+  UpdateManagedOrganizationRequest,
   UpsertOrgMemberResponse,
+  WalletResponse,
+  WalletTopUpRequest,
 } from '@vocdoni/api-types'
 import type { UpFetch } from 'up-fetch'
 import { handleError } from './errors'
@@ -56,10 +61,12 @@ export class OrganizationsClient {
 
   // ─── Integrator / managed organizations ───────────────────────────────────
 
+  /** `limits` and `usage.managedProcesses` are no longer returned (saas-backend#819). */
   async getIntegratorInfo(): Promise<IntegratorInfo> {
     return this.fetch<IntegratorInfo>('/integrator').catch(handleError)
   }
 
+  /** Each item carries `spendCapCents` and `spentCents` (see {@link ManagedOrganizationInfo}). */
   async listManaged(page?: number): Promise<ManagedOrganizationsResponse> {
     return this.fetch<ManagedOrganizationsResponse>('/integrator/organizations', {
       params: page !== undefined ? { page } : undefined,
@@ -73,11 +80,43 @@ export class OrganizationsClient {
     }).catch(handleError)
   }
 
+  /**
+   * Set the managed org's spend cap (`null` = unlimited). Admin JWT or a `managed:write` key;
+   * 404 if the org is not managed by the caller's integrator.
+   */
+  async updateManaged(orgAddress: string, body: UpdateManagedOrganizationRequest): Promise<ManagedOrganizationInfo> {
+    return this.fetch<ManagedOrganizationInfo>(`/integrator/organizations/${orgAddress}`, {
+      method: 'PUT',
+      body,
+    }).catch(handleError)
+  }
+
   async deleteManaged(orgAddress: string): Promise<DeleteManagedOrganizationResponse> {
     return this.fetch<DeleteManagedOrganizationResponse>(
       `/integrator/organizations/${orgAddress}`,
       { method: 'DELETE' },
     ).catch(handleError)
+  }
+
+  // ─── Wallet ────────────────────────────────────────────────────────────────
+
+  /**
+   * Wallet balance and ledger via `GET /organizations/{address}/wallet`. Admin/Manager, or a
+   * `quota:read` key of that same org. 403 40181 for a managed org: its integrator's wallet pays.
+   */
+  async getWallet(address: string, params: { page?: number; limit?: number } = {}): Promise<WalletResponse> {
+    return this.fetch<WalletResponse>(`/organizations/${address}/wallet`, { params }).catch(handleError)
+  }
+
+  /**
+   * Open a wallet top-up via `POST /organizations/{address}/wallet/topup`. The balance moves only
+   * when the verified webhook credits it. Admin JWT only.
+   */
+  async topUpWallet(address: string, body: WalletTopUpRequest): Promise<ProcessCheckoutResponse> {
+    return this.fetch<ProcessCheckoutResponse>(`/organizations/${address}/wallet/topup`, {
+      method: 'POST',
+      body,
+    }).catch(handleError)
   }
 
   // ─── Members (memberbase) ──────────────────────────────────────────────────

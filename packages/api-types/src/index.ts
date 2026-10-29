@@ -92,14 +92,20 @@ export interface CreateOrganizationRequest {
   timezone?: string
   subdomain?: string
   communications?: boolean
-  /** Opt-in to the free integrator plan at creation. */
+  /**
+   * Flags the org as an integrator, which can create managed organizations and
+   * pays for their processes from its wallet.
+   */
   integrator?: boolean
   meta?: Record<string, unknown>
   /** Opt-in to eagerly provision the on-chain account at creation (default false). */
   provisionAccount?: boolean
 }
 
-/** Effective managed-resource quota for an integrator. A 0 in any field means unlimited. */
+/**
+ * Effective managed-resource quota for an integrator. A 0 in any field means unlimited.
+ * @deprecated No longer returned since saas-backend#819: an integrator's spending is bounded by its wallet and per-org spend caps.
+ */
 export interface IntegratorLimits {
   maxManagedOrgs: number
   maxManagedProcesses: number
@@ -110,7 +116,8 @@ export interface IntegratorLimits {
 
 export interface IntegratorUsage {
   managedOrgs: number
-  managedProcesses: number
+  /** @deprecated No longer returned since saas-backend#819: an integrator's spending is bounded by its wallet and per-org spend caps. */
+  managedProcesses?: number
   sentVotes: number
   sentSMS: number
   sentEmails: number
@@ -119,7 +126,10 @@ export interface IntegratorUsage {
 /** Response of `GET /integrator`. */
 export interface IntegratorInfo {
   enabled: boolean
-  /** Omitted when `enabled` is false (the org is not an integrator). */
+  /**
+   * Omitted when `enabled` is false (the org is not an integrator).
+   * @deprecated No longer returned since saas-backend#819: an integrator's spending is bounded by its wallet and per-org spend caps.
+   */
   limits?: IntegratorLimits
   usage: IntegratorUsage
 }
@@ -624,6 +634,8 @@ export interface VotingProcessBase {
    * `omitempty`.
    */
   endedAt?: string
+  /** Paid per-process add-ons; absent when none selected. */
+  addOns?: ProcessAddOns
 }
 
 /**
@@ -774,6 +786,8 @@ export interface CreateVotingProcessRequest {
   streamUri?: string
   startDate?: string
   endDate?: string
+  /** PUT replaces the stored add-ons, so an update that omits `addOns` clears them. Turning branding/customUrl on for a paid draft is refused with 409 40177. */
+  addOns?: ProcessAddOns
   questions: VotingProcessQuestionRequest[]
 }
 
@@ -1309,9 +1323,180 @@ export type CreateManagedOrganizationRequest = CreateOrganizationRequest & {
   ownerEmail?: string
 }
 
+/** A managed org as its integrator sees it. `spendCapCents` null = unlimited; `spentCents` = what its processes hold debited now. */
+export interface ManagedOrganizationInfo extends OrganizationInfo {
+  spendCapCents: number | null
+  spentCents: number
+}
+
 export interface ManagedOrganizationsResponse {
-  organizations: OrganizationInfo[]
+  organizations: ManagedOrganizationInfo[]
   pagination?: Pagination
+}
+
+/** Body of `PUT /integrator/organizations/{orgAddress}`. Required, the only key; `null` lifts the cap, negative is a 400. */
+export interface UpdateManagedOrganizationRequest {
+  spendCapCents: number | null
+}
+
+// ─── Pay-per-process billing ──────────────────────────────────────────────────
+// All amounts are EUR cents, VAT excluded.
+
+/** Paid per-process options. 2FA add-ons are not here: they derive from census twoFaFields. */
+export interface ProcessAddOns {
+  signedCertificate?: boolean
+  customUrl?: boolean
+  branding?: boolean
+}
+
+export type QuoteLineKind =
+  | 'base'
+  | 'emailTwoFA'
+  | 'smsTwoFA'
+  | 'signedCertificate'
+  | 'customUrl'
+  | 'branding'
+  | 'minimumCharge'
+
+export interface QuoteLine {
+  kind: QuoteLineKind | (string & {})
+  description: string
+  amountCents: number
+}
+
+/** `quoteRecommended`: census > 15 000. `quoteRequired`: census > 50 000, no price at all (`lines` [], `totalCents` 0 is NOT free) and nothing can be paid self-service. */
+export interface ProcessQuote {
+  lines: QuoteLine[]
+  totalCents: number
+  quoteRecommended: boolean
+  quoteRequired: boolean
+}
+
+export type ProcessPaymentStatus = 'pending' | 'failed' | 'paid' | 'refunded'
+
+/** `GET /processes/{id}/price` and `GET /pricing`. `paymentStatus` absent when no payment exists (always absent on `/pricing`). */
+export interface ProcessPriceResponse extends ProcessQuote {
+  currency: string
+  paymentStatus?: ProcessPaymentStatus
+}
+
+/** Query of the public `GET /pricing` calculator. `voters` >= 1. */
+export interface PricingParams {
+  voters: number
+  emailTwoFA?: boolean
+  smsTwoFA?: boolean
+  signedCertificate?: boolean
+  customUrl?: boolean
+  branding?: boolean
+}
+
+/** `returnURL`: Stripe appends the session id. */
+export interface ProcessCheckoutRequest {
+  returnURL: string
+  locale?: string
+}
+
+/** Embedded Stripe checkout of a wallet top-up. */
+export interface ProcessCheckoutResponse {
+  clientSecret: string
+  sessionId: string
+  amountCents: number
+  currency: string
+}
+
+export interface ProcessPaymentStatusResponse {
+  status: ProcessPaymentStatus
+  amountCents: number
+  currency: string
+  paidAt?: string
+  sessionStatus?: 'open' | 'complete' | 'expired' | (string & {})
+  sessionPaymentStatus?: 'paid' | 'unpaid' | 'no_payment_required' | (string & {})
+}
+
+export interface ProcessCensusCheckoutRequest {
+  censusSize: number
+  /** Stripe appends the session id. */
+  returnURL: string
+  locale?: string
+}
+
+export type WalletLedgerKind = 'topup' | 'payment' | 'creditBack' | 'refund'
+
+/** `amountCents` is signed as applied (negative for payment/refund). `processOrgAddress`: the managed org a payment was for. */
+export interface WalletLedgerEntry {
+  id: string
+  orgAddress: string
+  amountCents: number
+  kind: WalletLedgerKind | (string & {})
+  processId?: string
+  processOrgAddress?: string
+  createdAt: string
+}
+
+export interface WalletResponse {
+  balanceCents: number
+  currency: string
+  history: WalletLedgerEntry[]
+  pagination: Pagination
+}
+
+/** €1–€100 000 (100–10 000 000 cents); Stripe Tax adds VAT on top. */
+export interface WalletTopUpRequest {
+  amountCents: number
+  /** Stripe appends the session id. */
+  returnURL: string
+  locale?: string
+}
+
+/** Backend error codes of the pay-per-process billing flow (the `code` of an API error). */
+export const ApiErrorCode = {
+  IntegratorOrgCannotOwnProcess: 40174, // 403
+  InsufficientWalletBalance: 40175, // 402, integrator wallet short for a managed org's debit
+  QuoteRequired: 40176, // 422, census > 50 000
+  PaymentSessionConflict: 40177, // 409, checkout open/completing, draft already paid, payment being refunded, add-on after payment
+  PaymentRequired: 40178, // 402, standard org wallet short at publish, or census growth past the paid price
+  ManagedOrgHasNoWallet: 40181, // 403
+  MaxWritersReached: 40182, // 400, 5 admins/managers incl. pending invites
+  SpendCapReached: 40183, // 402
+} as const
+
+export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode]
+
+/** 40178 data at publish: the quote flattened plus the wallet balance and what it lacks. */
+export interface PaymentRequiredData extends ProcessQuote {
+  balanceCents: number
+  shortfallCents: number
+}
+
+/** 40178 data on census growth past the paid envelope; buy it with `censusCheckout(processId, { censusSize })`. */
+export interface CensusGrowthQuote {
+  processId: string
+  lines: QuoteLine[]
+  totalCents: number
+  paidCents: number
+  dueCents: number
+  censusSize: number
+  currency: string
+  balanceCents: number
+  shortfallCents: number
+}
+
+export interface InsufficientWalletBalanceData {
+  requiredCents: number
+  availableCents: number
+}
+
+export interface SpendCapReachedData {
+  capCents: number
+  spentCents: number
+  requiredCents: number
+}
+
+/** The `data` each error code carries. 40175 carries it only when the balance could be read. */
+export interface ApiErrorDataByCode {
+  40175: InsufficientWalletBalanceData | undefined
+  40178: PaymentRequiredData | CensusGrowthQuote
+  40183: SpendCapReachedData
 }
 
 // ─── Organization members (memberbase) ──────────────────────────────────────────
