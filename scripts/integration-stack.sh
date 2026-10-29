@@ -23,7 +23,7 @@ BOOTSTRAP_SCRIPT="$SCRIPT_DIR/ci-bootstrap-integrator.sh"
 
 INTEGRATION_HOST_PORT="${INTEGRATION_HOST_PORT:-8080}"
 INTEGRATION_MAILHOG_PORT="${INTEGRATION_MAILHOG_PORT:-8025}"
-# A full run spends €325 (5 processes at €65) with no refund; €100k lasts ~300 runs of one stack.
+# A full run spends €330 (5 processes at €66) with no refund; €100k lasts ~300 runs of one stack.
 INTEGRATION_WALLET_CENTS="${INTEGRATION_WALLET_CENTS:-10000000}"
 export INTEGRATION_HOST_PORT INTEGRATION_MAILHOG_PORT
 
@@ -52,6 +52,18 @@ try:
 except Exception:
     pass
 " 2>/dev/null || true
+}
+
+# Reads a response body on stdin; exit 0 when it is a JSON object carrying an API error `code`.
+is_api_error_body() {
+  python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+sys.exit(0 if isinstance(d, dict) and "code" in d else 1)
+'
 }
 
 # True (exit 0) if nothing is listening on 127.0.0.1:$1. Uses bash's built-in
@@ -174,27 +186,39 @@ cmd_up() {
 
   echo "== asserting the wallet seed took" >&2
   # Read back through the API, proving the backend sees the seed as this integrator's wallet.
-  local wallet_body wallet_status
+  # saas-backend#819 moved the wallet under its organization; older backends only have GET /wallet.
+  local wallet_body wallet_status wallet_path
   wallet_body=$(mktemp)
+  wallet_path="/organizations/$INTEGRATOR_ORG_ADDRESS/wallet"
   wallet_status=$(curl -sS -m 10 -o "$wallet_body" -w '%{http_code}' \
-    -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL/wallet" || echo "000")
+    -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL$wallet_path" || echo "000")
+  # A plain-text 404 is a route the backend does not have; a JSON 404 (with an API error code) is a real answer.
+  if [ "$wallet_status" = 404 ] && ! is_api_error_body <"$wallet_body"; then
+    wallet_path=/wallet
+    wallet_status=$(curl -sS -m 10 -o "$wallet_body" -w '%{http_code}' \
+      -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL$wallet_path" || echo "000")
+  fi
   WALLET_JSON=$(cat "$wallet_body")
   rm -f "$wallet_body"
   case "$wallet_status" in
     200) ;;
     404)
+      if printf '%s' "$WALLET_JSON" | is_api_error_body; then
+        echo "ERROR: GET $INTEGRATION_API_URL$wallet_path answered 404 with an API error (body: $WALLET_JSON) — the integrator organization is not known to the api. This is NOT a seed problem for the wallet check; check the api logs." >&2
+        exit 1
+      fi
       # Wallets arrived in saas-backend#706; an older SAAS_BACKEND_IMAGE has nothing to fund.
-      echo "   GET /wallet is 404: this saas-backend predates integrator wallets; skipping the check" >&2
+      echo "   GET /organizations/<org>/wallet and GET /wallet are both 404: this saas-backend has no integrator wallet endpoint; skipping the check" >&2
       ;;
     *)
-      echo "ERROR: GET $INTEGRATION_API_URL/wallet answered HTTP $wallet_status — the api container is not serving or rejected the key. This is NOT a seed problem; check the api logs." >&2
+      echo "ERROR: GET $INTEGRATION_API_URL$wallet_path answered HTTP $wallet_status — the api container is not serving or rejected the key. This is NOT a seed problem; check the api logs." >&2
       exit 1
       ;;
   esac
   if [ "$wallet_status" = 200 ]; then
     WALLET_CENTS_READ=$(printf '%s' "$WALLET_JSON" | json_get "int(d['balanceCents'])")
     if [ -z "$WALLET_CENTS_READ" ]; then
-      echo "ERROR: GET /wallet has no integer balanceCents (body: $WALLET_JSON) — the API response changed shape; this is NOT a seed problem." >&2
+      echo "ERROR: GET $wallet_path has no integer balanceCents (body: $WALLET_JSON) — the API response changed shape; this is NOT a seed problem." >&2
       exit 1
     fi
     if [ "$WALLET_CENTS_READ" != "$INTEGRATION_WALLET_CENTS" ]; then
@@ -205,6 +229,7 @@ cmd_up() {
 
   echo "INTEGRATION_API_URL=$INTEGRATION_API_URL"
   echo "INTEGRATION_API_KEY=$INTEGRATION_API_KEY"
+  echo "INTEGRATION_ORG_ADDRESS=$INTEGRATOR_ORG_ADDRESS"
 
   # cmd_run passes a file here rather than capturing our stdout: running cmd_up
   # inside `out=$(cmd_up)` would silently disable `set -e` for everything in it
@@ -215,6 +240,7 @@ cmd_up() {
     {
       echo "INTEGRATION_API_URL=$INTEGRATION_API_URL"
       echo "INTEGRATION_API_KEY=$INTEGRATION_API_KEY"
+      echo "INTEGRATION_ORG_ADDRESS=$INTEGRATOR_ORG_ADDRESS"
     } >"$INTEGRATION_ENV_FILE"
   fi
 
@@ -222,6 +248,7 @@ cmd_up() {
     {
       echo "api_url=$INTEGRATION_API_URL"
       echo "api_key=$INTEGRATION_API_KEY"
+      echo "org_address=$INTEGRATOR_ORG_ADDRESS"
     } >>"$GITHUB_OUTPUT"
   fi
 }
@@ -244,7 +271,7 @@ cmd_run() {
   INTEGRATION_ENV_FILE="$envfile" cmd_up
   # shellcheck source=/dev/null
   . "$envfile"
-  export INTEGRATION_API_URL INTEGRATION_API_KEY
+  export INTEGRATION_API_URL INTEGRATION_API_KEY INTEGRATION_ORG_ADDRESS
   (cd "$REPO_ROOT" && pnpm test:integration)
 }
 
