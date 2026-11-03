@@ -240,3 +240,82 @@ describe('jobs.waitFor abort', () => {
     expect(polls).toBe(1)
   })
 })
+
+describe('jobs.waitFor backoff and transient failures', () => {
+  let client: VocdoniApiClient
+
+  beforeEach(() => {
+    client = new VocdoniApiClient({ apiUrl: BASE_URL })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('grows the poll interval up to maxIntervalMs while the job is pending', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5) // no jitter
+    const at: number[] = []
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) => {
+        at.push(Date.now())
+        return HttpResponse.json({
+          jobId: params.jobId as string,
+          type: 'relay_vote',
+          status: at.length < 5 ? 'pending' : 'completed',
+        })
+      }),
+    )
+
+    await client.jobs.waitFor('job-1', { intervalMs: 40, maxIntervalMs: 80 })
+
+    const gaps = at.slice(1).map((t, i) => t - at[i])
+    // 40, 60, 80 (capped), 80; timers may fire a little late, never early
+    expect(gaps).toHaveLength(4)
+    ;[40, 60, 80, 80].forEach((want, i) => expect(gaps[i]).toBeGreaterThanOrEqual(want - 2))
+    expect(gaps[3]).toBeLessThan(120)
+  })
+
+  it('keeps polling through 429, 503 and network failures', async () => {
+    let polls = 0
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) => {
+        polls++
+        if (polls === 1) return HttpResponse.json({ error: 'busy' }, { status: 429 })
+        if (polls === 2) return HttpResponse.json({ error: 'unavailable' }, { status: 503 })
+        if (polls === 3) return HttpResponse.error()
+        return HttpResponse.json({ jobId: params.jobId as string, type: 'relay_vote', status: 'completed' })
+      }),
+    )
+
+    const job = await client.jobs.waitFor('job-1', { intervalMs: 1 })
+    expect(job.status).toBe('completed')
+    expect(polls).toBe(4)
+  })
+
+  it('fails at once on a poll error that is not transient', async () => {
+    let polls = 0
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, () => {
+        polls++
+        return HttpResponse.json({ error: 'job not found', code: 40400 }, { status: 404 })
+      }),
+    )
+
+    await expect(client.jobs.waitFor('job-1', { intervalMs: 1 })).rejects.toMatchObject({
+      name: 'VocdoniApiError',
+      status: 404,
+    })
+    expect(polls).toBe(1)
+  })
+
+  it('rethrows the last transient failure once the deadline passes', async () => {
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, () => HttpResponse.json({ error: 'unavailable' }, { status: 503 })),
+    )
+
+    await expect(client.jobs.waitFor('job-1', { intervalMs: 5, timeoutMs: 50 })).rejects.toMatchObject({
+      name: 'VocdoniApiError',
+      status: 503,
+    })
+  })
+})
