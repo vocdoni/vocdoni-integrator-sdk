@@ -219,6 +219,17 @@ cmd_up() {
       exit 1
     fi
   fi
+  # saas-backend#819: managed-org creation is capped until the wallet keeps a top-up. GET /integrator
+  # reports netTopUpCents for an enabled integrator; backends without the field are skipped.
+  local integrator_json net_top_up
+  integrator_json=$(curl -sS -m 10 -H "Authorization: Bearer $INTEGRATION_API_KEY" "$INTEGRATION_API_URL/integrator" || echo "")
+  net_top_up=$(printf '%s' "$integrator_json" | json_get "int(d['netTopUpCents']) if d.get('enabled') and 'netTopUpCents' in d else ''")
+  if [ -z "$net_top_up" ]; then
+    echo "   GET /integrator reports no netTopUpCents: this saas-backend predates #819; skipping the top-up check" >&2
+  elif [ "$net_top_up" -le 0 ]; then
+    echo "wallet seed did not take (API reports netTopUpCents $net_top_up) — check db.WalletLedgerEntry bson tags (orgAddress, kind, amountCents) against the walletLedger topup in integration/seed-wallet.js" >&2
+    exit 1
+  fi
 
   echo "INTEGRATION_API_URL=$INTEGRATION_API_URL"
   echo "INTEGRATION_API_KEY=$INTEGRATION_API_KEY"
