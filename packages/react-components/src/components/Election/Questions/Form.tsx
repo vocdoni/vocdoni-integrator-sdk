@@ -8,6 +8,22 @@ import { useElection } from '@vocdoni/react-providers'
 import { QuestionsConfirmation } from './Confirmation'
 import { describeVoteError } from './vote-error'
 
+/**
+ * The i18n key of the notice that replaces a question's fields, or undefined
+ * when the voter can still answer it.
+ */
+export const lockedQuestionNotice = (
+  questionId: string,
+  pendingVotes: Record<string, true> | undefined,
+  voteStatus: Record<string, string> | undefined,
+): string | undefined => {
+  if (pendingVotes?.[questionId]) return 'vote.pending_resend'
+  const status = voteStatus?.[questionId]
+  if (status === 'unconfirmed') return 'vote.disabled.unconfirmed'
+  if (status === 'signed') return 'vote.disabled.signed'
+  return undefined
+}
+
 export type QuestionsFormContextState = {
   fmethods: UseFormReturn<any>
   vote: (values: FieldValues) => Promise<string | false | void>
@@ -36,7 +52,7 @@ export const QuestionsFormProvider = (props: PropsWithChildren<QuestionsFormProv
 const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFormProviderProps>) => {
   const fmethods = useForm()
   const { confirm } = useConfirm()
-  const { election, vote: baseVote } = useElection()
+  const { election, vote: baseVote, pendingVotes, voteStatus } = useElection()
   const t = useReactComponentsLocalize()
 
   const vote = async (values: FieldValues) => {
@@ -83,6 +99,12 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
     // handleSubmit as an unhandled promise on a vote that was never going to count.
     const encodedBallots: number[][] = []
     for (const [index, question] of election.questions.entries()) {
+      // A locked question renders no fields; the provider ignores its ballot
+      // (a pending one re-sends its stored tx, the others are never signed).
+      if (lockedQuestionNotice(question.id, pendingVotes, voteStatus)) {
+        encodedBallots.push([])
+        continue
+      }
       try {
         // encodeQuestionSelections, not encodeQuestionBallot: a ranked question's form
         // value is the voter's ordering; the wire transposition and its highest-is-best

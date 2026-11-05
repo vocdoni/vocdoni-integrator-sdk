@@ -132,7 +132,7 @@ const votable = check.questions.filter((status) => {
     console.warn(`No selections configured for question ${status.questionId} — skipping`)
     return false
   }
-  if (!status.canVote || status.hasVoted) {
+  if (!status.canVote || status.hasVoted || status.hasSigned) {
     console.log(`Cannot vote on question ${status.questionId} (ineligible or already voted) — skipping`)
     return false
   }

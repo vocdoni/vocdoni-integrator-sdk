@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds a vocdoni upstream image from source at a given ref, for running the
 # integration stack against an unpublished commit. Neither upstream publishes
-# per-commit images, so this is the only way to get one.
+# per-commit images, so this is the only way to get one. saas-backend is private and is
+# cloned over SSH: with SAAS_BACKEND_DEPLOY_KEY in CI, with your own SSH key otherwise.
 #
 # Usage:
 #   scripts/integration-build-image.sh <vocdoni-node|saas-backend> <ref|#PR>
@@ -31,54 +32,68 @@ if ! [[ "$ref" =~ ^#[0-9]{1,9}$ || "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ 
   exit 1
 fi
 
+if [ "$repo" = saas-backend ] && [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${SAAS_BACKEND_DEPLOY_KEY:-}" ]; then
+  echo "ERROR: SAAS_BACKEND_DEPLOY_KEY is empty: saas-backend is private. Fork PRs get no secrets, so a maintainer's /integration comment must run it." >&2
+  exit 1
+fi
+
 dir="$(mktemp -d)"
 trap 'rm -rf "$dir"' EXIT
 
-# Resolves the ref through the GitHub API, then shallow-fetches exactly that commit.
-# A #N ref reads the PR's head SHA; a branch, tag or short/full SHA goes via commits.
-auth=()
-if [ -n "${GH_TOKEN:-}" ]; then
-  auth=(-H "Authorization: Bearer $GH_TOKEN")
-fi
-body="$dir/resolve.txt"
-if [[ "$ref" == \#* ]]; then
-  command -v jq >/dev/null || {
-    echo "ERROR: jq is required to resolve '$ref'" >&2
-    exit 1
-  }
-  if curl -fsSL ${auth[@]+"${auth[@]}"} -H 'Accept: application/vnd.github+json' \
-    "https://api.github.com/repos/vocdoni/$repo/pulls/${ref:1}" -o "$body"; then
-    sha="$(jq -r '.head.sha // empty' "$body")"
-  else
-    sha=""
+# Full SHAs are fetched as they are. Other refs resolve in a throwaway bare repo that holds
+# every branch, tag and PR head (no trees or blobs), so a short SHA only resolves if one of
+# them reaches it. saas-backend is private: SSH with SAAS_BACKEND_DEPLOY_KEY in CI, your own key otherwise.
+url="https://github.com/vocdoni/$repo.git"
+if [ "$repo" = saas-backend ]; then
+  url="git@github.com:vocdoni/$repo.git"
+  if [ -n "${SAAS_BACKEND_DEPLOY_KEY:-}" ]; then
+    printf '%s\n' "$SAAS_BACKEND_DEPLOY_KEY" > "$dir/deploy_key"
+    chmod 600 "$dir/deploy_key"
+    echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$dir/known_hosts"
+    export GIT_SSH_COMMAND="ssh -i '$dir/deploy_key' -o IdentitiesOnly=yes -o UserKnownHostsFile='$dir/known_hosts'"
   fi
-elif curl -fsSL ${auth[@]+"${auth[@]}"} -H 'Accept: application/vnd.github.sha' \
-  "https://api.github.com/repos/vocdoni/$repo/commits/$ref" -o "$body"; then
-  sha="$(cat "$body")"
-else
-  sha=""
 fi
-rm -f "$body"
+refs="$dir/refs"
+sha=""
+if [[ "$ref" =~ ^[0-9A-Fa-f]{40}$ ]]; then
+  sha="$(printf '%s' "$ref" | tr '[:upper:]' '[:lower:]')"
+else
+  git init --quiet --bare "$refs" >&2
+  git -C "$refs" fetch --quiet --filter=tree:0 "$url" \
+    '+refs/heads/*:refs/heads/*' '+refs/tags/*:refs/tags/*' '+refs/pull/*/head:refs/pull/*' >&2
+  if [[ "$ref" =~ ^#[0-9]+$ ]]; then
+    sha="$(git -C "$refs" rev-parse --verify --quiet "refs/pull/${ref:1}^{commit}" || true)"
+  else
+    sha="$(git -C "$refs" rev-parse --verify --quiet "refs/heads/$ref^{commit}" || true)"
+    if [ -z "$sha" ]; then
+      sha="$(git -C "$refs" rev-parse --verify --quiet "refs/tags/$ref^{commit}" || true)"
+    fi
+    if [ -z "$sha" ] && [[ "$ref" =~ ^[0-9A-Fa-f]{7,39}$ ]]; then
+      sha="$(git -C "$refs" rev-parse --verify --quiet "$ref^{commit}" || true)"
+    fi
+  fi
+fi
 if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
   echo "ERROR: could not resolve '$ref' in vocdoni/$repo" >&2
   exit 1
 fi
-git -C "$dir" init --quiet >&2
-git -C "$dir" fetch --quiet --depth 1 "https://github.com/vocdoni/$repo.git" "$sha" >&2
-git -C "$dir" checkout --quiet FETCH_HEAD >&2
+src="$dir/src"
+git init --quiet "$src" >&2
+git -C "$src" fetch --quiet --depth 1 "$url" "$sha" >&2
+git -C "$src" checkout --quiet FETCH_HEAD >&2
 
 tag="integrator-sdk-integration/$repo:$sha"
 echo "== building $repo@$sha" >&2
 export DOCKER_BUILDKIT=1
 if [ "$repo" = vocdoni-node ]; then
-  docker build --platform linux/amd64 -t "$tag" "$dir" >&2
+  docker build --platform linux/amd64 -t "$tag" "$src" >&2
 else
-  go_version="$(awk '/^go [0-9]/ { print $2; exit }' "$dir/go.mod")"
+  go_version="$(awk '/^go [0-9]/ { print $2; exit }' "$src/go.mod")"
   if [ -z "$go_version" ]; then
     echo "ERROR: no 'go' directive found in saas-backend go.mod" >&2
     exit 1
   fi
-  docker build --platform linux/amd64 --build-arg "GOLANG_VERSION=$go_version" -t "$tag" "$dir" >&2
+  docker build --platform linux/amd64 --build-arg "GOLANG_VERSION=$go_version" -t "$tag" "$src" >&2
 fi
 
 printf 'image=%s\nsha=%s\n' "$tag" "$sha"

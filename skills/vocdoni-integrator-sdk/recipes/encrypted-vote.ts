@@ -75,7 +75,7 @@ const { questionId, processId } = found
 
 const status = check.questions.find((q) => q.questionId === questionId)
 if (!status?.canVote) throw new Error('Voter is not eligible for this question')
-if (status.hasVoted) throw new Error('Voter has already voted in this election')
+if (status.hasVoted || status.hasSigned) throw new Error('Voter has already voted in this election')
 
 // ─── 3. Encryption keys — poll the public question read until published ──────
 // Right after publish the keykeepers may not have published the keys yet; the

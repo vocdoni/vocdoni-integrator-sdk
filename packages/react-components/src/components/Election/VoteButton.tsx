@@ -10,7 +10,7 @@ import { useElection } from '@vocdoni/react-providers'
 
 export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<string, unknown>) => {
   const externalDisabled = Boolean(props.disabled)
-  const { election, status, isAbleToVote, voting, connected, isInCensus, hasVoted } = useElection()
+  const { election, status, isAbleToVote, voting, connected, isInCensus, hasVoted, voteStatus } = useElection()
   const { VoteButton: Slot } = useComponents()
   const t = useReactComponentsLocalize()
   const isHydrationRender = useIsHydrationRender()
@@ -50,6 +50,10 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     if (hasVoted) return t('vote.disabled.voted')
     if (!connected) return t('vote.disabled.identify')
     if (!isInCensus) return t('vote.disabled.not_in_census')
+    // Signed by the CSP, but nothing this tab can send or confirm.
+    const statuses = Object.values(voteStatus ?? {})
+    if (statuses.includes('unconfirmed')) return t('vote.disabled.unconfirmed')
+    if (statuses.includes('signed')) return t('vote.disabled.signed')
     return undefined
   }
 

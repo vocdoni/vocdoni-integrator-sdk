@@ -29,6 +29,7 @@ export {
   ElectionProvider,
   electionQueryKeys,
   PartialVoteError,
+  UnconfirmedVoteError,
   useElection,
   type ElectionContextValue,
   type ElectionProviderBaseProps,

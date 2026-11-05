@@ -32,6 +32,7 @@
     "vote_failed": "Your vote could not be cast: {{ detail }}",
     "vote_failed_unknown": "Your vote could not be cast. Please try again.",
     "vote_partial": "Only part of your vote was cast: {{ cast }} of {{ total }} questions were recorded. {{ detail }} Submit again to retry the ones that failed.",
+    "vote_unconfirmed": "Your vote could not be confirmed yet. It may still be recorded: submit again in a moment to check.",
     "wrong_data_description": "The specified data is not correct",
     "wrong_data_title": "Wrong data"
   },
@@ -109,11 +110,14 @@
       "not_in_census": "You are not eligible to vote in this process",
       "not_open": "Voting is not open",
       "paused": "Voting is paused",
+      "signed": "Your vote was already authorized. It cannot be confirmed from this device.",
+      "unconfirmed": "Your vote was authorized but did not reach the ledger, and this device cannot send it again. Please contact the organizer.",
       "upcoming": "Voting not open yet",
       "upcoming_at": "Voting opens on {{ date }}",
       "upcoming_date_format": "PPp",
       "voted": "You have already voted"
     },
+    "pending_resend": "Your vote for this question is being sent again.",
     "rank_position": "#{{ position }}",
     "sign": "Sign first",
     "voted_description": "Your vote id is {{ id }}. You can use it to verify your vote.",

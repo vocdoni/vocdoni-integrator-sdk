@@ -5,7 +5,7 @@ import { mockProcess } from '../../../../mocks/handlers'
 import { server } from '../../../../mocks/server'
 import { TestProvider } from '../test-utils'
 import { ElectionProvider, useElection } from './ElectionProvider'
-import { useElectionAuth } from './use-election-auth'
+import { useElectionAuth, type VoterSession } from './use-election-auth'
 
 function wrapper({ children }: { children: React.ReactNode }) {
   return (
@@ -105,6 +105,26 @@ describe('useElectionAuth', () => {
       expect(result.current.auth.weight).toBe(42)
     })
 
+    it('posts the member password client hash with the other auth fields', async () => {
+      useAuthOnlyCensus()
+      let body: unknown
+      server.use(
+        http.post('http://localhost/processes/:id/auth/0', async ({ request }) => {
+          body = await request.json()
+          return HttpResponse.json({ authToken: 'csp-step0-token' })
+        }),
+      )
+      const { result } = renderHook(useHooks, { wrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+
+      const password = '2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e'
+      await act(async () => {
+        await result.current.auth.auth0({ memberNumber: '5', password })
+      })
+      expect(body).toEqual({ memberNumber: '5', password })
+      expect(result.current.auth.connected).toBe(true)
+    })
+
     it('clear() resets the session AND the election voter state', async () => {
       useAuthOnlyCensus()
       const { result } = renderHook(useHooks, { wrapper })
@@ -123,6 +143,36 @@ describe('useElectionAuth', () => {
       await waitFor(() => expect(result.current.election.isInCensus).toBe(false))
       expect(result.current.election.hasVoted).toBe(false)
       expect(result.current.election.voteId).toBeNull()
+    })
+  })
+
+  describe('owner', () => {
+    // sha256('{"memberNumber":"5","name":"Ada"}') — keys sorted, whatever order auth0 got them in.
+    const ADA = 'b9b3e9e5352889d265d59f34ff9d186c892891e9bdc9a0ec3f9a1e4f229cb37e'
+    const ownerOf = (auth: unknown) => (auth as VoterSession).owner
+
+    it('is the sha256 of the sorted-key auth0 payload, stable across re-identification', async () => {
+      const { result } = renderHook(useHooks, { wrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+      expect(ownerOf(result.current.auth)).toBeNull()
+
+      await act(async () => {
+        await result.current.auth.auth0({ name: 'Ada', memberNumber: '5' })
+      })
+      expect(ownerOf(result.current.auth)).toBe(ADA)
+
+      act(() => result.current.auth.clear())
+      expect(ownerOf(result.current.auth)).toBeNull()
+
+      await act(async () => {
+        await result.current.auth.auth0({ memberNumber: '5', name: 'Ada' })
+      })
+      expect(ownerOf(result.current.auth)).toBe(ADA)
+
+      await act(async () => {
+        await result.current.auth.auth0({ memberNumber: '6', name: 'Ada' })
+      })
+      expect(ownerOf(result.current.auth)).not.toBe(ADA)
     })
   })
 

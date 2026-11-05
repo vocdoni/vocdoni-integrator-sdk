@@ -15,8 +15,9 @@ export {
   type ComputeProcessStatusOptions,
   type EndDates,
 } from './election-status'
+export { ApiErrorCode } from '@vocdoni/api-types'
 export { VocdoniApiClient } from './client'
 export { ElectionsClient, ProcessesCspClient } from './elections'
-export { VocdoniApiError } from './errors'
+export { VocdoniApiError, isApiError, isCensusGrowthQuote } from './errors'
 export { JobsClient, JobFailedError, type WaitForJobOptions } from './jobs'
 export { OrganizationsClient } from './organizations'

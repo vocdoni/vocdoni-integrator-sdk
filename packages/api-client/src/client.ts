@@ -1,4 +1,4 @@
-import type { ApiClientConfig, InfoResponse } from '@vocdoni/api-types'
+import type { ApiClientConfig, InfoResponse, PricingParams, ProcessPriceResponse } from '@vocdoni/api-types'
 import { up } from 'up-fetch'
 import type { UpFetch } from 'up-fetch'
 import { AuthClient } from './auth'
@@ -81,6 +81,14 @@ export class VocdoniApiClient {
    */
   async info(): Promise<InfoResponse> {
     return this.fetch<InfoResponse>('/info').catch(handleError)
+  }
+
+  /**
+   * Public price calculator via `GET /pricing`, no auth. Branding and customUrl are priced as
+   * requested, since there is no org context here.
+   */
+  async pricing(params: PricingParams): Promise<ProcessPriceResponse> {
+    return this.fetch<ProcessPriceResponse>('/pricing', { params }).catch(handleError)
   }
 
   /**

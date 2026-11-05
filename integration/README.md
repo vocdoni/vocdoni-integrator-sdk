@@ -45,12 +45,13 @@ publishes per-commit images, so build one from source; see
 
 To drive the stack and the suite as separate steps (e.g. to reuse the same
 stack across repeated test runs), use `scripts/integration-stack.sh up` to
-start it — it prints `INTEGRATION_API_URL` and `INTEGRATION_API_KEY` — then
-export those and run `pnpm test:integration` directly. If port `8080` (or
-`8025`) is already taken locally, set `INTEGRATION_HOST_PORT` (and/or
-`INTEGRATION_MAILHOG_PORT`) to an alternate port before calling `up`.
+start it — it prints `INTEGRATION_API_URL`, `INTEGRATION_API_KEY` and
+`INTEGRATION_ORG_ADDRESS` — then export those and run `pnpm test:integration`
+directly. If port `8080` (or `8025`) is already taken locally, set
+`INTEGRATION_HOST_PORT` (and/or `INTEGRATION_MAILHOG_PORT`) to an alternate port
+before calling `up`.
 `up` funds the integrator wallet with `INTEGRATION_WALLET_CENTS` (default
-€100,000). Each run spends €325 of it and nothing refunds it, so a reused stack
+€100,000). Each run spends €330 of it and nothing refunds it, so a reused stack
 lasts about 300 runs.
 
 ## Pinning upstream commits
@@ -64,7 +65,10 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
 
 - Each key is optional; a bare `/integration` uses the published `:main` images.
 - A ref can be a commit SHA (short or full, 7-40 hex), a branch, a tag, or
-  `#<PR number>` (its current head commit, e.g. `saas-backend=#760`).
+  `#<PR number>` (its current head commit, e.g. `saas-backend=#760`). A bare PR number
+  works too (`saas-backend=760`); a branch or tag named only with 1-6 digits can't be pinned by name.
+- A short SHA only resolves when a current branch, tag or PR head of the upstream
+  reaches it; use the full SHA for commits from deleted branches or force-pushed PR iterations.
 - Only users with write access can trigger it; comments from anyone else are
   ignored silently.
 - The run tests the PR's merge commit, as the `pull_request` check does, as it
@@ -106,6 +110,15 @@ image=$(scripts/integration-build-image.sh vocdoni-node <ref> | sed -n 's/^image
 The `up` step prints the two images it is using, so a run shows what it tested.
 
 Use `SAAS_BACKEND_IMAGE` and `saas-backend` the same way.
+
+saas-backend is private, so building it locally needs your own SSH access to
+`vocdoni/saas-backend`. If the `ghcr.io/vocdoni/saas-backend` package is private
+too, run `docker login ghcr.io` before pulling it.
+
+CI needs the `SAAS_BACKEND_DEPLOY_KEY` repo secret (a read-only deploy key on
+saas-backend) and read access to that package for this repo. Fork PR pushes
+get no secrets, so they cannot build a pinned saas-backend; a maintainer's
+`/integration` comment can.
 
 ## What it covers
 
@@ -157,19 +170,37 @@ it to what the voters actually picked. Two silent all-zero-results bugs were
 found exactly this way, which is why every supported ballot type is voted and
 asserted here rather than only the two named question types.
 
+## Pay-per-process billing (`payg.itest.ts`)
+
+Covers the saas-backend#819 billing surface through the integrator key, with no
+Stripe: the integrator wallet read (`getWallet`), draft add-ons and their echo,
+the per-draft price quote, the managed org's spend cap (set, listed, and a
+publish refused with `40183` before any debit), and the public `/pricing`
+calculator. It publishes nothing that spends money and cleans up its managed org
+at the end.
+
+The suite creates a managed org first and finds the integrator org from
+`INTEGRATION_ORG_ADDRESS`, or else from the new org's `managedBy`. If neither
+gives an address it fails. Against a backend that predates #819 the wallet route
+answers 404, and the suite skips every test with a console note instead of
+failing.
+
 ## Configuration
 
-| Env var               | Default                            | Purpose                       |
-| --------------------- | ---------------------------------- | ----------------------------- |
-| `INTEGRATION_API_URL` | `https://saas-api-dev.vocdoni.net` | Target API base URL           |
-| `INTEGRATION_API_KEY` | — (suite skips without it)         | Integrator API key (`vsk_…`)  |
+| Env var                   | Default                              | Purpose                          |
+| ------------------------- | ------------------------------------ | -------------------------------- |
+| `INTEGRATION_API_URL`     | `https://saas-api-dev.vocdoni.net`   | Target API base URL              |
+| `INTEGRATION_API_KEY`     | — (suite skips without it)           | Integrator API key (`vsk_…`)     |
+| `INTEGRATION_ORG_ADDRESS` | — (else `managedBy`)                 | The key's integrator org (`0x…`) |
 
 The key's organization must be an **integrator** with scopes `managed:write` +
 `members:write` + `voting:write`, and quota for ≥5 processes / ≥11 on-chain
-elections / ≥300 census size, and its prepaid wallet must hold ≥€325 per run: each of
-the 5 processes has a 100-voter census, above the free tier, so publishing it
-debits €65 from the integrator's wallet (an empty one answers
-`402 insufficient integrator wallet balance`). The suite creates real on-chain
-elections and casts 40 real votes, so expect it to take ~6 minutes. (The disposable stack
-above provisions all of that for you — this only applies when pointing
-`INTEGRATION_API_URL` at a shared environment.)
+elections / ≥300 census size, and its prepaid wallet must hold ≥€330 per run:
+each of the 5 processes has a 100-voter census, above the free tier, so
+publishing it debits the €66 base price (100 × €0.66) from the integrator's
+wallet. The census is auth-only, so no email 2FA is charged; an integrator with
+email 2FA pays €0.01 more per voter (€1 for 100). An empty wallet answers `402
+insufficient integrator wallet balance`. The suite creates real on-chain
+elections and casts 40 real votes, so expect it to take ~6 minutes. (The
+disposable stack above provisions all of that for you — this only applies when
+pointing `INTEGRATION_API_URL` at a shared environment.)

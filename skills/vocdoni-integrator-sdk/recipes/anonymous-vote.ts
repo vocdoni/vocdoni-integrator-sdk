@@ -67,7 +67,9 @@ if ((election.census.twoFaFields?.length ?? 0) > 0) {
 const check = await client.elections.check(PROCESS_ID, { authToken })
 if (!check.belongsToProcess) throw new Error('Voter is not in this census')
 
-const votable = check.questions.filter((q) => q.canVote && !q.hasVoted && q.upstreamId)
+// hasSigned: already authorized — a second blind signature is refused. (An
+// anonymous census never reports hasVoted; verify with elections.verifyVotes.)
+const votable = check.questions.filter((q) => q.canVote && !q.hasVoted && !q.hasSigned && q.upstreamId)
 if (votable.length === 0) throw new Error('Nothing left to vote on')
 
 // ─── 3. Blind CSP signing — ALL questions in one call ────────────────────────

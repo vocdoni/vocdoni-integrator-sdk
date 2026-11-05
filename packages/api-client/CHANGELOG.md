@@ -1,5 +1,32 @@
 # @vocdoni/api-client
 
+## 2.6.0
+
+### Minor Changes
+
+- 88f1444: Pay-per-process billing methods: `elections.getPrice`, `checkout`, `getCheckout`, `cancelCheckout` and `censusCheckout`, `organizations.getWallet`, `topUpWallet` and `updateManaged`, and `client.pricing()`. `VocdoniApiError` carries the error `data`, with `isApiError` and `isCensusGrowthQuote` to narrow it. `publishAndWait` no longer times out after 60 s by default.
+
+### Patch Changes
+
+- Updated dependencies [88f1444]
+  - @vocdoni/api-types@2.5.0
+  - @vocdoni/ballot@1.3.3
+
+## 2.5.0
+
+### Minor Changes
+
+- cd15073: Add `elections.verifyVotes(nullifiers)` (`POST /votes/verify`): checks vote nullifiers against the chain, one `{ nullifier, verified, … }` per nullifier in request order. An unreachable chain throws instead of reporting "not voted".
+
+### Patch Changes
+
+- 5dd0cf4: Census updates report per question. `QuestionJobResult` is new and `JobResult` gains `questions`, the per-question outcomes of `set_process_status` and `set_process_census` jobs in target order. On a census update, `noOp: true` means no transaction was sent because the election was no longer open on chain or already had the room, and a job fails if any attempted resize failed while the other resizes still apply. `UpdateProcessCensusResponse` and `elections.addCensusMembers` document that `jobId` is absent when no election can grow (only READY/PAUSED questions are resized), so callers must skip `jobs.waitFor` then.
+- Updated dependencies [5dd0cf4]
+- Updated dependencies [9d81ed8]
+- Updated dependencies [cd15073]
+  - @vocdoni/api-types@2.4.0
+  - @vocdoni/ballot@1.3.2
+
 ## 2.4.0
 
 ### Minor Changes

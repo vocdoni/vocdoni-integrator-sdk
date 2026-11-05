@@ -93,7 +93,8 @@ for (const status of check.questions) {
     console.log(`Not eligible for question ${status.questionId} — skipping`)
     continue
   }
-  if (status.hasVoted) {
+  // hasVoted = on chain; hasSigned = already authorized (a re-sign is refused).
+  if (status.hasVoted || status.hasSigned) {
     console.log(`Already voted on question ${status.questionId} — skipping`)
     continue
   }

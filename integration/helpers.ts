@@ -11,6 +11,8 @@ export function makeClient(authToken?: () => string | null | undefined): Vocdoni
 
 /** Integrator API key (`vsk_…`) used to drive the organizer-side admin flow. */
 export const apiKey = process.env.INTEGRATION_API_KEY
+/** Address of the key's integrator organization, set by integration-stack.sh (pay-per-process suite). */
+export const integratorOrgAddress = process.env.INTEGRATION_ORG_ADDRESS
 
 /**
  * A client authenticated with the integrator API key. The key rides the same

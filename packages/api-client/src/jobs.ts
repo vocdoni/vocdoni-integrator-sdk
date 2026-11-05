@@ -34,15 +34,19 @@ export class JobFailedError extends Error {
 
 const delay = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
-    const id = setTimeout(resolve, ms)
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(id)
-        reject(new DOMException('Aborted', 'AbortError'))
-      },
-      { once: true },
-    )
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'))
+      return
+    }
+    const onAbort = () => {
+      clearTimeout(id)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    const id = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 
 /**
@@ -52,8 +56,8 @@ const delay = (ms: number, signal?: AbortSignal) =>
 export class JobsClient {
   constructor(private readonly fetch: UpFetch) {}
 
-  async get(jobId: string): Promise<JobStatusResponse> {
-    return this.fetch<JobStatusResponse>(`/jobs/${jobId}`).catch(handleError)
+  async get(jobId: string, signal?: AbortSignal): Promise<JobStatusResponse> {
+    return this.fetch<JobStatusResponse>(`/jobs/${jobId}`, { signal }).catch(handleError)
   }
 
   /**
@@ -81,7 +85,9 @@ export class JobsClient {
     const deadline = Date.now() + timeoutMs
 
     for (;;) {
-      const job = await this.get(jobId)
+      signal?.throwIfAborted()
+      const job = await this.get(jobId, signal)
+      signal?.throwIfAborted()
       onPoll?.(job)
       if (job.status === 'completed') {
         if (expectType && job.type !== expectType) {

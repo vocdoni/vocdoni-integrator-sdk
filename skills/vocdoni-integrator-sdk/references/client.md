@@ -118,8 +118,12 @@ const question = await client.elections.getQuestion(processId, questionId)
 // Auth step 0 — identify the voter.
 // Pass all fields the census requires (see question.census.authFields)
 const res0 = await client.elections.authStep0(processId, {
-  memberNumber: '42',      // or: name, surname, birthDate, nationalId, email, phone
+  memberNumber: '42',      // or: name, surname, birthDate, nationalId, email, phone, password
 })
+// A 'password' auth field takes the member password as its CLIENT HASH, never the
+// plaintext: lowercase_hex(SHA-256("vocdoni-member-password:" + "0x" + lowercase org
+// address without any 0x + ":" + trim(password).normalize("NFC"))). See AuthRequest.password in
+// @vocdoni/api-types for the test vector. A wrong one fails like an unknown voter (40029).
 // res0.authToken — verified immediately if question.census.twoFaFields is empty (auth-only)
 //               — pending verification otherwise (proceed to step 1)
 
@@ -135,7 +139,11 @@ await client.elections.resend(processId, { authToken, email: 'voter@example.com'
 // Voter status — census membership, weight and PER-QUESTION eligibility in one
 // call. Ineligibility is belongsToProcess=false with HTTP 200, not an error.
 const { belongsToProcess, questions, weight } = await client.elections.check(processId, { authToken })
-// questions[i] — { questionId, upstreamId, canVote, hasVoted }
+// questions[i] — { questionId, upstreamId, canVote, hasVoted, hasSigned? }
+// hasVoted = the vote is on chain; hasSigned = the CSP authorized it (may not be
+// on chain). An anonymous census always reports hasVoted=false: verify its
+// nullifier with verifyVotes(). A backend that predates hasSigned omits it and
+// reports "signed" as hasVoted.
 
 // Get CSP signature over an ephemeral voter address, per question.
 // A question's signing slot is consumed on success — it cannot be signed twice.
@@ -301,6 +309,9 @@ const draftId = await client.elections.create({
 
 // Admin: publish the draft on-chain. Async — returns { jobId } to poll (or
 // { address, status } if already published). publishAndWait does the polling.
+// It waits with NO deadline by default (a publish can take ~15 min, hours with many
+// questions); pass timeoutMs or signal to bound it. Can reject with 402/409/422:
+// see "Pay-per-process billing".
 const published = await client.elections.publishAndWait(draftId)
 // published.address — on-chain address from the publish job. The per-question
 // vochain ids appear as questions[i].upstreamId on the next get(draftId).
@@ -321,11 +332,12 @@ const { participants } = await client.elections.participants(mongoId, {
   value: '42',
 })
 // participants[i] — { memberId, name?, surname?, email?, memberNumber?,
-//                     questions: [{ questionId, upstreamId?, hasVoted }] }
+//                     questions: [{ questionId, upstreamId?, hasVoted, hasSigned? }] }
 
 // Admin: append org members to a PUBLISHED process's census (append-only;
 // drafts 409 — edit those via update()). jobId tracks the async on-chain
-// maxCensusSize bump when one is needed.
+// maxCensusSize bump when one is needed; absent when no election can grow
+// (only READY/PAUSED questions are resized), so skip waitFor then.
 const { added, jobId } = await client.elections.addCensusMembers(mongoId, ['m-1', 'm-2'])
 if (jobId) await client.jobs.waitFor(jobId)
 
@@ -338,6 +350,7 @@ await client.elections.validateCensus({ orgAddress, census: { authFields: ['memb
 
 // Drafts: update(id, draft) PUTs the same shape as create and resolves void
 // (re-get() for the stored shape; 409 once published). delete(id) removes it.
+// The PUT replaces the whole draft, `addOns` included: resend them on every update.
 // signInfo(id, { authToken }) → { consumed: [{ questionId, nullifier, … }] },
 // one entry per question the voter already cast.
 
@@ -350,6 +363,14 @@ const { jobId } = await client.elections.vote({ txPayload })
 // rejection relays nothing — this closes the half-voted window of relaying a
 // multi-question process envelope by envelope. One job covers the batch.
 const { jobId } = await client.elections.voteBatch({ votes: [{ txPayload }, ...] })
+
+// Is a vote on chain? POST /votes/verify (public), at most 100 nullifiers, one
+// entry per nullifier in request order (echoed as bare lowercase hex). Unknown
+// → verified=false; an unreachable chain throws (500) instead of "not voted".
+// The nullifier of a vote you cast: voteNullifier(signer.address, upstreamId)
+// from @vocdoni/api-voting.
+const { votes } = await client.elections.verifyVotes([nullifier])
+// votes[i] — { nullifier, verified, processId?, blockHeight?, date?, txHash? }
 ```
 
 ---
@@ -367,6 +388,8 @@ const org = await client.organizations.createManaged({ name: 'Acme', type: 'comp
 // CSP voter routes. A new member without one weighs 1. A JSON number is rejected
 // with a 400. Weights only count in a census created with `weighted: true`,
 // which needs a plan that allows weighted voting.
+// Member `password` is write-only and takes the same client hash as auth step 0
+// (never the plaintext, which is a 400); reads report `hasPassword` instead.
 const members = [{ memberNumber: '1', name: 'Alice', weight: '2' }]
 const { jobId } = await client.organizations.addMembers(org.address, members, { async: true })
 if (jobId) await client.jobs.waitFor(jobId) // progress in job.result.added/total/progress
@@ -385,11 +408,10 @@ const draftId = await client.elections.create({
   questions,
 })
 
-// Integrator quota/usage (also callable with a scoped API key, scope quota:read).
-const { enabled, limits, usage } = await client.organizations.getIntegratorInfo()
-// limits — { maxManagedOrgs, maxManagedProcesses, maxVotes, maxSMS, maxEmails } (0 = unlimited;
-//           omitted entirely when enabled is false)
-// usage  — { managedOrgs, managedProcesses, sentVotes, sentSMS, sentEmails }
+// Integrator status and usage (also callable with a scoped API key, scope quota:read).
+const { enabled, usage } = await client.organizations.getIntegratorInfo()
+// usage  — { managedOrgs, sentVotes, sentSMS, sentEmails }
+// `limits` and `usage.managedProcesses` are gone; see "Pay-per-process billing".
 
 // API keys (integrator-only, /integrator/organizations/{addr}/apikeys routes):
 const key = await client.organizations.createApiKey(org.address, {
@@ -402,6 +424,92 @@ const key = await client.organizations.createApiKey(org.address, {
 `OrganizationsClient` also covers groups CRUD, meta, subscription, and
 list-reads (censuses). See `packages/api-client/src/organizations.ts`
 for the full set — the live `integration/full-flow.itest.ts` drives the whole flow end to end.
+
+---
+
+## Pay-per-process billing
+
+Each process is priced from its eligible voters and its `addOns`, and paid from a
+prepaid wallet (EUR cents, VAT excluded). Drafts are free, and so is a process of up
+to 25 voters with no add-ons. Quoting never charges. Only a verified Stripe top-up adds
+money to a wallet; publishing or buying census headroom only debits one, and a paid draft
+that is deleted, or a publish that fails for good, credits its payment back (`creditBack`). Above
+50 000 voters a process is quote-only and cannot be paid self-service.
+
+```ts
+// Quote a draft: { lines, totalCents, quoteRecommended, quoteRequired, currency, paymentStatus? }
+const price = await client.elections.getPrice(draftId)
+
+// Public calculator: no auth, no draft. Branding and customUrl are priced as requested.
+const quote = await client.pricing({ voters: 1200, emailTwoFA: true })
+```
+
+**Publish refusals** (`publish` / `publishAndWait`), all `VocdoniApiError` with `code`:
+
+| Status · code | Meaning | What to do |
+|---|---|---|
+| 402 · 40178 | Standard org's wallet is short; `data` is `PaymentRequiredData` (quote + `balanceCents`, `shortfallCents`) | `checkout(id, { returnURL })`: embedded Stripe top-up for the shortfall. The webhook credits the wallet and publishes the draft |
+| 402 · 40175 | Managed org; its integrator's wallet is short; `data` `{ requiredCents, availableCents }` | The integrator tops up its own wallet (`topUpWallet`), then publishes again |
+| 402 · 40183 | Managed org's spend cap reached; `data` `{ capCents, spentCents, requiredCents }` (may be absent) | Raise or lift it with `updateManaged` |
+| 409 · 40177 | A top-up checkout is open for the draft | Pay it, or `cancelCheckout(id)` and publish again |
+| 422 · 40176 | Census above 50 000: quote-only, no payment route | Handle out of band; the API cannot take payment |
+
+```ts
+import { ApiErrorCode, isApiError } from '@vocdoni/api-client'
+
+try {
+  await client.elections.publishAndWait(draftId)
+} catch (err) {
+  if (!isApiError(err, ApiErrorCode.PaymentRequired)) throw err
+  // Standard org, wallet short: show the embedded checkout, the webhook publishes the draft
+  const { clientSecret } = await client.elections.checkout(draftId, { returnURL })
+}
+```
+
+- `checkout(id, { returnURL, locale? })` (Admin JWT only) opens or reuses a top-up for the
+  shortfall (at least €1). It answers 400 when the process is free or the wallet already
+  covers it (publish directly), 403 · 40181 for a managed org, 422 · 40176 above 50 000
+  voters, and 409 · 40177 when the draft is already paid or its last checkout is being credited.
+- `getCheckout(id)` reports the payment (`status`: `pending` | `paid` | `failed` | `refunded`,
+  404 when none). Poll it for display only; the draft's published state is what matters.
+- `cancelCheckout(id)` expires the open session. A repeat is a 404.
+- **Census growth.** A census write that grows a paid process (`addCensusMembers`, or a
+  member or group change that grows a group-backed census) is refused when the growth is
+  not covered: a standard org, or a managed org whose integrator wallet covers `dueCents`,
+  gets 402 · 40178 with a `CensusGrowthQuote` (`isCensusGrowthQuote(err.data)`; `dueCents`
+  is the difference). A managed org whose integrator wallet is short gets 402 · 40175
+  `{ requiredCents, availableCents }`. Past 50 000 voters it is 422 · 40176, and while the
+  payment is in flight it is 409 · 40177.
+- `censusCheckout(id, { censusSize, returnURL })` buys that difference. When the wallet
+  covers it, the difference is debited at once: `amountCents` is what was debited and
+  `sessionId`/`clientSecret` come back empty. Otherwise a standard org gets a top-up for
+  `max(shortfall, €1)`; the headroom is debited when the webhook credits it, so retry the
+  census write after. A managed org gets 402 · 40175, or 402 · 40183 at its spend cap. An
+  API key may only take the debit path: its top-up branch is refused with 403 · 40157.
+- **Draft `addOns`.** `{ signedCertificate?, customUrl?, branding? }` on `create` and
+  `update`. The 2FA add-ons come from `census.twoFaFields`, not from here. Adding
+  `branding` or `customUrl` to a draft already paid without it is 409 · 40177, unless the
+  organization has already paid for that add-on.
+
+**Wallet** (`client.organizations`):
+
+```ts
+const { balanceCents, history, pagination } = await client.organizations.getWallet(orgAddress, { page, limit })
+const { clientSecret, amountCents } = await client.organizations.topUpWallet(orgAddress, {
+  amountCents: 5_000, // €1 to €100 000; Stripe adds VAT on top
+  returnURL,
+})
+```
+
+`getWallet` is for Admin/Manager, or a `quota:read` key of that same org. `topUpWallet` is
+Admin JWT only, and the balance moves only when the webhook credits it. A managed org has no
+wallet: both answer 403 · 40181 to a session. An API key of another org (e.g. the integrator's
+key on a managed org) gets 403 · 40157 first.
+
+**Spend caps** (integrator): `updateManaged(orgAddress, { spendCapCents })` sets the cap in
+EUR cents, and `null` lifts it. It takes an admin JWT or a `managed:write` key, and answers 404
+for an org this integrator does not manage. `listManaged()` items carry `spendCapCents` and
+`spentCents`. A debit past the cap is refused with 402 · 40183 before anything is charged.
 
 ---
 
@@ -425,6 +533,8 @@ const job = await client.jobs.get(jobId)
 //   { processId, nullifier, status, voteID?, error? }. The job completes only when EVERY
 //   envelope landed and fails otherwise — a failed job still carries the array.
 // job.result?.added/total/progress — import counters (org_members / census_participants jobs)
+// job.result?.questions — set_process_status/set_process_census: per-question { questionId, status?, error?, noOp? }
+//   in target order; noOp = no tx sent. A census job fails if any resize failed; the rest still apply.
 // job.errors — error detail lines (e.g. "line 3: invalid email" on imports)
 
 // Poll until terminal state
@@ -540,7 +650,7 @@ interface QuestionResults {
 // Voter status for a process (client.elections.check)
 interface ProcessCheckResponse {
   belongsToProcess: boolean
-  questions: ProcessQuestionStatus[]  // { questionId, upstreamId?, canVote, hasVoted }
+  questions: ProcessQuestionStatus[]  // { questionId, upstreamId?, canVote, hasVoted, hasSigned? }
   weight?: string                     // hex census weight
 }
 

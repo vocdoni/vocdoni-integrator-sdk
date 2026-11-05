@@ -7,6 +7,7 @@ import {
 } from '../../../mocks/handlers'
 import { ElectionsClient, ProcessesCspClient } from './elections'
 import { VocdoniApiClient } from './client'
+import { VocdoniApiError } from './errors'
 
 const BASE_URL = 'http://localhost'
 
@@ -126,6 +127,39 @@ describe('VocdoniApiClient', () => {
       })
       expect(res.jobId).toBe('batch-1')
       expect(received).toEqual([{ txPayload: 'aa' }, { txPayload: 'bb' }])
+    })
+  })
+
+  describe('elections.verifyVotes', () => {
+    it('POSTs the nullifiers to /votes/verify and returns the per-nullifier outcomes', async () => {
+      let received: unknown
+      server.use(
+        http.post(`${BASE_URL}/votes/verify`, async ({ request }) => {
+          received = await request.json()
+          return HttpResponse.json({
+            votes: [
+              { nullifier: 'aa', verified: true, processId: 'bb', blockHeight: 7, txHash: 'cc' },
+              { nullifier: 'dd', verified: false },
+            ],
+          })
+        }),
+      )
+
+      const res = await client.elections.verifyVotes(['0xaa', 'dd'])
+      expect(received).toEqual({ nullifiers: ['0xaa', 'dd'] })
+      expect(res.votes).toEqual([
+        { nullifier: 'aa', verified: true, processId: 'bb', blockHeight: 7, txHash: 'cc' },
+        { nullifier: 'dd', verified: false },
+      ])
+    })
+
+    it('throws a VocdoniApiError when the chain cannot be reached', async () => {
+      server.use(
+        http.post(`${BASE_URL}/votes/verify`, () =>
+          HttpResponse.json({ error: 'blockchain request failed', code: 50001 }, { status: 500 }),
+        ),
+      )
+      await expect(client.elections.verifyVotes(['aa'])).rejects.toBeInstanceOf(VocdoniApiError)
     })
   })
 

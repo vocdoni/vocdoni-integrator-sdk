@@ -6,6 +6,8 @@ const state = vi.hoisted(() => ({
   election: null as ReturnType<typeof makeProcess> | null,
   vote: vi.fn(),
   confirmResult: true,
+  pendingVotes: {} as Record<string, true>,
+  voteStatus: {} as Record<string, string>,
 }))
 vi.mock('@vocdoni/react-providers', () => ({
   useElection: () => ({
@@ -15,6 +17,8 @@ vi.mock('@vocdoni/react-providers', () => ({
     hasVoted: false,
     isAbleToVote: true,
     voteIds: {},
+    pendingVotes: state.pendingVotes,
+    voteStatus: state.voteStatus,
   }),
 }))
 vi.mock('../../../confirm/useConfirm', () => ({
@@ -44,6 +48,8 @@ const partialVoteError = (
 function render(questions = oneQuestion) {
   state.election = makeProcess({ questions })
   state.confirmResult = true
+  state.pendingVotes = {}
+  state.voteStatus = {}
   return renderWithComponents(<ElectionQuestions />)
 }
 
@@ -169,5 +175,44 @@ describe('a failed vote is reported to the voter', () => {
 
     await waitFor(() => expect(screen.queryByText(/could not be cast/)).toBeNull())
     expect(state.vote).not.toHaveBeenCalled()
+  })
+})
+
+describe('a question whose vote is already signed', () => {
+  it('renders "being sent again" instead of the fields of a pending question, and votes the rest', async () => {
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: twoQuestions })
+    state.confirmResult = true
+    state.voteStatus = {}
+    state.pendingVotes = { [state.election.questions[0].id]: true }
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    expect(screen.getByText('Your vote for this question is being sent again.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('A')).toBeNull()
+    submit(container, ['C'])
+    // The pending question's ballot is a placeholder: the provider re-sends its stored tx.
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], [0]]))
+  })
+
+  it.each([
+    ['unconfirmed', 'Your vote was authorized but did not reach the ledger'],
+    ['signed', 'Your vote was already authorized'],
+  ])('renders the %s notice instead of the fields', (status, text) => {
+    state.election = makeProcess({ questions: oneQuestion })
+    state.pendingVotes = {}
+    state.voteStatus = { [state.election.questions[0].id]: status }
+    renderWithComponents(<ElectionQuestions />)
+    expect(screen.getByText(new RegExp(text))).toBeInTheDocument()
+    expect(screen.queryByLabelText('A')).toBeNull()
+  })
+
+  it('says an unknown outcome could not be confirmed yet, not that it failed', async () => {
+    state.vote = vi.fn().mockRejectedValue(
+      partialVoteError([], [{ questionId: 'q', error: new Error('could not confirm the vote on chain yet') }]),
+    )
+    const { container } = render()
+    submit(container)
+    expect(await screen.findByText(/could not be confirmed yet/)).toBeInTheDocument()
+    expect(screen.queryByText(/could not confirm the vote on chain yet/)).toBeNull()
   })
 })

@@ -92,14 +92,20 @@ export interface CreateOrganizationRequest {
   timezone?: string
   subdomain?: string
   communications?: boolean
-  /** Opt-in to the free integrator plan at creation. */
+  /**
+   * Flags the org as an integrator, which can create managed organizations and
+   * pays for their processes from its wallet.
+   */
   integrator?: boolean
   meta?: Record<string, unknown>
   /** Opt-in to eagerly provision the on-chain account at creation (default false). */
   provisionAccount?: boolean
 }
 
-/** Effective managed-resource quota for an integrator. A 0 in any field means unlimited. */
+/**
+ * Effective managed-resource quota for an integrator. A 0 in any field means unlimited.
+ * @deprecated No longer returned since saas-backend#819: an integrator's spending is bounded by its wallet and per-org spend caps.
+ */
 export interface IntegratorLimits {
   maxManagedOrgs: number
   maxManagedProcesses: number
@@ -110,7 +116,8 @@ export interface IntegratorLimits {
 
 export interface IntegratorUsage {
   managedOrgs: number
-  managedProcesses: number
+  /** @deprecated No longer returned since saas-backend#819: an integrator's spending is bounded by its wallet and per-org spend caps. */
+  managedProcesses?: number
   sentVotes: number
   sentSMS: number
   sentEmails: number
@@ -119,7 +126,10 @@ export interface IntegratorUsage {
 /** Response of `GET /integrator`. */
 export interface IntegratorInfo {
   enabled: boolean
-  /** Omitted when `enabled` is false (the org is not an integrator). */
+  /**
+   * Omitted when `enabled` is false (the org is not an integrator).
+   * @deprecated No longer returned since saas-backend#819: an integrator's spending is bounded by its wallet and per-org spend caps.
+   */
   limits?: IntegratorLimits
   usage: IntegratorUsage
 }
@@ -160,11 +170,11 @@ export interface CensusInfo {
 }
 
 /**
- * Member-data fields a CSP census can authenticate on. Listed in the process
- * census ({@link CensusSpec}); an auth-only census (no 2FA) is one with only
- * `authFields` set.
+ * Member-data fields a CSP census can authenticate on ({@link CensusSpec}); an auth-only
+ * census (no 2FA) sets only `authFields`. `'password'` never identifies a member on its
+ * own, so a census needs another auth or 2FA field next to it.
  */
-export type OrgMemberAuthField = 'name' | 'surname' | 'memberNumber' | 'nationalId' | 'birthDate'
+export type OrgMemberAuthField = 'name' | 'surname' | 'memberNumber' | 'nationalId' | 'birthDate' | 'password'
 /** Contact fields used for the 2FA OTP challenge. */
 export type OrgMemberTwoFaField = 'email' | 'phone'
 
@@ -624,6 +634,8 @@ export interface VotingProcessBase {
    * `omitempty`.
    */
   endedAt?: string
+  /** Paid per-process add-ons; absent when none selected. */
+  addOns?: ProcessAddOns
 }
 
 /**
@@ -774,6 +786,12 @@ export interface CreateVotingProcessRequest {
   streamUri?: string
   startDate?: string
   endDate?: string
+  /**
+   * PUT replaces the stored add-ons: an update that omits `addOns` clears them.
+   * Turning branding/customUrl on for a draft paid without them is refused with 409 40177,
+   * unless the org already paid that add-on.
+   */
+  addOns?: ProcessAddOns
   questions: VotingProcessQuestionRequest[]
 }
 
@@ -821,6 +839,39 @@ export interface RelayVotesRequest {
   votes: RelayVoteRequest[]
 }
 
+/** Body of `POST /votes/verify` — at most 100 nullifiers (hex, with or without `0x`). */
+export interface VerifyVotesRequest {
+  nullifiers: string[]
+}
+
+/**
+ * One nullifier's outcome in {@link VerifyVotesResponse}. Everything beyond
+ * `verified` comes from the on-chain vote and is absent when it was not found.
+ */
+export interface VerifiedVote {
+  /** The nullifier that was checked, echoed back as bare lowercase hex. */
+  nullifier: string
+  /** Whether the chain has a vote with this nullifier. */
+  verified: boolean
+  /** On-chain election id the vote belongs to (hex). */
+  processId?: string
+  /** Block the vote was registered in. */
+  blockHeight?: number
+  /** When the vote was registered on chain (RFC 3339). */
+  date?: string
+  /** Hash of the transaction that carried the vote (hex). */
+  txHash?: string
+}
+
+/**
+ * Response of `POST /votes/verify` — one entry per requested nullifier, in
+ * request order. An unknown nullifier is `verified: false`; a chain that cannot
+ * be reached fails the whole call instead.
+ */
+export interface VerifyVotesResponse {
+  votes: VerifiedVote[]
+}
+
 // ─── Jobs (async transaction outcomes) ─────────────────────────────────────────
 
 export type JobStatus = 'pending' | 'completed' | 'failed'
@@ -850,6 +901,18 @@ export interface VoteJobResult {
   error?: string
 }
 
+/**
+ * One question's outcome in a `set_process_status` or `set_process_census` job,
+ * in target order. On a census update, `noOp: true` means no tx was sent because
+ * the election was no longer open on chain or already had the room.
+ */
+export interface QuestionJobResult {
+  questionId: string
+  status?: JobStatus
+  error?: string
+  noOp?: boolean
+}
+
 /** Unified job result — each field is only populated by the job types that produce it. */
 export interface JobResult {
   address?: string
@@ -870,6 +933,12 @@ export interface JobResult {
    * (also present on a failed job) for the per-vote truth.
    */
   votes?: VoteJobResult[]
+  /**
+   * Per-question outcomes of status-change and census-update jobs, in target
+   * order. A census-update job fails if any resize failed; the others still
+   * apply and the job error names each failed question.
+   */
+  questions?: QuestionJobResult[]
   /** Members/census rows imported so far — produced by member/census import jobs. */
   added?: number
   /** Total rows to import — produced by member/census import jobs. */
@@ -912,6 +981,17 @@ export interface AuthRequest {
   birthDate?: string
   email?: string
   phone?: string
+  /**
+   * Client hash of the member password (64 lowercase hex, never the plaintext), required
+   * when the census `authFields` include `'password'`; the same value {@link OrgMember.password}
+   * was set with: `lowercase_hex(SHA-256(UTF-8("vocdoni-member-password:" + "0x" +
+   * lowercase(orgAddress without any "0x") + ":" + trim(password).normalize("NFC"))))`.
+   * NFC makes accented passwords hash alike whichever Unicode form they were typed in.
+   * Test vector: org `0x00000000000000000000000000000000000000AA` and `s3cret` hash to
+   * `2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e`.
+   * A wrong password fails like an unknown participant (40029); a malformed hash is 40005.
+   */
+  password?: string
 }
 
 /** Auth step 1 — confirm the 2FA challenge. Not used by auth-only censuses. */
@@ -951,8 +1031,19 @@ export interface ProcessQuestionStatus {
   upstreamId?: string
   /** Whether the voter is eligible for this question (eligibility subset). */
   canVote: boolean
-  /** Whether the voter has already consumed this question's election. */
+  /**
+   * Whether the voter's vote for this question is on chain. A backend without
+   * {@link hasSigned} reports "the CSP signed" here instead. An anonymous census
+   * always reports `false` on a backend with `hasSigned`: verify its nullifier
+   * through `POST /votes/verify`.
+   */
   hasVoted: boolean
+  /**
+   * Whether the CSP authorized (signed) a vote for this question. It may not be
+   * on chain: compare with {@link hasVoted}. The only signal for an anonymous
+   * census. Absent on a backend that predates it.
+   */
+  hasSigned?: boolean
 }
 
 /**
@@ -1157,14 +1248,17 @@ export type ProcessParticipantLookupField = 'email' | 'phone' | 'memberNumber' |
 
 /**
  * One question's voted status for a matched participant — `hasVoted` is true
- * when the member has consumed that question's on-chain election. Questions
- * not yet published (no `upstreamId`) are omitted from the list.
+ * when the member's vote is on chain, `hasSigned` when the CSP authorized it.
+ * Questions not yet published (no `upstreamId`) are omitted from the list.
  */
 export interface ProcessParticipantQuestionVote {
   questionId: string
   /** Vochain election id of the question (64-hex). */
   upstreamId?: string
+  /** Whether the member's vote is on chain. */
   hasVoted: boolean
+  /** Whether the CSP authorized a vote for the member. Absent on older backends. */
+  hasSigned?: boolean
 }
 
 /** A matched org member that is also a participant of the process census. */
@@ -1189,9 +1283,12 @@ export interface ProcessParticipantsResponse {
 /**
  * Response of `PUT /processes/{id}/census` — the number of members added to
  * the census synchronously, plus the async job id that raises each published
- * election's `maxCensusSize` on-chain (absent when no on-chain update was
- * needed). Only published processes can have their census extended; drafts are
- * edited through `PUT /processes/{id}` instead (409 otherwise).
+ * election's `maxCensusSize` on-chain. `jobId` is absent when no election can
+ * grow: only READY/PAUSED questions are resized, so e.g. a process whose
+ * elections already ended returns 200 with no job. Callers must skip
+ * `jobs.waitFor` when `jobId` is absent. Only published processes can have their
+ * census extended; drafts are edited through `PUT /processes/{id}` instead (409
+ * otherwise).
  */
 export interface UpdateProcessCensusResponse {
   jobId?: string
@@ -1230,9 +1327,183 @@ export type CreateManagedOrganizationRequest = CreateOrganizationRequest & {
   ownerEmail?: string
 }
 
+/** A managed org as its integrator sees it. `spendCapCents` null = unlimited; `spentCents` = what its processes hold debited now. */
+export interface ManagedOrganizationInfo extends OrganizationInfo {
+  spendCapCents: number | null
+  spentCents: number
+}
+
 export interface ManagedOrganizationsResponse {
-  organizations: OrganizationInfo[]
+  organizations: ManagedOrganizationInfo[]
   pagination?: Pagination
+}
+
+/** Body of `PUT /integrator/organizations/{orgAddress}`. Required, the only key; `null` lifts the cap, negative is a 400. */
+export interface UpdateManagedOrganizationRequest {
+  spendCapCents: number | null
+}
+
+// ─── Pay-per-process billing ──────────────────────────────────────────────────
+// All amounts are EUR cents, VAT excluded.
+
+/** Paid per-process options. 2FA add-ons are not here: they derive from census twoFaFields. */
+export interface ProcessAddOns {
+  signedCertificate?: boolean
+  customUrl?: boolean
+  branding?: boolean
+}
+
+export type QuoteLineKind =
+  | 'base'
+  | 'emailTwoFA'
+  | 'smsTwoFA'
+  | 'signedCertificate'
+  | 'customUrl'
+  | 'branding'
+  | 'minimumCharge'
+
+export interface QuoteLine {
+  kind: QuoteLineKind | (string & {})
+  description: string
+  amountCents: number
+}
+
+/** `quoteRecommended`: census > 15 000. `quoteRequired`: census > 50 000, no price at all (`lines` [], `totalCents` 0 is NOT free) and nothing can be paid self-service. */
+export interface ProcessQuote {
+  lines: QuoteLine[]
+  totalCents: number
+  quoteRecommended: boolean
+  quoteRequired: boolean
+}
+
+export type ProcessPaymentStatus = 'pending' | 'failed' | 'paid' | 'refunded'
+
+/** `GET /processes/{id}/price` and `GET /pricing`. `paymentStatus` absent when no payment exists (always absent on `/pricing`). */
+export interface ProcessPriceResponse extends ProcessQuote {
+  currency: string
+  paymentStatus?: ProcessPaymentStatus
+}
+
+/** Query of the public `GET /pricing` calculator. `voters` >= 1. */
+export interface PricingParams {
+  voters: number
+  emailTwoFA?: boolean
+  smsTwoFA?: boolean
+  signedCertificate?: boolean
+  customUrl?: boolean
+  branding?: boolean
+}
+
+/** `returnURL`: Stripe appends the session id. */
+export interface ProcessCheckoutRequest {
+  returnURL: string
+  locale?: string
+}
+
+/** Embedded Stripe checkout of a wallet top-up. */
+export interface ProcessCheckoutResponse {
+  clientSecret: string
+  sessionId: string
+  amountCents: number
+  currency: string
+}
+
+export interface ProcessPaymentStatusResponse {
+  status: ProcessPaymentStatus
+  amountCents: number
+  currency: string
+  paidAt?: string
+  sessionStatus?: 'open' | 'complete' | 'expired' | (string & {})
+  sessionPaymentStatus?: 'paid' | 'unpaid' | 'no_payment_required' | (string & {})
+}
+
+export interface ProcessCensusCheckoutRequest {
+  censusSize: number
+  /** Stripe appends the session id. */
+  returnURL: string
+  locale?: string
+}
+
+export type WalletLedgerKind = 'topup' | 'payment' | 'creditBack' | 'refund'
+
+/** `amountCents` is signed as applied (negative for payment/refund). `processOrgAddress`: the managed org a payment was for. */
+export interface WalletLedgerEntry {
+  id: string
+  orgAddress: string
+  amountCents: number
+  kind: WalletLedgerKind | (string & {})
+  processId?: string
+  processOrgAddress?: string
+  createdAt: string
+}
+
+export interface WalletResponse {
+  balanceCents: number
+  currency: string
+  history: WalletLedgerEntry[]
+  pagination: Pagination
+}
+
+/** €1–€100 000 (100–10 000 000 cents); Stripe Tax adds VAT on top. */
+export interface WalletTopUpRequest {
+  amountCents: number
+  /** Stripe appends the session id. */
+  returnURL: string
+  locale?: string
+}
+
+/** Backend error codes of the pay-per-process billing flow (the `code` of an API error). */
+export const ApiErrorCode = {
+  IntegratorOrgCannotOwnProcess: 40174, // 403
+  InsufficientWalletBalance: 40175, // 402, integrator wallet short for a managed org's debit
+  QuoteRequired: 40176, // 422, census > 50 000
+  PaymentSessionConflict: 40177, // 409, checkout open/completing, draft already paid, payment being refunded, add-on after payment
+  PaymentRequired: 40178, // 402, standard org wallet short at publish, or census growth past the paid price
+  ManagedOrgHasNoWallet: 40181, // 403
+  MaxWritersReached: 40182, // 400, 5 admins/managers incl. pending invites
+  SpendCapReached: 40183, // 402
+} as const
+
+export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode]
+
+/** 40178 data at publish: the quote flattened plus the wallet balance and what it lacks. */
+export interface PaymentRequiredData extends ProcessQuote {
+  balanceCents: number
+  shortfallCents: number
+}
+
+/** 40178 data on census growth past the paid envelope; buy it with `censusCheckout(processId, { censusSize })`. */
+export interface CensusGrowthQuote {
+  processId: string
+  lines: QuoteLine[]
+  totalCents: number
+  paidCents: number
+  dueCents: number
+  censusSize: number
+  currency: string
+  balanceCents: number
+  shortfallCents: number
+}
+
+export interface InsufficientWalletBalanceData {
+  requiredCents: number
+  availableCents: number
+}
+
+export interface SpendCapReachedData {
+  capCents: number
+  spentCents: number
+  requiredCents: number
+}
+
+/**
+ * The `data` each error code carries. 40183 can arrive without data when the
+ * backend cannot re-read the wallet.
+ */
+export interface ApiErrorDataByCode {
+  40175: InsufficientWalletBalanceData
+  40178: PaymentRequiredData | CensusGrowthQuote
+  40183: SpendCapReachedData | undefined
 }
 
 // ─── Organization members (memberbase) ──────────────────────────────────────────
@@ -1252,8 +1523,13 @@ export interface OrgMember {
    * CSP voter routes. Defaults to `1`; only a weighted census uses it.
    */
   weight?: string
-  /** Write-only: hashed by the backend and never returned. */
+  /**
+   * Write-only client hash of the member password ({@link AuthRequest.password}); plaintext
+   * is a 400. Stored argon2-hashed, never returned; on update `''` clears it, omitting keeps it.
+   */
   password?: string
+  /** Read-only: whether the member has a password. Ignored on writes. */
+  hasPassword?: boolean
   other?: Record<string, unknown>
 }
 

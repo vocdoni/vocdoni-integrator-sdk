@@ -177,6 +177,10 @@ describe('integration-sticky.sh', () => {
     ).toBe(refs('', '#760'))
   })
 
+  it('a bare PR number sets the sticky state as #N', () => {
+    expect(sticky([{ body: '/integration saas-backend=795', user: { login: WRITER } }])).toBe(refs('', '#795'))
+  })
+
   it('reads the first line of a multi-line body', () => {
     expect(
       sticky([
