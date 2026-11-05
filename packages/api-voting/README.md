@@ -37,7 +37,7 @@ package picks up from there and produces the vote.
 ## Install
 
 This package builds and signs the vote, but it does **not** talk to the network — it stays
-free of any HTTP client so its (eventually large, with ZK) bundle never leaks into read-only
+free of any HTTP client so its bundle never leaks into read-only
 consumers. The actual relay is performed by [`@vocdoni/api-client`](../api-client), which you
 inject. Install both:
 

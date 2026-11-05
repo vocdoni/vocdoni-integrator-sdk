@@ -14,7 +14,6 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | `@vocdoni/api-types` | Shared TypeScript interfaces — no runtime code |
 | `@vocdoni/api-client` | HTTP client wrapping the SaaS REST API ⚠️ surface in flux |
 | `@vocdoni/api-voting` | CSP auth, vote envelope, ballot encryption, vote-tx signing |
-| `@vocdoni/api-voting-zk` | ZK/anonymous voting: SIK derivation, Groth16 proofs, circuit fetching |
 | `@vocdoni/react-providers` | Headless React context providers and hooks |
 | `@vocdoni/react-components` | Unstyled React UI components built on react-providers |
 
@@ -32,7 +31,6 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | Add voting to a React app | `references/react.md` | — |
 | Manage election lifecycle (pause/end/cancel) | `references/react.md` + `references/client.md` | — |
 | Price a process, pay for publish or census growth, manage wallets and spend caps | `references/client.md` (Pay-per-process billing) | — |
-| ZK/anonymous voting | `references/zk-voting.md` | — |
 
 ## The vote flow in one minute
 
@@ -154,7 +152,7 @@ console.log('nullifier:', job.result?.voteID)
 - **Gotcha: `publishAndWait` waits indefinitely by default.** Its `timeoutMs` defaults to `Infinity`, unlike `jobs.waitFor` (60 s); pass `timeoutMs` or `signal` to bound it.
 - **Relaying is async.** `elections.vote()` returns a `jobId`. Poll `jobs.waitFor(jobId)` to get the vote nullifier (`voteID`). The `VotingClient.vote()` method returns the jobId; the React `useElection().vote()` awaits the full job for each question.
 - **One nullifier per question, not per process.** A voter who answered N questions holds N vote ids. Read them all from `useElection().voteIds` (`Record<questionId, string>`) — the older single `voteId` is deprecated and only ever shows one. Server-side, `elections.signInfo(id, { authToken })` returns the same set as `consumed[]`.
-- **An anonymous census is unlinkable, not ZK.** `census.anonymous: true` makes the CSP blind-sign — it never sees the ephemeral address, so it cannot link voter → vote. `EnvelopeType.Anonymous` stays **false**; this is a blind signature, not a zk-SNARK (that is `@vocdoni/api-voting-zk`, a separate path). Consequence: `signInfo().consumed[]` carries **no `address` and no `nullifier`** for such a process — both fields are optional now — and `check()` reports `hasVoted: false` for everyone (only `hasSigned`). The only proof a vote is on chain is its nullifier, `voteNullifier(signer.address, upstreamId)` from `@vocdoni/api-voting`, checked with `client.elections.verifyVotes([nullifier])` (`POST /votes/verify`, public). `ElectionProvider` keeps each confirmed anonymous nullifier in the tab's `sessionStorage`, so a reload of the same tab still reads `hasVoted`; a new tab or device reads the question as `signed`.
+- **An anonymous census is unlinkable, not ZK.** `census.anonymous: true` makes the CSP blind-sign — it never sees the ephemeral address, so it cannot link voter → vote. `EnvelopeType.Anonymous` stays **false**; this is a blind signature, not a zk-SNARK. Consequence: `signInfo().consumed[]` carries **no `address` and no `nullifier`** for such a process — both fields are optional now — and `check()` reports `hasVoted: false` for everyone (only `hasSigned`). The only proof a vote is on chain is its nullifier, `voteNullifier(signer.address, upstreamId)` from `@vocdoni/api-voting`, checked with `client.elections.verifyVotes([nullifier])` (`POST /votes/verify`, public). `ElectionProvider` keeps each confirmed anonymous nullifier in the tab's `sessionStorage`, so a reload of the same tab still reads `hasVoted`; a new tab or device reads the question as `signed`.
 - **`hasVoted` means "on chain", `hasSigned` means "the CSP authorized it".** A vote can be signed and never land (a relay lost to a proxy 502). `ElectionProvider` reports a question voted only on on-chain evidence, stores every signed tx in the tab's `sessionStorage` (`vocdoni.pendingVote.<upstreamId>.<nullifier>`) before relaying it, and re-sends that same tx — never a new signature — on the next `vote()` or on connect. A backend without `hasSigned` keeps the old behaviour (`hasVoted` = signed, trusted as on chain).
 
 ## A note on api-client stability

@@ -44,8 +44,8 @@
 A modular, tree-shakeable toolkit for building voting applications on top of the
 Vocdoni SaaS API. It replaces the monolithic `@vocdoni/sdk` with a set of small,
 focused packages: a typed HTTP client, the client-side voting primitives (CSP
-auth, vote envelopes, ballot encryption), optional anonymous (ZK) voting, and a
-set of headless React providers and UI components.
+auth, vote envelopes, ballot encryption), and a set of headless React providers
+and UI components.
 
 > The SDK talks **only** to the Vocdoni SaaS API — it never reaches the
 > blockchain directly.
@@ -58,7 +58,6 @@ set of headless React providers and UI components.
 | [`@vocdoni/api-types`](./packages/api-types) | Shared TypeScript types for the SaaS API. |
 | [`@vocdoni/ballot`](./packages/ballot) | Framework-agnostic ballot semantics: type inference, choice encoding, results decoding. |
 | [`@vocdoni/api-voting`](./packages/api-voting) | Client-side voting: CSP auth, vote envelope, encrypted ballots. |
-| [`@vocdoni/api-voting-zk`](./packages/api-voting-zk) | ZK / anonymous voting. |
 | [`@vocdoni/react-providers`](./packages/react-providers) | Headless React providers and hooks. |
 | [`@vocdoni/react-components`](./packages/react-components) | React UI components for voting. |
 
