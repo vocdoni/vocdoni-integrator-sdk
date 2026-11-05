@@ -1,0 +1,41 @@
+{
+  "name": "@vocdoni/metadata-verify",
+  "version": "0.0.0",
+  "license": "GPL-3.0-or-later",
+  "description": "Framework-agnostic verification of Vocdoni election metadata against the hashes committed on the Vochain",
+  "keywords": [
+    "vocdoni",
+    "vochain",
+    "election",
+    "metadata",
+    "verification",
+    "audit"
+  ],
+  "homepage": "https://github.com/vocdoni/vocdoni-integrator-sdk",
+  "bugs": "https://github.com/vocdoni/vocdoni-integrator-sdk/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vocdoni/vocdoni-integrator-sdk.git",
+    "directory": "packages/metadata-verify"
+  },
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsdown",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo",
+    "prepack": "clean-package",
+    "postpack": "mv -fv package.json.backup package.json"
+  },
+  "devDependencies": {
+    "@noble/hashes": "^1.8.0",
+    "@vocdoni/api-types": "workspace:*",
+    "tsconfig": "workspace:*",
+    "tsdown": "^0.22.3",
+    "typescript": "^5.7.0"
+  },
+  "clean-package": "../../clean-package.config.json"
+}

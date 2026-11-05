@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig/library.json",
+  "include": ["src"],
+  "compilerOptions": {
+    "outDir": "dist",
+    "paths": {
+      "@vocdoni/api-types": ["../api-types/src/index.ts"]
+    }
+  }
+}
