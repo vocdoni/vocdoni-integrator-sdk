@@ -989,7 +989,9 @@ export interface AuthRequest {
    * NFC makes accented passwords hash alike whichever Unicode form they were typed in.
    * Test vector: org `0x00000000000000000000000000000000000000AA` and `s3cret` hash to
    * `2f7e83a0b19a82fa9a5dc6ecc6ff44ec82679ea87012a7187bd3313366bf277e`.
-   * A wrong password fails like an unknown participant (40029); a malformed hash is 40005.
+   * `hashMemberPassword` from `@vocdoni/api-client` computes it.
+   * A wrong password answers 401 with error code 40802, like login data that matches no participant;
+   * a malformed hash is 40005.
    */
   password?: string
 }
