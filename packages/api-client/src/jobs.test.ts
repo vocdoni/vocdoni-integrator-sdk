@@ -253,7 +253,7 @@ describe('jobs.waitFor backoff and transient failures', () => {
   })
 
   it('grows the poll interval up to maxIntervalMs while the job is pending', async () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.5) // no jitter
+    vi.spyOn(Math, 'random').mockReturnValue(0) // no jitter
     const at: number[] = []
     server.use(
       http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) => {
@@ -317,5 +317,48 @@ describe('jobs.waitFor backoff and transient failures', () => {
       name: 'VocdoniApiError',
       status: 503,
     })
+  })
+
+  it('gives up on a failing streak after maxFailingMs even without a deadline', async () => {
+    let polls = 0
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) => {
+        polls++
+        if (polls === 1) return HttpResponse.json({ jobId: params.jobId as string, type: 'publish', status: 'pending' })
+        return HttpResponse.json({ error: 'unavailable' }, { status: 503 })
+      }),
+    )
+
+    const started = Date.now()
+    await expect(
+      client.jobs.waitFor('job-1', { intervalMs: 5, timeoutMs: Infinity, maxFailingMs: 60 }),
+    ).rejects.toMatchObject({ name: 'VocdoniApiError', status: 503 })
+    expect(Date.now() - started).toBeLessThan(1000)
+    expect(polls).toBeGreaterThan(2)
+  })
+
+  it('fails at once on a TypeError that is not a network failure', async () => {
+    const broken = new VocdoniApiClient({ apiUrl: 'not a url' })
+
+    await expect(broken.jobs.waitFor('job-1', { intervalMs: 1, timeoutMs: Infinity })).rejects.toBeInstanceOf(
+      TypeError,
+    )
+  })
+
+  it('waits at least the Retry-After of a rejected poll', async () => {
+    const at: number[] = []
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) => {
+        at.push(Date.now())
+        if (at.length === 1) {
+          return HttpResponse.json({ error: 'busy' }, { status: 429, headers: { 'Retry-After': '0.1' } })
+        }
+        return HttpResponse.json({ jobId: params.jobId as string, type: 'relay_vote', status: 'completed' })
+      }),
+    )
+
+    await client.jobs.waitFor('job-1', { intervalMs: 1 })
+    expect(at).toHaveLength(2)
+    expect(at[1] - at[0]).toBeGreaterThanOrEqual(98)
   })
 })

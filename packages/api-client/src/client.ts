@@ -3,7 +3,7 @@ import { up } from 'up-fetch'
 import type { UpFetch } from 'up-fetch'
 import { AuthClient } from './auth'
 import { ElectionsClient } from './elections'
-import { handleError } from './errors'
+import { handleError, parseRejected } from './errors'
 import { JobsClient } from './jobs'
 import { OrganizationsClient } from './organizations'
 
@@ -59,6 +59,7 @@ export class VocdoniApiClient {
           if (!text.trim()) return undefined as never
           return JSON.parse(text)
         },
+        parseRejected,
       }
     })
 
