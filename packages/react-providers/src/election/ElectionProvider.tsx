@@ -215,7 +215,7 @@ export interface VoteOptions {
   /**
    * How long to wait for the relay job before falling back to voter-state
    * reconciliation, in milliseconds. Defaults to the api-client's job wait
-   * default (60s).
+   * default (5 min).
    */
   jobTimeoutMs?: number
 }

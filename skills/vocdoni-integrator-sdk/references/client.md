@@ -539,8 +539,10 @@ const job = await client.jobs.get(jobId)
 
 // Poll until terminal state
 const job = await client.jobs.waitFor(jobId, {
-  intervalMs: 1000,        // default 1000
-  timeoutMs: 60000,        // default 60000
+  intervalMs: 1000,        // default 1000: first wait, grows x1.5 per pending poll (up to 20% shorter, jitter)
+  maxIntervalMs: 5000,     // default 5000 (or intervalMs when larger): cap of the wait
+  timeoutMs: 300000,       // default 300000 (5 min)
+  maxFailingMs: 60000,     // default 60000: give up after polls fail this long in a row
   signal,                  // optional AbortSignal
   expectType: 'relay_vote', // optional: throw if the completed job.type differs
   onPoll: (j) => {},       // optional: observe every polled state (e.g. relay_votes
@@ -548,6 +550,9 @@ const job = await client.jobs.waitFor(jobId, {
 })
 // throws JobFailedError if job.status === 'failed'
 // throws Error on timeout, or on job.type mismatch when expectType is set
+// retries transient poll failures (network, 429, 502, 503, 504), waiting at least their
+//   Retry-After, until the deadline or maxFailingMs since the last answered poll, then
+//   rethrows the last one; any other poll error (e.g. 404, invalid URL) is thrown at once
 
 // Admin: paginated org job history (GET /jobs — orgAddress is required)
 const { jobs, pagination } = await client.jobs.list({
