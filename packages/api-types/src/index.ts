@@ -193,6 +193,8 @@ export interface OrganizationCensus {
   groupID?: string
   authFields?: OrgMemberAuthField[]
   twoFaFields?: OrgMemberTwoFaField[]
+  /** Certificate census: voters prove their `nationalId` with a personal certificate (see {@link CensusSpec.certAuth}). */
+  certAuth?: boolean
 }
 
 // ─── Election ─────────────────────────────────────────────────────────────────
