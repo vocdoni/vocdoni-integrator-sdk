@@ -106,8 +106,10 @@ export const ElectionAuthContext = createContext<ElectionAuthContextValue | unde
  */
 export interface VoterSession extends ElectionAuthContextValue {
   /**
-   * sha256 hex of the canonical (sorted-key JSON) auth0 participant payload,
-   * so the same person re-identifying in this tab gets the same value. Null
+   * The step-0 `voterRef` when the backend returns one (certificate censuses,
+   * whose payload changes on every login), else sha256 hex of the canonical
+   * (sorted-key JSON) auth0 participant payload, so the same person
+   * re-identifying in this tab gets the same value. Null
    * before auth0, after `clear()`, or where Web Crypto is unavailable
    * (insecure context) — the pending-vote store is then not used.
    */
@@ -163,7 +165,7 @@ export function useVoterSession(
       // sees the new owner paired with the old voter's token. The session stays
       // disconnected until auth1 (or, auth-only, the token set below).
       setAuthToken(null)
-      setOwner(await ownerHash(participant))
+      setOwner(res.voterRef ?? (await ownerHash(participant)))
       if (isAuthOnly) {
         // No challenge step: the step-0 token is already verified.
         setAuthToken(res.authToken)

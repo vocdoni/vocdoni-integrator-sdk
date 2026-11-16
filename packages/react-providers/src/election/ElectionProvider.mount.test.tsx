@@ -127,6 +127,39 @@ describe('ElectionProvider — pending votes on connect', () => {
     expect(listPendingVotes(UPSTREAM)).toEqual([])
   })
 
+  it('certificate census: a reload and a new certificate login re-send the entry saved under the voterRef', async () => {
+    const VOTER_REF = 'ab'.repeat(32)
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          census: { authFields: ['nationalId'], twoFaFields: [], certAuth: true },
+          questions: [{ ...mockProcess.questions[0], status: 'ONGOING' }],
+        }),
+      ),
+      // every certificate login sends a fresh code and verifier; the backend answers the same voterRef
+      http.post('http://localhost/processes/:processId/auth/0', () =>
+        HttpResponse.json({ authToken: 'cert-token', voterRef: VOTER_REF }),
+      ),
+    )
+    // saved before the reload, by the first certificate login of this voter
+    savePendingVote(UPSTREAM, { owner: VOTER_REF, nullifier: NULLIFIER, txPayload: STORED_TX, savedAt: 1 })
+    const { batches, signCalls } = mockRelay()
+    mockCheck(() => batches.length > 0)
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election).not.toBeNull())
+    await act(async () => {
+      await result.current.auth0({ certCode: 'c'.repeat(43), codeVerifier: 'v'.repeat(43) })
+    })
+
+    await waitFor(() => expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed' }))
+    expect(batches).toEqual([[STORED_TX]])
+    expect(signCalls.count).toBe(0)
+    expect(listPendingVotes(UPSTREAM)).toEqual([])
+  })
+
   it('AC6: does not re-send while the process is not ONGOING', async () => {
     useProcess({ status: 'PAUSED' })
     savePendingVote(UPSTREAM, { owner: OWNER, nullifier: NULLIFIER, txPayload: STORED_TX, savedAt: 1 })

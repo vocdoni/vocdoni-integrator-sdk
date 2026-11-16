@@ -205,7 +205,9 @@ A question counts as voted only on on-chain evidence: the relay job said
 `hasSigned` alone never confirms anything. Every signed tx is written to
 `sessionStorage` under `vocdoni.pendingVote.<upstreamId>.<nullifier>` before it
 is relayed, as `{ owner, nullifier, txPayload?, savedAt, confirmedAt? }`, where
-`owner` is the sha256 of the voter's canonical `auth0()` payload. So:
+`owner` is the sha256 of the voter's canonical `auth0()` payload, or the step-0
+`voterRef` when the backend returns one (certificate censuses, `census.certAuth`,
+where the payload is a fresh `{ certCode, codeVerifier }` on every login). So:
 
 - a relay that fails or never answers leaves the question `failed` and in
   `pendingVotes`; the next `vote()` — or the next connect in the same tab —

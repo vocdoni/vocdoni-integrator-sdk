@@ -123,6 +123,10 @@ const res0 = await client.elections.authStep0(processId, {
 // A 'password' auth field takes the member password as its CLIENT HASH, never the
 // plaintext: use hashMemberPassword(orgAddress, rawPassword) from @vocdoni/api-client.
 // A wrong one fails like an unknown voter (401, error code 40802).
+// A census with `certAuth: true` takes no typed field: step 0 is
+// authStep0(processId, { certCode, codeVerifier /*, email | phone when the census has 2FA */ }),
+// with the single-use code the certificate gateway returned to the voting page and its PKCE verifier.
+// The answer also carries `voterRef`, a stable reference of that voter on the process.
 // res0.authToken — verified immediately if question.census.twoFaFields is empty (auth-only)
 //               — pending verification otherwise (proceed to step 1)
 
