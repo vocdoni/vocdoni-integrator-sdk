@@ -403,16 +403,23 @@ one step, so closing the code dialog and reopening it from another button resume
 step. Without it each `<CspAuth />` keeps its own step. A session from an outer `ElectionProvider`
 is reused only when it belongs to the same `ElectionProvider` instance and process; a nested provider
 gets its own flow. A request in flight outlives the dialog that sent it: the trigger gets `loading`
-(rendered as `aria-busy`) until it settles, and only requests on the same process mark it busy.
+(rendered as `aria-busy`) until it settles, and only requests of the same session on the same process mark it busy.
 A failure that settles after the dialog closed is kept in the session and shown when it reopens.
 A process change, logout or start over drops a request that is still in flight, so its outcome
 never moves the flow.
 
 The code step maps the backend codes to these messages: a resend that hits the per-token cap
 (40017 without a `retryAfter`) says to start over (`csp.errors.resend_limit`); a rejected code
-(40001) says it is not valid or has expired (`csp.errors.code_rejected`); missing identify data
+(40001) says it is not valid or has expired (`csp.errors.code_rejected`), and a resend rejected
+with 40001 says the code has expired (`csp.errors.resend_expired`); missing identify data
 (40005) asks to fill in every field (`csp.errors.missing_data`). If the app clears the voter while
 the flow is on step 1 (`clear()`, `clearVoter()`), the flow goes back to identify.
+Auth requests are never retried, whatever the app's `QueryClient` mutation defaults, so a failed
+identify or code costs one attempt.
+
+**Certificate censuses are not handled by `<CspAuth />`.** A census with `certAuth` logs in with a
+certificate (`certCode` and `codeVerifier`), not with the census fields. For it `<CspAuth />` renders
+nothing until the app connects the voter by other means; once connected it shows the Logout button.
 
 **The password is never sent in plaintext.** It is hashed with
 `hashMemberPassword(orgAddress, password)` from `@vocdoni/api-client` before the identify request.
@@ -424,8 +431,8 @@ The flow is customizable through five slots, all in `ComponentsProvider`:
 | Slot | Props |
 |---|---|
 | `CspAuthTrigger` | `label`, `onClick`, `loading?` (aria-busy), plus HTML button attributes. Default: `<button>` |
-| `CspAuthLogout` | `label`, `onClick` (calls `clear()`). Default: `<button>` |
-| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Always rendered, with `isOpen` false while closed. Default: overlay and `role="dialog"`; focus moves into the dialog on open and back on close; Escape and a click that starts and ends on the overlay close it. The default has no positioning or visual styles |
+| `CspAuthLogout` | `label`, `onClick` (calls `clear()`), `disabled?` (true while a vote is being sent). Default: `<button>` |
+| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Always rendered, with `isOpen` false while closed and once connected. Default: overlay and `role="dialog"`; focus moves into the dialog on open and back on close; Escape and a click that starts and ends on the overlay close it. The default has no positioning or visual styles |
 | `CspAuthIdentifyForm` (step 0) | `fields: CspAuthField[]`, `terms?`, `termsField?: { error?, inputProps }` (set with `requireTerms`), `error?`, `loading`, `submitLabel`, `info?`, `onSubmit(event)` |
 | `CspAuthCodeForm` (step 1) | `title`, `helper`, `code`, `length`, `onCodeChange(code)`, `error?`, `notice?`, `loading`, `submitLabel`, `onSubmit(event)`, `resendLabel`, `onResend`, `resending`, `startOverLabel`, `onStartOver`, `actionsDisabled`, `footer?` |
 
