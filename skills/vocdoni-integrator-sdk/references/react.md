@@ -149,6 +149,7 @@ const {
   // voter auth session (also available standalone via useElectionAuth())
   authToken,     // string | null — verified CSP token; null until authenticated
   connected,     // boolean — true once the voter holds a verified authToken
+  challengePending, // boolean — true after a 2FA auth0() until auth1() confirms it (or clear() drops it)
   weight,        // number | null — census weight (decoded from hex)
   auth0,         // (participant: AuthRequest) => Promise<void>
   auth1,         // (solution: string | string[]) => Promise<void> — confirm 2FA OTP
@@ -239,7 +240,7 @@ election.questions
 
 **Auth-only census** (no 2FA): `election?.census?.twoFaFields` is empty/absent. `auth0()` sets `connected = true` immediately; skip `auth1`.
 
-**2FA census**: `auth0()` sends the challenge; call `auth1(otp)` to confirm. `connected` becomes `true` after `auth1`.
+**2FA census**: `auth0()` sends the challenge; call `auth1(otp)` to confirm. `connected` becomes `true` after `auth1`. While the challenge awaits, `challengePending` is `true`; `clear()` drops it, so a code step must go back to identify.
 
 A successful `auth0()` replaces the current session: an already connected voter is disconnected (`authToken` null, vote state reset) until the new identity's `auth1()` completes (auth-only census: at once), so the previous voter's token is never used for the new identity.
 
@@ -255,7 +256,7 @@ await auth1('123456')
 // connected === true
 ```
 
-`useElectionAuth()` returns just the session slice (`authToken`, `connected`, `weight`, `auth0`, `auth1`, `resend`, `check`, `sign`, `signBatch`, `clear`) from its own context — auth-only widgets (identify forms, OTP inputs, logout buttons) using it don't re-render when election data or results update. Its `clear()` is equivalent to `clearVoter()`: clearing the session also resets the vote state.
+`useElectionAuth()` returns just the session slice (`authToken`, `connected`, `challengePending`, `weight`, `auth0`, `auth1`, `resend`, `check`, `sign`, `signBatch`, `clear`) from its own context — auth-only widgets (identify forms, OTP inputs, logout buttons) using it don't re-render when election data or results update. Its `clear()` is equivalent to `clearVoter()`: clearing the session also resets the vote state.
 
 `vote(encodedBallots, memos?)` takes one pre-encoded `number[]` per question (plus optional per-question memo strings — free-text notes like an open "Other" answer, max 256 UTF-8 bytes each, validated pre-flight; ⚠️ memos ride the envelope in cleartext even for secret questions), casts a separate Vochain vote for each, and returns the first nullifier cast by the call. In `react-components`, registering reserved `memo.{index}` fields (`memo.0`, `memo.1`, …) in the questions form collects memos automatically.
 
@@ -382,9 +383,11 @@ Key election components (all from `@vocdoni/react-components`):
 
 **CSP voter identify — `<CspAuth />` and `<CspAuthSession />`.** `<CspAuth />` asks for
 the census `authFields` (the password always last). When `twoFaFields` is set, one contact
-input follows, routed to `email` if it contains `@` and both channels are allowed, otherwise
-to `phone`; step 1 then asks for the 6-digit one-time code, which submits itself once all six
-digits are in and offers resend and start over. An auth-only census is connected after step 0.
+input follows. Its type is `email` for an email-only census and `tel` for phone-only; with both
+channels it is `text`, and the value is routed to `email` if it contains `@`, otherwise to `phone`.
+Whitespace-only values are rejected as required. Step 1 then asks for the 6-digit one-time code,
+which submits itself once all six digits are in (a code typed while a resend is in flight goes out
+when the resend settles) and offers resend and start over. An auth-only census is connected after step 0.
 Props: `terms?: ReactNode` (content above the submit button), `requireTerms?: boolean` (makes
 `terms` the label of a required checkbox, so submit is blocked until it is checked), `className?`.
 
@@ -398,8 +401,18 @@ Props: `terms?: ReactNode` (content above the submit button), `requireTerms?: bo
 Wrap a page's identify buttons in one `<CspAuthSession>`: every `<CspAuth />` under it shares
 one step, so closing the code dialog and reopening it from another button resumes the same
 step. Without it each `<CspAuth />` keeps its own step. A session from an outer `ElectionProvider`
-is reused only when it is for the same process. A request in flight outlives the dialog that sent
-it: the trigger gets `loading` (rendered as `aria-busy`) until it settles.
+is reused only when it belongs to the same `ElectionProvider` instance and process; a nested provider
+gets its own flow. A request in flight outlives the dialog that sent it: the trigger gets `loading`
+(rendered as `aria-busy`) until it settles, and only requests on the same process mark it busy.
+A failure that settles after the dialog closed is kept in the session and shown when it reopens.
+A process change, logout or start over drops a request that is still in flight, so its outcome
+never moves the flow.
+
+The code step maps the backend codes to these messages: a resend that hits the per-token cap
+(40017 without a `retryAfter`) says to start over (`csp.errors.resend_limit`); a rejected code
+(40001) says it is not valid or has expired (`csp.errors.code_rejected`); missing identify data
+(40005) asks to fill in every field (`csp.errors.missing_data`). If the app clears the voter while
+the flow is on step 1 (`clear()`, `clearVoter()`), the flow goes back to identify.
 
 **The password is never sent in plaintext.** It is hashed with
 `hashMemberPassword(orgAddress, password)` from `@vocdoni/api-client` before the identify request.
@@ -412,14 +425,15 @@ The flow is customizable through five slots, all in `ComponentsProvider`:
 |---|---|
 | `CspAuthTrigger` | `label`, `onClick`, `loading?` (aria-busy), plus HTML button attributes. Default: `<button>` |
 | `CspAuthLogout` | `label`, `onClick` (calls `clear()`). Default: `<button>` |
-| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Always rendered, with `isOpen` false while closed. Default: overlay and `role="dialog"`; focus moves into the dialog on open and back on close; Escape and an overlay click close it. The default has no positioning or visual styles |
+| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Always rendered, with `isOpen` false while closed. Default: overlay and `role="dialog"`; focus moves into the dialog on open and back on close; Escape and a click that starts and ends on the overlay close it. The default has no positioning or visual styles |
 | `CspAuthIdentifyForm` (step 0) | `fields: CspAuthField[]`, `terms?`, `termsField?: { error?, inputProps }` (set with `requireTerms`), `error?`, `loading`, `submitLabel`, `info?`, `onSubmit(event)` |
 | `CspAuthCodeForm` (step 1) | `title`, `helper`, `code`, `length`, `onCodeChange(code)`, `error?`, `notice?`, `loading`, `submitLabel`, `onSubmit(event)`, `resendLabel`, `onResend`, `resending`, `startOverLabel`, `onStartOver`, `actionsDisabled`, `footer?` |
 
 `CspAuthField` is `{ name, label, type, required, helper?, error?, inputProps }`; spread
 `inputProps` (react-hook-form's `register` result) on the input. Whatever a custom slot passes to
 `onCodeChange`, the component keeps only its digits, up to the code length. Labels and messages live under the
-`csp.*` keys of the `react-components` i18n namespace.
+`csp.*` keys of the `react-components` i18n namespace. The code input has no `maxLength`: a pasted
+"123 456" is filtered to its digits, not cut.
 
 **A question with no inferable ballot type degrades instead of crashing.** Legacy
 elections projected by `GET /processes` can carry questions with an empty `type`, no
