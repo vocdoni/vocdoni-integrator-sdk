@@ -25,6 +25,8 @@ export type VotedVote = {
   voteId: string
   /** Ready-to-render line for this vote, with the id link-ified. */
   description: ReactNode
+  /** Explorer verify link of this vote, absent when the network is unknown. */
+  url?: string
 }
 
 export type VotedSlotProps = BaseProps<HTMLDivElement> & {

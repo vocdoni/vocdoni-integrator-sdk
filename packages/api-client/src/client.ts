@@ -5,6 +5,7 @@ import { AuthClient } from './auth'
 import { ElectionsClient } from './elections'
 import { handleError, parseRejected } from './errors'
 import { JobsClient } from './jobs'
+import { networkFromChainId, type VocdoniNetwork } from './networks'
 import { OrganizationsClient } from './organizations'
 
 /** Resolve a static value or sync/async getter on each request. */
@@ -82,6 +83,15 @@ export class VocdoniApiClient {
    */
   async info(): Promise<InfoResponse> {
     return this.fetch<InfoResponse>('/info').catch(handleError)
+  }
+
+  /**
+   * The network of the service's current chain (see {@link info}), so apps need not
+   * configure it apart from the API URL. A process may sit on an older chain after a
+   * migration: for links about one process, use `networkFromChainId(process.chainId)`.
+   */
+  async network(): Promise<VocdoniNetwork | undefined> {
+    return networkFromChainId((await this.info()).chainId)
   }
 
   /**

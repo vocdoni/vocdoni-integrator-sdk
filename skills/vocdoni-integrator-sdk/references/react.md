@@ -132,11 +132,17 @@ import { ElectionProvider, useElection } from '@vocdoni/react-providers'
   resultsQueryOptions={{ refetchInterval: 10_000 }} // live tallies
 >...</ElectionProvider>
 
+// Block-explorer base URL for the vote-id links (trailing slashes are stripped; empty falls
+// back). Defaults to the explorer of the process's own chainId, so pass it only to override that.
+<ElectionProvider id="<processMongoId>" explorerUrl="https://explorer.example">...</ElectionProvider>
+
 const {
   // data
   election,      // VotingProcessResponse | null — full process with questions[]
   status,        // QuestionStatus | null — derived from all question statuses
   chainId,       // string | null — Vochain chain id votes are signed against
+  explorerUrl,   // string | null — explorer base: the explorerUrl prop, else the explorer of
+                 //   chainId; null when neither resolves (an unknown chain)
   results,       // VotingProcessResultsResponse | null — per-question results
   loading,       // boolean
   error,         // Error | null
@@ -370,7 +376,7 @@ Key election components (all from `@vocdoni/react-components`):
 | `<VoteButton />` | Submit button; auto-disabled when `!isAbleToVote`, when `status !== 'ONGOING'`, or while a vote is in flight. Passes the slot a `tooltip` naming why it is disabled ("Voting opens on Sep 29, 2026, 9:00 AM", "Voting not open yet" without a start date, "Voting is paused", "Voting has ended", "Voting was canceled", "You have already voted", "Identify first to vote", "You are not eligible to vote in this process", and — when a question is `unconfirmed` or `signed` — `vote.disabled.unconfirmed` / `vote.disabled.signed`) — the default slot renders it as the button's `title`, which is a minimal reference only — a disabled button takes no keyboard focus and touch devices never reveal `title`, so a production slot should render the reason as visible helper text tied to the button with `aria-describedby`. A consumer-passed `disabled` carries no tooltip. Strings live under `vote.disabled.*` in the `react-components` i18n namespace; `vote.disabled.upcoming_date_format` is the date-fns pattern of the dated one. |
 | `<VoteWeight />` | Voter's census weight |
 | `<ElectionResults />` | Results histogram; respects `secretUntilTheEnd`; renders the abstain row only when it is meaningful |
-| `<Voted />` | The voter's vote ids — one line per voted question |
+| `<Voted />` | The voter's vote ids — one line per voted question, each linked to the explorer |
 | `<ElectionEnvelope />` | Vote envelope / nullifier display |
 
 **A question with no inferable ballot type degrades instead of crashing.** Legacy
@@ -415,9 +421,11 @@ the encode-error branch already used. `useElection().vote()` still throws, so a 
 that drives the cast itself keeps full control of the error.
 
 **`<Voted />`** renders one entry per question the voter cast, in process order,
-each pairing the question's title with its vote id (rendered as a link). Its
+each pairing the question's title with its vote id. The id links to
+`${explorerUrl}/verify/{voteId}`; without an `explorerUrl` (unknown chain) it is plain text. Its
 `Voted` slot gets both a `votes: VotedVote[]` array
-(`{ questionId, questionTitle, voteId, description }`) to lay out yourself and a
+(`{ questionId, questionTitle, voteId, description, url? }`, where `url` is that vote's verify link,
+absent when the network is unknown) to lay out yourself and a
 joined `description` node, so overrides written against the old single-string
 `description` keep showing every id. With a single voted question it renders the
 plain `vote.voted_description` sentence, exactly as before; with more, it uses

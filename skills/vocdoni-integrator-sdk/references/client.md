@@ -83,6 +83,42 @@ A getter (`lang: () => i18n.language`) covers the same ground without any
 imperative call, so reach for `setLang()` only when the locale does not live
 somewhere the client can read on demand.
 
+### Network helpers and ids
+
+Pure helpers, no request. `VocdoniNetwork` is `'dev' | 'stg' | 'prod'`, and
+`VOCDONI_NETWORKS` maps each to its `gateway` and `explorer` URLs:
+
+```ts
+import {
+  isVocdoniNetwork, networkFromChainId, resolveNetwork, explorerVoteUrl, explorerElectionUrl, explorerOrganizationUrl,
+} from '@vocdoni/api-client'
+
+networkFromChainId('vocdoni/LTS/1.3') // 'prod' (LTS → prod, STAGE/STG → stg, DEV → dev)
+networkFromChainId('vocdoni/TEST/1')  // undefined: unknown chains never fall back to dev
+resolveNetwork('stg')                 // 'stg': a network name wins over a chain id
+isVocdoniNetwork(env.NETWORK)         // type guard for 'dev' | 'stg' | 'prod' (case-sensitive)
+
+// Link builders take a network name or a chain id; undefined when it does not resolve or the id is empty
+explorerVoteUrl(process.chainId, voteId)        // {explorer}/verify/{voteId}
+explorerElectionUrl(process.chainId, upstreamId) // {explorer}/process/{upstreamId}
+explorerOrganizationUrl('prod', address)        // {explorer}/organization/{address}
+```
+
+`explorerUrl(networkOrChainId)` returns the bare explorer base URL. `client.network()`
+resolves the network of the service's current chain (from `info()`), not of one
+process: for links about a process, use `networkFromChainId(process.chainId)`.
+
+Id predicates and address normalization:
+
+- `isProcessId(v)`: a Mongo ObjectID, 24 hex chars, no `0x`.
+- `isVochainElectionId(v)`: a question's `upstreamId`, 64 hex chars, optional `0x`.
+- `isOrganizationAddress(v)`: 40 hex chars, optional `0x`.
+- `normalizeOrganizationAddress(v)`: `0x` + lowercase hex. Idempotent; use it to compare addresses.
+
+Ids interpolated into request paths are percent-encoded, so an id cannot add path
+segments, a query or a fragment. An empty, `.` or `..` id throws a `TypeError` before any
+request is sent.
+
 ---
 
 ## Voter CSP surface (`client.elections`)
@@ -122,7 +158,7 @@ const res0 = await client.elections.authStep0(processId, {
 })
 // A 'password' auth field takes the member password as its CLIENT HASH, never the
 // plaintext: use hashMemberPassword(orgAddress, rawPassword) from @vocdoni/api-client.
-// A wrong one fails like an unknown voter (401, error code 40802).
+// A wrong one fails like an unknown voter (401, error code 40802; see typed errors below).
 // A census with `certAuth: true` takes no typed field: step 0 is
 // authStep0(processId, { certCode, codeVerifier /*, email | phone when the census has 2FA */ }),
 // with the single-use code the certificate gateway returned to the voting page and its PKCE verifier.
@@ -175,6 +211,28 @@ const { weight } = await client.elections.weight(processId, { authToken })
 const { consumed } = await client.elections.signInfo(processId, { authToken })
 // ⚠️ `address` and `nullifier` are OPTIONAL — an anonymous census reports
 //    neither, because the CSP blind-signs and never learns the address.
+```
+
+**Typed voter errors.** A CSP route rejects with a `VocdoniApiError` carrying a stable
+`code`. Narrow it with `isApiError`; `data` is typed per code:
+
+```ts
+import { ApiErrorCode, isApiError } from '@vocdoni/api-client'
+
+try {
+  await client.elections.authStep0(processId, { memberNumber })
+} catch (err) {
+  if (isApiError(err, ApiErrorCode.CspAuthFailed) || isApiError(err, ApiErrorCode.CensusParticipantNotFound)) {
+    // 40802 (401): wrong credentials or unknown voter. Older backends answer 40029 for the unknown one.
+  } else if (isApiError(err, ApiErrorCode.VerificationMaxAttempts)) {
+    // 40017 (400): too many attempts. err.data?.retryAfter is in seconds.
+  } else if (isApiError(err, ApiErrorCode.AttemptCooldown)) {
+    // 40103 (401): wait before retrying. err.data.coolDownTime is in milliseconds.
+  } else if (isApiError(err, ApiErrorCode.ZeroWeightVoter)) {
+    // 40801 (401): the voter's census weight is zero.
+  }
+  throw err
+}
 ```
 
 ### Anonymous census: blind signing
@@ -236,9 +294,8 @@ publish, status, census) require the API key / JWT.
 // Fetch a process by Mongo id — per-question vochain data lives on questions[]
 const election = await client.elections.get(mongoId)
 // election.id              — Mongo id (admin endpoints)
-// election.orgAddress      — owner org address, UNPREFIXED lowercase hex.
-//                            Other endpoints (auth/addresses, organizations/{address})
-//                            return the same value 0x-prefixed — normalize before comparing.
+// election.orgAddress      — owner org address, 0x-prefixed lowercase hex (the client
+//                            normalizes the wire value on read; compare with normalizeOrganizationAddress).
 // election.title           — MultiLangString ({ default, [lang]: string })
 // election.census          — CensusSpec ({ weighted, authFields, twoFaFields, size?,
 //                            totalWeight?, anonymous?, ... })
@@ -350,6 +407,8 @@ const { valid, errors } = await client.elections.validate(mongoId)
 // Admin: validate a census spec before wiring it to a process
 // (POST /processes/census/validation; resolves an OK string, 400s with detail).
 await client.elections.validateCensus({ orgAddress, census: { authFields: ['memberNumber'] } })
+// A 400 with 40037 (ApiErrorCode.InvalidData) carries CensusValidationErrorData in err.data:
+// memberIds (members that pass), duplicates, missingData, notFound, each string[] | null.
 
 // Drafts: update(id, draft) PUTs the same shape as create and resolves void
 // (re-get() for the stored shape; 409 once published). delete(id) removes it.
@@ -605,8 +664,8 @@ type VotingProcessResponse = DraftVotingProcessResponse | PublishedVotingProcess
 
 interface VotingProcessBase {
   id: string                          // Mongo ObjectID (admin endpoints, getResults) — never 0x-hex
-  orgAddress: string                  // owner org address, UNPREFIXED lowercase hex (other
-                                      // endpoints return it 0x-prefixed — normalize to compare)
+  orgAddress: string                  // owner org address, 0x-prefixed lowercase hex (normalized by
+                                      // the client on read; compare with normalizeOrganizationAddress)
   title: MultiLangString              // { default, [lang]: string }
   description?: MultiLangString
   census: CensusSpec                  // { weighted?, authFields?, twoFaFields?, ... }

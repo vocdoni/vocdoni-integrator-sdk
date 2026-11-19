@@ -96,3 +96,13 @@ export function questionSelectionRange(question: {
   const min = Math.min(max, Math.max(floor, question.typeSetup?.minChoices ?? 1))
   return { min, max }
 }
+
+/**
+ * Whether the multichoice abstain row is shown: a zero is a real measurement only where the
+ * question reserves headroom, and a non-zero count is always shown so the percentages add up.
+ */
+export function isAbstainVisible(question: Parameters<typeof questionReservesAbstain>[0], abstainVotes: number): boolean {
+  // Without an inferable type there is no headroom to reserve, so only votes can show the row.
+  if (tryInferQuestionBallotType(question) === undefined) return abstainVotes > 0
+  return questionReservesAbstain(question) || abstainVotes > 0
+}

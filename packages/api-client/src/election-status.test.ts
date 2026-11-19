@@ -52,6 +52,26 @@ describe('normalizeVotingProcess', () => {
     const normalized = normalizeVotingProcess({ ...base, questions: [q(READY), q('ENDED')] })
     expect(normalized.questions.map((x) => x.status)).toEqual(['ONGOING', 'ENDED'])
   })
+
+  it('prefixes orgAddress with 0x and lowercases it', () => {
+    const normalized = normalizeVotingProcess({
+      ...base,
+      orgAddress: '1A9FFE1F4C2493578CE4A7DBEBD7D95433EEE6F0',
+      questions: [],
+    })
+    expect(normalized.orgAddress).toBe('0x1a9ffe1f4c2493578ce4a7dbebd7d95433eee6f0')
+  })
+
+  it('normalizes a 0X-prefixed orgAddress', () => {
+    const normalized = normalizeVotingProcess({ ...base, orgAddress: '0XABCDEF', questions: [] })
+    expect(normalized.orgAddress).toBe('0xabcdef')
+  })
+
+  it('is idempotent on orgAddress', () => {
+    const once = normalizeVotingProcess({ ...base, orgAddress: 'ABCDEF', questions: [] })
+    const twice = normalizeVotingProcess(once)
+    expect(twice.orgAddress).toBe('0xabcdef')
+  })
 })
 
 describe('isLive', () => {

@@ -51,6 +51,7 @@ import { normalizeQuestionChoiceMeta } from './choice-meta'
 import { normalizeQuestionStatus, normalizeVotingProcess } from './election-status'
 import { handleError } from './errors'
 import { JobsClient, type WaitForJobOptions } from './jobs'
+import { path } from './path'
 
 /** True when a publish response is the async enqueued form (vs. already published). */
 function isEnqueued(res: PublishProcessResponse | EnqueuedResponse): res is EnqueuedResponse {
@@ -187,7 +188,7 @@ export class ElectionsClient {
    * and only they get the open-value voter memos in `questions[].results.memos`.
    */
   async get(id: string): Promise<VotingProcessResponse> {
-    return this.fetch<VotingProcessResponse>(`/processes/${id}`)
+    return this.fetch<VotingProcessResponse>(path`/processes/${id}`)
       .then(normalizeVotingProcess)
       .catch(handleError)
   }
@@ -197,7 +198,7 @@ export class ElectionsClient {
    * plus ids. Managers (or a `voting:write` key) also get the open-value voter `memos`.
    */
   async getResults(id: string): Promise<VotingProcessResultsResponse> {
-    return this.fetch<VotingProcessResultsResponse>(`/processes/${id}/results`).catch(handleError)
+    return this.fetch<VotingProcessResultsResponse>(path`/processes/${id}/results`).catch(handleError)
   }
 
   /**
@@ -236,12 +237,12 @@ export class ElectionsClient {
    */
   async update(draftId: string, data: CreateVotingProcessRequest): Promise<void> {
     const body = normalizeVotingProcessRequest(data)
-    await this.fetch(`/processes/${draftId}`, { method: 'PUT', body }).catch(handleError)
+    await this.fetch(path`/processes/${draftId}`, { method: 'PUT', body }).catch(handleError)
   }
 
   /** Delete a process via `DELETE /processes/{id}`. */
   async delete(id: string): Promise<void> {
-    await this.fetch(`/processes/${id}`, { method: 'DELETE' }).catch(handleError)
+    await this.fetch(path`/processes/${id}`, { method: 'DELETE' }).catch(handleError)
   }
 
   /**
@@ -250,7 +251,7 @@ export class ElectionsClient {
    * `POST /processes/{id}/check`, the public CSP voter-eligibility route.)
    */
   async validate(id: string): Promise<VotingProcessValidateResponse> {
-    return this.fetch<VotingProcessValidateResponse>(`/processes/${id}/validation`).catch(handleError)
+    return this.fetch<VotingProcessValidateResponse>(path`/processes/${id}/validation`).catch(handleError)
   }
 
   /**
@@ -264,7 +265,7 @@ export class ElectionsClient {
     id: string,
     params: { field: ProcessParticipantLookupField; value: string },
   ): Promise<ProcessParticipantsResponse> {
-    return this.fetch<ProcessParticipantsResponse>(`/processes/${id}/participants`, { params }).catch(handleError)
+    return this.fetch<ProcessParticipantsResponse>(path`/processes/${id}/participants`, { params }).catch(handleError)
   }
 
   /**
@@ -278,7 +279,7 @@ export class ElectionsClient {
    * {@link update} instead).
    */
   async addCensusMembers(id: string, memberIds: string[]): Promise<UpdateProcessCensusResponse> {
-    return this.fetch<UpdateProcessCensusResponse>(`/processes/${id}/census`, {
+    return this.fetch<UpdateProcessCensusResponse>(path`/processes/${id}/census`, {
       method: 'PUT',
       body: { memberIds },
     }).catch(handleError)
@@ -290,8 +291,8 @@ export class ElectionsClient {
    * credentials over the target members (a group, an explicit `memberIds`
    * subset, or the whole organization when neither is set), without creating
    * anything. Requires Manager/Admin role of the organization. Fails with 400
-   * and the offending duplicate/missing-data member ids when the census is
-   * not usable.
+   * · 40037 whose `data` is a `CensusValidationErrorData` (narrow with
+   * `isApiError(err, ApiErrorCode.InvalidData)`) when the census is not usable.
    */
   async validateCensus(req: ValidateProcessCensusRequest): Promise<ValidateProcessCensusResponse> {
     return this.fetch<ValidateProcessCensusResponse>('/processes/census/validation', {
@@ -306,7 +307,7 @@ export class ElectionsClient {
    * Prefer {@link publishAndWait} unless you want to manage polling yourself.
    */
   async publish(draftId: string): Promise<PublishProcessResponse | EnqueuedResponse> {
-    return this.fetch<PublishProcessResponse | EnqueuedResponse>(`/processes/${draftId}/publish`, {
+    return this.fetch<PublishProcessResponse | EnqueuedResponse>(path`/processes/${draftId}/publish`, {
       method: 'POST',
     }).catch(handleError)
   }
@@ -331,7 +332,7 @@ export class ElectionsClient {
 
   /** Server-side quote of a draft via `GET /processes/{id}/price`. Quoting never charges or claims anything. */
   async getPrice(id: string): Promise<ProcessPriceResponse> {
-    return this.fetch<ProcessPriceResponse>(`/processes/${id}/price`).catch(handleError)
+    return this.fetch<ProcessPriceResponse>(path`/processes/${id}/price`).catch(handleError)
   }
 
   /**
@@ -340,7 +341,7 @@ export class ElectionsClient {
    * already covers it (publish directly); 403 40181 for managed orgs. JWT only.
    */
   async checkout(id: string, body: ProcessCheckoutRequest): Promise<ProcessCheckoutResponse> {
-    return this.fetch<ProcessCheckoutResponse>(`/processes/${id}/checkout`, {
+    return this.fetch<ProcessCheckoutResponse>(path`/processes/${id}/checkout`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -351,7 +352,7 @@ export class ElectionsClient {
    * when the process is missing: both answer ErrProcessNotFound (code 40038), so check the process first.
    */
   async getCheckout(id: string): Promise<ProcessPaymentStatusResponse> {
-    return this.fetch<ProcessPaymentStatusResponse>(`/processes/${id}/checkout`).catch(handleError)
+    return this.fetch<ProcessPaymentStatusResponse>(path`/processes/${id}/checkout`).catch(handleError)
   }
 
   /**
@@ -359,7 +360,7 @@ export class ElectionsClient {
    * ErrProcessNotFound (code 40038) like a missing process.
    */
   async cancelCheckout(id: string): Promise<void> {
-    await this.fetch(`/processes/${id}/checkout`, { method: 'DELETE' }).catch(handleError)
+    await this.fetch(path`/processes/${id}/checkout`, { method: 'DELETE' }).catch(handleError)
   }
 
   /**
@@ -368,7 +369,7 @@ export class ElectionsClient {
    * The only payment route an API key may call, and only when no checkout would open.
    */
   async censusCheckout(id: string, body: ProcessCensusCheckoutRequest): Promise<ProcessCheckoutResponse> {
-    return this.fetch<ProcessCheckoutResponse>(`/processes/${id}/census/checkout`, {
+    return this.fetch<ProcessCheckoutResponse>(path`/processes/${id}/census/checkout`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -379,7 +380,7 @@ export class ElectionsClient {
    * `PUT /processes/{processId}/questions/{questionId}/status`.
    */
   async setQuestionStatus(processId: string, questionId: string, status: string): Promise<EnqueuedResponse> {
-    return this.fetch<EnqueuedResponse>(`/processes/${processId}/questions/${questionId}/status`, {
+    return this.fetch<EnqueuedResponse>(path`/processes/${processId}/questions/${questionId}/status`, {
       method: 'PUT',
       body: { status },
     }).catch(handleError)
@@ -390,7 +391,7 @@ export class ElectionsClient {
    * `PUT /processes/{processId}/questions/status`.
    */
   async bulkSetQuestionStatus(processId: string, req: SetQuestionsStatusRequest): Promise<EnqueuedResponse> {
-    return this.fetch<EnqueuedResponse>(`/processes/${processId}/questions/status`, {
+    return this.fetch<EnqueuedResponse>(path`/processes/${processId}/questions/status`, {
       method: 'PUT',
       body: req,
     }).catch(handleError)
@@ -404,7 +405,7 @@ export class ElectionsClient {
    * Managers (or a `voting:write` key) also get the open-value voter `results.memos`.
    */
   async getQuestion(processId: string, questionId: string): Promise<PublicQuestionResponse> {
-    return this.fetch<PublicQuestionResponse>(`/processes/${processId}/questions/${questionId}`)
+    return this.fetch<PublicQuestionResponse>(path`/processes/${processId}/questions/${questionId}`)
       .then((q) => normalizeQuestionChoiceMeta({ ...q, status: normalizeQuestionStatus(q.status) }))
       .catch(handleError)
   }
@@ -418,7 +419,7 @@ export class ElectionsClient {
    * and the token must be confirmed via {@link authStep1}.
    */
   async authStep0(processId: string, body: AuthRequest): Promise<AuthResponse> {
-    return this.fetch<AuthResponse>(`/processes/${processId}/auth/0`, {
+    return this.fetch<AuthResponse>(path`/processes/${processId}/auth/0`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -426,7 +427,7 @@ export class ElectionsClient {
 
   /** Auth step 1 — confirm the 2FA challenge (OTP) for the step-0 token. */
   async authStep1(processId: string, body: AuthChallengeRequest): Promise<AuthResponse> {
-    return this.fetch<AuthResponse>(`/processes/${processId}/auth/1`, {
+    return this.fetch<AuthResponse>(path`/processes/${processId}/auth/1`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -434,7 +435,7 @@ export class ElectionsClient {
 
   /** Resend the challenge for an existing, non-verified auth token. */
   async resend(processId: string, body: AuthResendRequest): Promise<AuthResponse> {
-    return this.fetch<AuthResponse>(`/processes/${processId}/auth/resend`, {
+    return this.fetch<AuthResponse>(path`/processes/${processId}/auth/resend`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -446,7 +447,7 @@ export class ElectionsClient {
    * `belongsToProcess: false` with HTTP 200, not an error.
    */
   async check(processId: string, body: CheckMembershipRequest): Promise<ProcessCheckResponse> {
-    return this.fetch<ProcessCheckResponse>(`/processes/${processId}/check`, {
+    return this.fetch<ProcessCheckResponse>(path`/processes/${processId}/check`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -458,7 +459,7 @@ export class ElectionsClient {
    * `upstreamId`; each question can only be signed once.
    */
   async sign(processId: string, body: SignRequest): Promise<AuthResponse> {
-    return this.fetch<AuthResponse>(`/processes/${processId}/sign`, {
+    return this.fetch<AuthResponse>(path`/processes/${processId}/sign`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -479,7 +480,7 @@ export class ElectionsClient {
    * {@link blindSign}, and this endpoint rejects them.
    */
   async signBatch(processId: string, body: SignBatchRequest): Promise<SignBatchResponse> {
-    return this.fetch<SignBatchResponse>(`/processes/${processId}/sign-batch`, {
+    return this.fetch<SignBatchResponse>(path`/processes/${processId}/sign-batch`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -497,7 +498,7 @@ export class ElectionsClient {
    * rounds and the blinding for you.
    */
   async blindPoint(processId: string, body: BlindPointRequest): Promise<BlindPointResponse> {
-    return this.fetch<BlindPointResponse>(`/processes/${processId}/blind-point`, {
+    return this.fetch<BlindPointResponse>(path`/processes/${processId}/blind-point`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -510,7 +511,7 @@ export class ElectionsClient {
    * signature.
    */
   async blindSign(processId: string, body: BlindSignRequest): Promise<BlindSignResponse> {
-    return this.fetch<BlindSignResponse>(`/processes/${processId}/blind-sign`, {
+    return this.fetch<BlindSignResponse>(path`/processes/${processId}/blind-sign`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -518,7 +519,7 @@ export class ElectionsClient {
 
   /** Get the voter's census weight for the process. */
   async weight(processId: string, body: UserWeightRequest): Promise<UserWeightResponse> {
-    return this.fetch<UserWeightResponse>(`/processes/${processId}/weight`, {
+    return this.fetch<UserWeightResponse>(path`/processes/${processId}/weight`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -529,7 +530,7 @@ export class ElectionsClient {
    * (others omitted). Needs the voter's verified CSP `authToken`.
    */
   async signInfo(processId: string, body: ConsumedAddressRequest): Promise<ProcessSignInfoResponse> {
-    return this.fetch<ProcessSignInfoResponse>(`/processes/${processId}/sign-info`, {
+    return this.fetch<ProcessSignInfoResponse>(path`/processes/${processId}/sign-info`, {
       method: 'POST',
       body,
     }).catch(handleError)

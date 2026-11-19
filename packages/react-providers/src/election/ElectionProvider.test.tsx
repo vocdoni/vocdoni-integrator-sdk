@@ -31,6 +31,35 @@ function wrapper({ children }: { children: React.ReactNode }) {
 
 const useVoter = () => ({ election: useElection() })
 
+function explorerWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <TestProvider>
+      <ElectionProvider id={mockProcess.id} explorerUrl='https://custom.example/'>
+        {children}
+      </ElectionProvider>
+    </TestProvider>
+  )
+}
+
+function emptyExplorerWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <TestProvider>
+      <ElectionProvider id={mockProcess.id} explorerUrl=''>
+        {children}
+      </ElectionProvider>
+    </TestProvider>
+  )
+}
+
+/** Serves the process read with the given chain id. */
+function serveChainId(chainId: string) {
+  server.use(
+    http.get(`http://localhost/processes/:id`, ({ params }) =>
+      HttpResponse.json({ ...mockProcess, id: params.id as string, chainId }),
+    ),
+  )
+}
+
 // Same wrapper, but with a test-fast reconciliation window and job wait for
 // the unknown-relay-outcome paths.
 function reconcilingWrapper({ children }: { children: React.ReactNode }) {
@@ -153,6 +182,40 @@ describe('ElectionProvider', () => {
   it('exposes the chainId once the process read loads', async () => {
     const { result } = renderHook(useVoter, { wrapper })
     await waitFor(() => expect(result.current.election.chainId).toBe('test'))
+  })
+
+  it('derives explorerUrl from the process chain id', async () => {
+    serveChainId('vocdoni/LTS/1.3')
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.chainId).toBe('vocdoni/LTS/1.3'))
+    expect(result.current.election.explorerUrl).toBe('https://explorer.vote')
+  })
+
+  it('derives explorerUrl for a dev chain', async () => {
+    serveChainId('vocdoni/DEV/36')
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.chainId).toBe('vocdoni/DEV/36'))
+    expect(result.current.election.explorerUrl).toBe('https://dev.explorer.vote')
+  })
+
+  it('leaves explorerUrl null for a chain that does not resolve to a network', async () => {
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election.chainId).toBe('test'))
+    expect(result.current.election.explorerUrl).toBeNull()
+  })
+
+  it('falls back to the chain network when the explorerUrl prop is empty', async () => {
+    serveChainId('vocdoni/LTS/1.3')
+    const { result } = renderHook(useVoter, { wrapper: emptyExplorerWrapper })
+    await waitFor(() => expect(result.current.election.chainId).toBe('vocdoni/LTS/1.3'))
+    expect(result.current.election.explorerUrl).toBe('https://explorer.vote')
+  })
+
+  it('prefers the explorerUrl prop over the chain network, trimming trailing slashes', async () => {
+    serveChainId('vocdoni/LTS/1.3')
+    const { result } = renderHook(useVoter, { wrapper: explorerWrapper })
+    await waitFor(() => expect(result.current.election.chainId).toBe('vocdoni/LTS/1.3'))
+    expect(result.current.election.explorerUrl).toBe('https://custom.example')
   })
 
   it('connects through the process auth flow and resolves membership + weight', async () => {

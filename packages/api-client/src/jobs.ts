@@ -1,6 +1,7 @@
 import type { JobsResponse, JobStatusResponse } from '@vocdoni/api-types'
 import type { UpFetch } from 'up-fetch'
 import { handleError, VocdoniApiError } from './errors'
+import { path } from './path'
 
 /**
  * Default `waitFor` deadline. A tx job stays pending while it waits for a relay worker and then
@@ -110,7 +111,7 @@ export class JobsClient {
   constructor(private readonly fetch: UpFetch) {}
 
   async get(jobId: string, signal?: AbortSignal): Promise<JobStatusResponse> {
-    return this.fetch<JobStatusResponse>(`/jobs/${jobId}`, { signal }).catch(handleError)
+    return this.fetch<JobStatusResponse>(path`/jobs/${jobId}`, { signal }).catch(handleError)
   }
 
   /**

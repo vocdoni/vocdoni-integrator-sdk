@@ -387,9 +387,9 @@ export interface SetElectionStatusRequest {
 
 export interface ElectionListParams {
   /**
-   * Owner organization address filter. The returned list items echo it as
-   * UNPREFIXED lowercase hex regardless of the form passed here — see
-   * {@link VotingProcessBase.orgAddress}.
+   * Owner organization address filter. The wire echoes it UNPREFIXED lowercase
+   * hex; `@vocdoni/api-client` list items come back `0x`-prefixed (see
+   * {@link VotingProcessBase.orgAddress}).
    */
   orgAddress: string
   status?: string
@@ -588,8 +588,8 @@ export interface EligibilitySpec {
 /**
  * Body of `POST /processes/census/validation` — a pre-flight check of a
  * {@link CensusSpec} against an organization's members, without creating
- * anything. On 400, the error body carries the offending duplicate/missing-data
- * member ids.
+ * anything. On 400 (40037) the error `data` is a {@link CensusValidationErrorData};
+ * narrow it with `isApiError(err, ApiErrorCode.InvalidData)`.
  */
 export interface ValidateProcessCensusRequest {
   orgAddress: string
@@ -615,11 +615,9 @@ export interface VotingProcessBase {
   /** Process id, a Mongo ObjectID (24-hex chars) — never a `0x…` hex id. */
   id: string
   /**
-   * Owner organization address as UNPREFIXED lowercase hex (e.g.
-   * `"1a9ffe1f4c2493578ce4a7dbebd7d95433eee6f0"`). Beware: other endpoints
-   * (`GET /auth/addresses`, `GET /organizations/{address}`) return the same
-   * logical value `0x`-prefixed, so never compare the raw strings across
-   * endpoints — strip/normalize the `0x` prefix first.
+   * Owner organization address as UNPREFIXED lowercase hex on the wire. The
+   * `@vocdoni/api-client` reads return it `0x`-prefixed (see
+   * `normalizeOrganizationAddress`), like the other endpoints: compare through it.
    */
   orgAddress: string
   title: MultiLangString
@@ -784,10 +782,9 @@ export interface VotingProcessQuestionRequest {
 /** Body of `POST /processes` and `PUT /processes/{id}` — flat process draft with per-question ballot protocols. */
 export interface CreateVotingProcessRequest {
   /**
-   * Owner organization address. The request side tolerates the `0x`-prefixed
-   * form (verified live), but note the asymmetry: process reads
-   * ({@link VotingProcessResponse}) always return it back as UNPREFIXED
-   * lowercase hex, so don't expect to read back what you sent.
+   * Owner organization address; the request tolerates the `0x` form (verified live).
+   * The wire reads back UNPREFIXED, and `@vocdoni/api-client` reads return `0x`-prefixed
+   * lowercase (see {@link VotingProcessBase.orgAddress}).
    */
   orgAddress: string
   census?: CensusSpec
@@ -1481,7 +1478,10 @@ export interface WalletTopUpRequest {
   locale?: string
 }
 
-/** Backend error codes of the pay-per-process billing flow (the `code` of an API error). */
+/**
+ * Backend error codes (the `code` of an API error): the pay-per-process billing
+ * flow and the CSP voter and census-validation routes.
+ */
 export const ApiErrorCode = {
   IntegratorOrgCannotOwnProcess: 40174, // 403
   InsufficientWalletBalance: 40175, // 402, integrator wallet short for a managed org's debit
@@ -1491,6 +1491,12 @@ export const ApiErrorCode = {
   ManagedOrgHasNoWallet: 40181, // 403
   MaxWritersReached: 40182, // 400, 5 admins/managers incl. pending invites
   SpendCapReached: 40183, // 402
+  InvalidData: 40037, // 400, census validation carries CensusValidationErrorData
+  CensusParticipantNotFound: 40029, // 404, older backends' answer for an unknown CSP participant
+  CspAuthFailed: 40802, // 401, unknown participant or wrong credentials (same answer by design)
+  VerificationMaxAttempts: 40017, // 400, rate limited, carries RateLimitedData
+  AttemptCooldown: 40103, // 401, cooldown between attempts, carries AttemptCooldownData
+  ZeroWeightVoter: 40801, // 401, the voter's census weight is zero
 } as const
 
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode]
@@ -1525,11 +1531,39 @@ export interface SpendCapReachedData {
   requiredCents: number
 }
 
+/** 40017 data: seconds until the rate-limit window resets (at least 1). Absent on some answers. */
+export interface RateLimitedData {
+  retryAfter: number
+}
+
+/** 40103 data: cooldown between attempts, in milliseconds. */
+export interface AttemptCooldownData {
+  coolDownTime: number
+}
+
 /**
- * The `data` each error code carries. 40183 can arrive without data when the
- * backend cannot re-read the wallet.
+ * 40037 data on `POST /processes/census/validation`. `null` stands for an empty
+ * list. Other 40037 errors carry no data.
+ */
+export interface CensusValidationErrorData {
+  /** Members that pass the check. */
+  memberIds: string[] | null
+  /** Members whose chosen fields collide with another member's. */
+  duplicates: string[] | null
+  /** Members lacking a chosen field. */
+  missingData: string[] | null
+  /** Requested member ids matching no organization member (explicit `memberIds` only). */
+  notFound: string[] | null
+}
+
+/**
+ * The `data` each error code carries. Codes typed `| undefined` can arrive
+ * without data (e.g. 40183 when the backend cannot re-read the wallet).
  */
 export interface ApiErrorDataByCode {
+  40017: RateLimitedData | undefined
+  40037: CensusValidationErrorData | undefined
+  40103: AttemptCooldownData
   40175: InsufficientWalletBalanceData
   40178: PaymentRequiredData | CensusGrowthQuote
   40183: SpendCapReachedData | undefined

@@ -6,18 +6,19 @@ import type { VotedVote } from '../../context/types'
 import { useComponents } from '../../context/useComponents'
 
 /**
- * Splits `text` around every occurrence of `id` and renders the id as a link,
- * so the vote id stays clickable wherever a translation places it.
+ * Splits `text` around every occurrence of `id` and renders the id as a link to
+ * `url`, so the vote id stays clickable wherever a translation places it. Without
+ * a `url` (unknown network) the text is returned as is.
  */
-const linkifyVoteId = (text: string, id: string): ReactNode => {
+const linkifyVoteId = (text: string, id: string, url: string | undefined): ReactNode => {
   const parts = text.split(id)
-  if (parts.length < 2) return text
+  if (parts.length < 2 || !url) return text
 
   return parts.reduce<ReactNode[]>((acc, part, index) => {
     acc.push(part)
     if (index < parts.length - 1) {
       acc.push(
-        <a key={`link-${index}`} href={id} target='_blank' rel='noreferrer'>
+        <a key={`link-${index}`} href={url} target='_blank' rel='noreferrer'>
           {id}
         </a>
       )
@@ -27,7 +28,7 @@ const linkifyVoteId = (text: string, id: string): ReactNode => {
 }
 
 export const Voted = () => {
-  const { election, voteIds, voteId } = useElection()
+  const { election, voteIds, voteId, explorerUrl } = useElection()
   const { Voted: Slot } = useComponents()
   const t = useReactComponentsLocalize()
 
@@ -60,6 +61,9 @@ export const Voted = () => {
 
   if (entries.length === 0) return null
 
+  // Mirrors api-client's `explorerVoteUrl`, which takes a network rather than a base URL.
+  const verifyUrl = (id: string) => (explorerUrl && id ? `${explorerUrl}/verify/${encodeURIComponent(id)}` : undefined)
+
   const votes: VotedVote[] = entries.map((entry) => {
     // One vote id needs no title to disambiguate it, and an untitled question
     // has none to show — both read better as the plain singular sentence.
@@ -72,7 +76,8 @@ export const Voted = () => {
             defaultValue: `Your vote id for "${entry.questionTitle}" is ${entry.voteId}.`,
           })
 
-    return { ...entry, description: linkifyVoteId(text, entry.voteId) }
+    const url = verifyUrl(entry.voteId)
+    return { ...entry, url, description: linkifyVoteId(text, entry.voteId, url) }
   })
 
   // Every line joined, so overrides written against the old single-string

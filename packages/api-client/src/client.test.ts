@@ -51,6 +51,12 @@ describe('VocdoniApiClient', () => {
       expect(process.questions).toHaveLength(mockProcess.questions.length)
     })
 
+    it('returns orgAddress 0x-prefixed though the wire sends it unprefixed', async () => {
+      expect(mockProcess.orgAddress).not.toMatch(/^0x/)
+      const process = await client.elections.get('abc123')
+      expect(process.orgAddress).toBe(`0x${mockProcess.orgAddress}`)
+    })
+
     it('normalizes the wire READY question status to ONGOING', async () => {
       server.use(
         http.get(`${BASE_URL}/processes/:id`, ({ params }) =>
@@ -67,6 +73,17 @@ describe('VocdoniApiClient', () => {
   })
 
   describe('elections.list', () => {
+    it('returns each item orgAddress 0x-prefixed though the wire sends it unprefixed', async () => {
+      server.use(
+        http.get(`${BASE_URL}/processes`, () =>
+          HttpResponse.json({ processes: [mockProcess], pagination: { total: 1 } }),
+        ),
+      )
+
+      const res = await client.elections.list({ orgAddress: '0xabc' })
+      expect(res.processes[0].orgAddress).toBe(`0x${mockProcess.orgAddress}`)
+    })
+
     it('serializes the published drafts filter — false must survive as published=false', async () => {
       const queries: Array<URLSearchParams> = []
       server.use(
@@ -467,6 +484,35 @@ describe('VocdoniApiClient', () => {
     })
   })
 
+  describe('path parameter encoding', () => {
+    it('encodes an id that tries to escape its segment', async () => {
+      const urls: string[] = []
+      server.use(
+        http.get(`${BASE_URL}/processes/:id`, ({ request }) => {
+          urls.push(request.url)
+          return HttpResponse.json(mockProcess)
+        }),
+      )
+
+      await client.elections.get('../x')
+      expect(urls).toEqual([`${BASE_URL}/processes/..%2Fx`])
+    })
+
+    it('rejects a "." or ".." id without sending a request', async () => {
+      let requests = 0
+      server.use(
+        http.all('*', () => {
+          requests++
+          return HttpResponse.json(mockProcess)
+        }),
+      )
+
+      await expect(client.elections.get('..')).rejects.toThrow(TypeError)
+      await expect(client.elections.getResults('.')).rejects.toThrow(TypeError)
+      expect(requests).toBe(0)
+    })
+  })
+
   describe('info', () => {
     it('reads GET /info without an API key', async () => {
       let auth: string | null = 'unset'
@@ -482,6 +528,28 @@ describe('VocdoniApiClient', () => {
       expect(info.version).toBe('1.2.3')
       expect(info.goVersion).toBe('go1.22')
       expect(auth).toBeNull()
+    })
+  })
+
+  describe('network', () => {
+    it('derives the network from the service chain id', async () => {
+      server.use(
+        http.get(`${BASE_URL}/info`, () =>
+          HttpResponse.json({ chainId: 'vocdoni/LTS/1.3', version: '1.2.3', goVersion: 'go1.22' }),
+        ),
+      )
+
+      expect(await client.network()).toBe('prod')
+    })
+
+    it('returns undefined for a chain it does not know', async () => {
+      server.use(
+        http.get(`${BASE_URL}/info`, () =>
+          HttpResponse.json({ chainId: 'vocdoni/TEST/1', version: '1.2.3', goVersion: 'go1.22' }),
+        ),
+      )
+
+      expect(await client.network()).toBeUndefined()
     })
   })
 })

@@ -19,6 +19,24 @@ export { ApiErrorCode } from '@vocdoni/api-types'
 export { VocdoniApiClient } from './client'
 export { ElectionsClient, ProcessesCspClient } from './elections'
 export { VocdoniApiError, isApiError, isCensusGrowthQuote } from './errors'
+export {
+  isOrganizationAddress,
+  isProcessId,
+  isVochainElectionId,
+  normalizeOrganizationAddress,
+} from './ids'
 export { JobsClient, JobFailedError, type WaitForJobOptions } from './jobs'
 export { hashMemberPassword } from './member-password'
+export {
+  VOCDONI_NETWORKS,
+  explorerElectionUrl,
+  explorerOrganizationUrl,
+  explorerUrl,
+  explorerVoteUrl,
+  isVocdoniNetwork,
+  networkFromChainId,
+  resolveNetwork,
+  type VocdoniNetwork,
+  type VocdoniNetworkUrls,
+} from './networks'
 export { OrganizationsClient } from './organizations'

@@ -25,7 +25,13 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { JobFailedError, normalizeVotingProcess, VocdoniApiError, type VocdoniApiClient } from '@vocdoni/api-client'
+import {
+  explorerUrl as explorerBaseUrl,
+  JobFailedError,
+  normalizeVotingProcess,
+  VocdoniApiError,
+  type VocdoniApiClient,
+} from '@vocdoni/api-client'
 import { useClient } from '../client/ClientProvider'
 import {
   clearPendingVotes,
@@ -90,6 +96,11 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
   status: QuestionStatus | null
   /** Vochain chain id the process's votes are signed against. */
   chainId: string | null
+  /**
+   * Block-explorer base URL (no trailing slash), from the `explorerUrl` prop or
+   * the network of {@link chainId}. `null` when neither resolves.
+   */
+  explorerUrl: string | null
   /** Per-question results from `GET /processes/{id}/results`. */
   results: VotingProcessResultsResponse | null
   loading: boolean
@@ -243,6 +254,8 @@ export interface ElectionProviderBaseProps {
   resultsQueryOptions?: ElectionResultsQueryOptions
   /** Vote relay tuning — see {@link VoteOptions}. */
   voteOptions?: VoteOptions
+  /** Block-explorer base URL, overriding the network default. An empty value falls back to the default. */
+  explorerUrl?: string
 }
 
 /** At least one of `id` or `election` must be provided. */
@@ -440,6 +453,7 @@ export function ElectionProvider({
   queryOptions,
   resultsQueryOptions,
   voteOptions,
+  explorerUrl: explorerOverride,
 }: ElectionProviderProps) {
   const { client } = useClient()
 
@@ -488,6 +502,11 @@ export function ElectionProvider({
   const session = useVoterSession(electionId, election)
 
   const chainId = election?.chainId ?? null
+
+  const explorer = useMemo(() => {
+    const override = explorerOverride?.replace(/\/+$/, '')
+    return (override || explorerBaseUrl(chainId)) ?? null
+  }, [explorerOverride, chainId])
 
   const status = useProcessStatus(election)
 
@@ -1055,6 +1074,7 @@ export function ElectionProvider({
       election,
       status,
       chainId,
+      explorerUrl: explorer,
       results,
       loading,
       error: error ?? null,
@@ -1079,7 +1099,7 @@ export function ElectionProvider({
       isAbleToVote,
       clearVoter,
     }),
-    [election, status, chainId, results, loading, error, session, isInCensus, voterQuestions, hasVoted, pendingVotes, vote, voting, voteStatus, voteIds, voteId, isAbleToVote, clearVoter],
+    [election, status, chainId, explorer, results, loading, error, session, isInCensus, voterQuestions, hasVoted, pendingVotes, vote, voting, voteStatus, voteIds, voteId, isAbleToVote, clearVoter],
   )
 
   return (

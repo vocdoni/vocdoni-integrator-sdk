@@ -317,6 +317,9 @@ votes is never hidden. The dense layout emits no bucket at all, so both layouts 
 
 > ℹ️ This layout is wire-identical to a full-slate ranked ballot — see the ranked section.
 
+`isAbstainVisible(question, abstainVotes)` is the rule `<ElectionResults />` uses to show the
+abstain row: shown when the protocol reserves headroom for it, or when it holds votes.
+
 ### Ranked / rated (unique values)
 
 `ballotProtocol.maxCount = numOptions`, `ballotProtocol.maxValue = numOptions - 1`,
@@ -458,6 +461,13 @@ Prefer `encodeQuestionBallot(question, selections)` from `@vocdoni/ballot`
 over hand-building this array — it infers the ballot type from
 `question.ballotProtocol` and handles multichoice abstain-padding for you
 (see the recipes).
+
+### Voting power per question
+
+`castVotingPower(question, results)` from `@vocdoni/ballot` works for single-choice, approval, multichoice and ranked. It takes the
+**raw** `results` matrix (`question.results.results`), not the decoded tally: decoding drops the
+`notSelected` column of a dense question. It returns `null` when the power is not recoverable: no
+tally, a type that cannot be inferred, or budget/quadratic (`value × weight` shares one cell).
 
 ---
 

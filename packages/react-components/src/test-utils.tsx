@@ -148,7 +148,7 @@ export function makeProcess(opts: MakeProcessOptions = {}): VotingProcessRespons
     ...(q.endedAt ? { endedAt: q.endedAt } : {}),
   }))
 
-  // Process reads return orgAddress as unprefixed lowercase hex.
+  // Raw wire value: process reads send orgAddress as unprefixed lowercase hex.
   const common = {
     id: rest.id ?? 'proc-1',
     orgAddress: '0000000000000000000000000000000000000001',
