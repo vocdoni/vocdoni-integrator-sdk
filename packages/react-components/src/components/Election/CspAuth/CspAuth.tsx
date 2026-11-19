@@ -23,7 +23,8 @@ export type CspAuthProps = {
 
 /**
  * The voter's CSP identify flow: an Identify button opening a modal, or a Logout button once connected.
- * Renders nothing until the election loads.
+ * Renders nothing until the election loads. Certificate censuses (`census.certAuth`) are not handled here:
+ * the app connects those voters by other means, and only the Logout button shows then.
  */
 export const CspAuth = (props: CspAuthProps) => {
   const { election } = useElection()
@@ -45,8 +46,9 @@ export const CspAuth = (props: CspAuthProps) => {
 
 const CspAuthControls = ({ terms, requireTerms, className }: CspAuthProps) => {
   const t = useReactComponentsLocalize()
+  const { election, voting } = useElection()
   const { connected, clear } = useElectionAuth()
-  const { currentStep } = useCspAuthSession()
+  const { currentStep, processId } = useCspAuthSession()
   const authPending = useCspAuthPending()
   const { CspAuthTrigger, CspAuthLogout, CspAuthModal } = useComponents()
   const [open, setOpen] = useState(false)
@@ -56,25 +58,35 @@ const CspAuthControls = ({ terms, requireTerms, className }: CspAuthProps) => {
     if (connected) setOpen(false)
   }, [connected])
 
-  if (connected) {
-    return <CspAuthLogout className={className} label={t('csp.logout')} onClick={() => clear()} />
-  }
+  // A certificate census logs in with a certificate, not these fields: the identify form would only answer 40005.
+  if (election?.census.certAuth && !connected) return null
 
   return (
     <>
-      <CspAuthTrigger
-        className={className}
-        label={t('csp.identify')}
-        onClick={() => setOpen(true)}
-        loading={authPending}
-      />
+      {connected ? (
+        // Disabled while voting: a vote in flight still writes to this session, and would leak into the next voter's.
+        <CspAuthLogout className={className} label={t('csp.logout')} onClick={() => clear()} disabled={voting} />
+      ) : (
+        <CspAuthTrigger
+          className={className}
+          label={t('csp.identify')}
+          onClick={() => setOpen(true)}
+          loading={authPending}
+        />
+      )}
+      {/* Always rendered, so the slot sees isOpen turn false when the voter connects. */}
       <CspAuthModal
-        isOpen={open}
+        isOpen={open && !connected}
         onClose={() => setOpen(false)}
         title={t('csp.modal_title')}
         closeLabel={t('csp.close')}
         content={
-          currentStep === 0 ? <CspAuthIdentifyStep terms={terms} requireTerms={requireTerms} /> : <CspAuthCodeStep />
+          // Keyed by process: a process change must not carry typed values into the new process.
+          currentStep === 0 ? (
+            <CspAuthIdentifyStep key={processId} terms={terms} requireTerms={requireTerms} />
+          ) : (
+            <CspAuthCodeStep />
+          )
         }
       />
     </>

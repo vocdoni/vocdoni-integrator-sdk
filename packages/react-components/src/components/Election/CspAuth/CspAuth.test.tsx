@@ -25,9 +25,14 @@ import { CspAuthSession } from './CspAuthSession'
 const ORG = '0x00000000000000000000000000000000000000AA'
 
 type ElectionScope = {
-  election: { id: string; orgAddress: string; census: { authFields: string[]; twoFaFields: string[] } } | null
+  election: {
+    id: string
+    orgAddress: string
+    census: { authFields: string[]; twoFaFields: string[]; certAuth?: boolean }
+  } | null
   connected: boolean
   challengePending: boolean
+  voting: boolean
   auth0: Mock
   auth1: Mock
   resend: Mock
@@ -39,6 +44,7 @@ const makeScope = (over: Partial<ElectionScope> = {}): ElectionScope => ({
   connected: false,
   // Step 0 leaves the challenge pending; a test clears it to model the app calling clear().
   challengePending: true,
+  voting: false,
   auth0: vi.fn(async () => {}),
   auth1: vi.fn(async () => {}),
   resend: vi.fn(async () => {}),
@@ -778,5 +784,105 @@ describe('CspAuth', () => {
 
     expect(screen.queryByLabelText('Enter the verification code')).not.toBeInTheDocument()
     expect(screen.getByLabelText('Member Number')).toBeInTheDocument()
+  })
+
+  it('renders nothing for a certificate census until the voter is connected', () => {
+    const scope = makeScope({
+      election: { id: 'proc-1', orgAddress: ORG, census: { authFields: ['nationalId'], twoFaFields: [], certAuth: true } },
+    })
+    const { container, setScope } = renderCsp(<CspAuth />, scope)
+    expect(container).toBeEmptyDOMElement()
+
+    setScope({ ...scope, connected: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Logout' }))
+    expect(scope.clear).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not retry a rejected identify, even with an app-wide mutation retry default', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: 3 } } })
+    const scope = makeScope()
+    scope.auth0.mockRejectedValue(new VocdoniApiError(401, { code: 40802 }, 'not found', 40802))
+    renderWithComponents(
+      <QueryClientProvider client={queryClient}>
+        <electionScope.context.Provider value={scope}>
+          <CspAuth />
+        </electionScope.context.Provider>
+      </QueryClientProvider>,
+    )
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }))
+
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(scope.auth0).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the modal slot mounted and tells it isOpen is false once the voter connects', () => {
+    const Modal = vi.fn(() => null)
+    const scope = makeScope()
+    const { setScope } = renderCsp(<CspAuth />, scope, { CspAuthModal: Modal as never })
+    openIdentify()
+    expect(Modal).toHaveBeenLastCalledWith(expect.objectContaining({ isOpen: true }), undefined)
+
+    setScope({ ...scope, connected: true })
+
+    expect(Modal).toHaveBeenLastCalledWith(expect.objectContaining({ isOpen: false }), undefined)
+  })
+
+  it('disables logout while a vote is being sent', () => {
+    const scope = makeScope({ connected: true, voting: true })
+    const { setScope } = renderCsp(<CspAuth />, scope)
+    expect(screen.getByRole('button', { name: 'Logout' })).toBeDisabled()
+
+    setScope({ ...scope, voting: false })
+
+    expect(screen.getByRole('button', { name: 'Logout' })).toBeEnabled()
+  })
+
+  it('does not mark a flow busy for a request under another provider of the same process', async () => {
+    const pending = deferred()
+    const outer = makeScope()
+    const inner = makeScope()
+    outer.auth0.mockReturnValueOnce(pending.promise)
+    renderCsp(
+      <>
+        <electionScope.context.Provider value={outer}>
+          <CspAuth />
+        </electionScope.context.Provider>
+        <electionScope.context.Provider value={inner}>
+          <CspAuth />
+        </electionScope.context.Provider>
+      </>,
+      outer,
+    )
+    const [outerTrigger, innerTrigger] = screen.getAllByRole('button', { name: 'Identify' })
+    fireEvent.click(outerTrigger)
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }))
+    await waitFor(() => expect(outer.auth0).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(innerTrigger).not.toHaveAttribute('aria-busy')
+    fireEvent.click(innerTrigger)
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }))
+    await waitFor(() => expect(inner.auth0).toHaveBeenCalledWith({ memberNumber: '7' }))
+
+    await act(async () => pending.resolve())
+  })
+
+  it('clears the identify form when the process changes, keeping the dialog open', () => {
+    const scope = makeScope()
+    const { setScope } = renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+
+    setScope({
+      ...scope,
+      election: { id: 'proc-2', orgAddress: ORG, census: { authFields: ['memberNumber'], twoFaFields: [] } },
+    })
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByLabelText('Member Number')).toHaveValue('')
   })
 })

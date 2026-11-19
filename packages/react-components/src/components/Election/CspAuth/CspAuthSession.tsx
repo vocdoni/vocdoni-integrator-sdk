@@ -1,6 +1,16 @@
 import type { OrgMemberAuthField, OrgMemberTwoFaField } from '@vocdoni/api-types'
 import { useElection, useElectionAuth } from '@vocdoni/react-providers'
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 
 /** The contact the one-time code was sent to, kept so step 1 can resend it. */
 export type CspAuthContact = {
@@ -31,6 +41,8 @@ export type CspAuthSessionValue = {
   twoFaFields: OrgMemberTwoFaField[]
   /** The process this flow authenticates against. */
   processId?: string
+  /** Unique per session: keys the auth requests, so a request under another session does not mark this flow busy. */
+  sessionId: string
   /**
    * The `clear` of the ElectionProvider this session belongs to. It is stable per provider instance,
    * so it tells apart two providers for the same process.
@@ -56,6 +68,7 @@ export const CspAuthSession = ({ children }: { children: ReactNode }) => {
   const [error, setError] = useState<string>()
   const flowGeneration = useRef(0)
   const processId = election?.id
+  const sessionId = useId()
 
   // Bails out when the flow is already at its start, so the mount-time run does not re-render every consumer.
   const resetFlow = useCallback(() => {
@@ -99,10 +112,11 @@ export const CspAuthSession = ({ children }: { children: ReactNode }) => {
       authFields: census?.authFields ?? [],
       twoFaFields: census?.twoFaFields ?? [],
       processId,
+      sessionId,
       providerClear: clear,
       resetFlow,
     }),
-    [currentStep, contact, pendingNotice, error, census, processId, clear, getFlowGeneration, resetFlow]
+    [currentStep, contact, pendingNotice, error, census, processId, sessionId, clear, getFlowGeneration, resetFlow]
   )
 
   return <CspAuthSessionContext.Provider value={value}>{children}</CspAuthSessionContext.Provider>

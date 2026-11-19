@@ -31,8 +31,9 @@ export const translateCspAuthError = (
           hasPassword ? t('csp.errors.credentials_or_password_incorrect') : t('csp.errors.participant_not_found')
         )
       case 40001:
-        // Wrong code, expired token or too many attempts: the code step only.
+        // Wrong code, expired token or too many attempts. A resend sees the token itself: it is gone for good.
         if (step === 'code') return new Error(t('csp.errors.code_rejected'))
+        if (step === 'resend') return new Error(t('csp.errors.resend_expired'))
         break
       case 40005:
         // Required auth data is missing: the identify step only.

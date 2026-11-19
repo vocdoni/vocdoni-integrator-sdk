@@ -73,10 +73,13 @@ describe('translateCspAuthError', () => {
     expect(translateCspAuthError(apiError(40001), t, options(false, 'code')).message).toBe('csp.errors.code_rejected')
   })
 
-  it('keeps 40001 unmapped outside the code step', () => {
+  it('maps 40001 on a resend to the expired-code message', () => {
+    expect(translateCspAuthError(apiError(40001), t, options(false, 'resend')).message).toBe('csp.errors.resend_expired')
+  })
+
+  it('keeps 40001 unmapped on the identify step', () => {
     const error = apiError(40001)
     expect(translateCspAuthError(error, t, options(false, 'identify'))).toBe(error)
-    expect(translateCspAuthError(error, t, options(false, 'resend'))).toBe(error)
   })
 
   it('maps 40005 on the identify step to the missing-data message', () => {

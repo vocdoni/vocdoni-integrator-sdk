@@ -340,8 +340,8 @@ export const defaultComponents: ComponentsDefinition = {
       {label}
     </button>
   ),
-  CspAuthLogout: ({ label, onClick, ...props }) => (
-    <button {...props} type='button' onClick={onClick}>
+  CspAuthLogout: ({ label, onClick, disabled, ...props }) => (
+    <button {...props} type='button' onClick={onClick} disabled={disabled}>
       {label}
     </button>
   ),
@@ -383,6 +383,7 @@ export const defaultComponents: ComponentsDefinition = {
     title,
     helper,
     code,
+    // Not on the input: a maxLength would cut a pasted "123 456" before its digits are filtered.
     length,
     onCodeChange,
     error,
@@ -397,8 +398,6 @@ export const defaultComponents: ComponentsDefinition = {
     onStartOver,
     actionsDisabled,
     footer,
-    // Not on the input: a maxLength would cut a pasted "123 456" before its digits are filtered.
-    length: _length,
     ...props
   }) => {
     const id = useId()

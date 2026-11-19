@@ -108,6 +108,8 @@ export type CspAuthTriggerSlotProps = BaseProps<HTMLButtonElement> & {
 export type CspAuthLogoutSlotProps = BaseProps<HTMLButtonElement> & {
   label: string
   onClick: () => void
+  /** True while a vote is being sent: clearing the session then would leak the vote into the next voter's. */
+  disabled?: boolean
 }
 
 /**
