@@ -1536,7 +1536,7 @@ export interface RateLimitedData {
   retryAfter: number
 }
 
-/** 40103 data: cooldown between attempts, in milliseconds. Absent on some answers. */
+/** 40103 data: cooldown between attempts, in milliseconds. */
 export interface AttemptCooldownData {
   coolDownTime: number
 }
@@ -1557,13 +1557,13 @@ export interface CensusValidationErrorData {
 }
 
 /**
- * The `data` each error code carries. 40183 can arrive without data when the
- * backend cannot re-read the wallet.
+ * The `data` each error code carries. Codes typed `| undefined` can arrive
+ * without data (e.g. 40183 when the backend cannot re-read the wallet).
  */
 export interface ApiErrorDataByCode {
   40017: RateLimitedData | undefined
   40037: CensusValidationErrorData | undefined
-  40103: AttemptCooldownData | undefined
+  40103: AttemptCooldownData
   40175: InsufficientWalletBalanceData
   40178: PaymentRequiredData | CensusGrowthQuote
   40183: SpendCapReachedData | undefined

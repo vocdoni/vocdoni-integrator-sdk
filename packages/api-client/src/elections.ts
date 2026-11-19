@@ -291,8 +291,8 @@ export class ElectionsClient {
    * credentials over the target members (a group, an explicit `memberIds`
    * subset, or the whole organization when neither is set), without creating
    * anything. Requires Manager/Admin role of the organization. Fails with 400
-   * and the offending duplicate/missing-data member ids when the census is
-   * not usable.
+   * · 40037 whose `data` is a `CensusValidationErrorData` (narrow with
+   * `isApiError(err, ApiErrorCode.InvalidData)`) when the census is not usable.
    */
   async validateCensus(req: ValidateProcessCensusRequest): Promise<ValidateProcessCensusResponse> {
     return this.fetch<ValidateProcessCensusResponse>('/processes/census/validation', {

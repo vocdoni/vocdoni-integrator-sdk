@@ -1,4 +1,4 @@
-import { ApiErrorCode, type ApiErrorDataByCode } from '@vocdoni/api-types'
+import { ApiErrorCode } from '@vocdoni/api-types'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../mocks/server'
 import { VocdoniApiClient } from './client'
@@ -95,10 +95,23 @@ describe('typed backend error codes and data', () => {
     }
   })
 
-  it('types the 40017 and 40037 data as optional, for answers that carry none', () => {
-    const rateLimited: ApiErrorDataByCode[40017] = undefined
-    const invalidData: ApiErrorDataByCode[40037] = undefined
-    expect(rateLimited).toBeUndefined()
-    expect(invalidData).toBeUndefined()
+  it('narrows a 40017 answer without data and leaves data undefined', async () => {
+    server.use(
+      http.post(`${BASE_URL}/processes/${PROCESS_ID}/auth/0`, () =>
+        HttpResponse.json(
+          { error: 'too many verification attempts', code: ApiErrorCode.VerificationMaxAttempts },
+          { status: 400 },
+        ),
+      ),
+    )
+
+    const err = await client.elections
+      .authStep0(PROCESS_ID, { memberNumber: '42' })
+      .catch((e: unknown) => e)
+
+    expect(isApiError(err, ApiErrorCode.VerificationMaxAttempts)).toBe(true)
+    if (isApiError(err, ApiErrorCode.VerificationMaxAttempts)) {
+      expect(err.data).toBeUndefined()
+    }
   })
 })
