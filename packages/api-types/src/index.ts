@@ -193,6 +193,8 @@ export interface OrganizationCensus {
   groupID?: string
   authFields?: OrgMemberAuthField[]
   twoFaFields?: OrgMemberTwoFaField[]
+  /** Certificate census: voters prove their `nationalId` with a personal certificate (see {@link CensusSpec.certAuth}). */
+  certAuth?: boolean
 }
 
 // ─── Election ─────────────────────────────────────────────────────────────────
@@ -566,6 +568,15 @@ export interface CensusSpec {
    * into percentages (e.g. results reports). Serialized with `omitempty`.
    */
   totalWeight?: number
+  /**
+   * Certificate census: voters prove their `nationalId` with a Spanish personal
+   * certificate through the certificate gateway instead of typing it. Requires
+   * `authFields` to be exactly `['nationalId']`; `twoFaFields` may add an email
+   * or SMS code. Refused (40025) by a backend without certificate gateway keys.
+   * Echoed on reads. Step 0 then takes `certCode` and `codeVerifier` (see
+   * {@link AuthRequest}).
+   */
+  certAuth?: boolean
 }
 
 /** Per-question member eligibility restriction (subset of the process census). */
@@ -994,6 +1005,16 @@ export interface AuthRequest {
    * a malformed hash is 40005.
    */
   password?: string
+  /**
+   * Certificate census only (`census.certAuth`): the single-use code the
+   * certificate gateway returned to the voting page in the URL fragment
+   * (`#certCode=`). Sent with {@link codeVerifier} and, when the census has 2FA,
+   * the email or phone; no other login field. An unknown, expired, used or
+   * foreign code, or a wrong verifier, answers 40802.
+   */
+  certCode?: string
+  /** PKCE verifier (43–128 base64url characters) of the `codeChallenge` sent to the gateway. */
+  codeVerifier?: string
 }
 
 /** Auth step 1 — confirm the 2FA challenge. Not used by auth-only censuses. */
@@ -1011,6 +1032,12 @@ export interface AuthResponse {
   signature?: string
   /** Hex-encoded census weight. */
   weight?: string
+  /**
+   * Certificate census, step 0 only: a stable reference of the voter on the
+   * process (lowercase hex sha256), the same on every login. `auth0` binds the
+   * tab's pending votes to it.
+   */
+  voterRef?: string
 }
 
 export interface AuthResendRequest {
