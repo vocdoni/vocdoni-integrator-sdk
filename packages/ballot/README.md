@@ -147,6 +147,13 @@ export function encodeQuestionSelections(question: QuestionLike, selections: num
 // (range + uniqueness). The encoders run it on everything they produce; call it
 // directly on a ballot built by hand. See "Unsatisfiable ballot configs" below.
 export function assertEncodedBallot(ballot: number[], bounds: ProtocolBounds): void
+
+// Voting power cast on one question, read from its RAW results matrix (decoding drops the
+// notSelected column). null when not recoverable: no tally, undeterminable type, budget or quadratic.
+export function castVotingPower(question: QuestionLike, results: string[][] | null | undefined): number | null
+
+// Whether the multichoice abstain row is shown: headroom reserved, or a non-zero count.
+export function isAbstainVisible(question: QuestionLike, abstainVotes: number): boolean
 ```
 
 ## Usage

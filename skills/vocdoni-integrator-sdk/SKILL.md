@@ -31,6 +31,10 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | Add voting to a React app | `references/react.md` | — |
 | Manage election lifecycle (pause/end/cancel) | `references/react.md` + `references/client.md` | — |
 | Price a process, pay for publish or census growth, manage wallets and spend caps | `references/client.md` (Pay-per-process billing) | — |
+| Link to the block explorer, map a chain id to a network, check ids or addresses | `references/client.md` (Network helpers and ids) | — |
+| Handle a CSP voter error (wrong credentials, too many attempts, cooldown) or a census validation error | `references/client.md` (Typed voter errors) | — |
+| Show a vote's explorer link in React | `references/react.md` (`explorerUrl`, `<Voted />`) | — |
+| Read the voting power or abstain row of a question's results | `references/voting.md` (Voting power per question) | — |
 
 ## The vote flow in one minute
 
