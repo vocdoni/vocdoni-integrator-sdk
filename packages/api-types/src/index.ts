@@ -387,9 +387,9 @@ export interface SetElectionStatusRequest {
 
 export interface ElectionListParams {
   /**
-   * Owner organization address filter. The returned list items echo it as
-   * UNPREFIXED lowercase hex regardless of the form passed here — see
-   * {@link VotingProcessBase.orgAddress}.
+   * Owner organization address filter. The wire echoes it UNPREFIXED lowercase
+   * hex; `@vocdoni/api-client` list items come back `0x`-prefixed (see
+   * {@link VotingProcessBase.orgAddress}).
    */
   orgAddress: string
   status?: string
@@ -782,10 +782,9 @@ export interface VotingProcessQuestionRequest {
 /** Body of `POST /processes` and `PUT /processes/{id}` — flat process draft with per-question ballot protocols. */
 export interface CreateVotingProcessRequest {
   /**
-   * Owner organization address. The request side tolerates the `0x`-prefixed
-   * form (verified live), but note the asymmetry: process reads
-   * ({@link VotingProcessResponse}) always return it back as UNPREFIXED
-   * lowercase hex, so don't expect to read back what you sent.
+   * Owner organization address; the request tolerates the `0x` form (verified live).
+   * The wire reads back UNPREFIXED, and `@vocdoni/api-client` reads return `0x`-prefixed
+   * lowercase (see {@link VotingProcessBase.orgAddress}).
    */
   orgAddress: string
   census?: CensusSpec

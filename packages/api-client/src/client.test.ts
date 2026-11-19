@@ -51,6 +51,12 @@ describe('VocdoniApiClient', () => {
       expect(process.questions).toHaveLength(mockProcess.questions.length)
     })
 
+    it('returns orgAddress 0x-prefixed though the wire sends it unprefixed', async () => {
+      expect(mockProcess.orgAddress).not.toMatch(/^0x/)
+      const process = await client.elections.get('abc123')
+      expect(process.orgAddress).toBe(`0x${mockProcess.orgAddress}`)
+    })
+
     it('normalizes the wire READY question status to ONGOING', async () => {
       server.use(
         http.get(`${BASE_URL}/processes/:id`, ({ params }) =>
@@ -67,6 +73,17 @@ describe('VocdoniApiClient', () => {
   })
 
   describe('elections.list', () => {
+    it('returns each item orgAddress 0x-prefixed though the wire sends it unprefixed', async () => {
+      server.use(
+        http.get(`${BASE_URL}/processes`, () =>
+          HttpResponse.json({ processes: [mockProcess], pagination: { total: 1 } }),
+        ),
+      )
+
+      const res = await client.elections.list({ orgAddress: '0xabc' })
+      expect(res.processes[0].orgAddress).toBe(`0x${mockProcess.orgAddress}`)
+    })
+
     it('serializes the published drafts filter — false must survive as published=false', async () => {
       const queries: Array<URLSearchParams> = []
       server.use(

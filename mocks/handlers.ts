@@ -28,7 +28,7 @@ export const mockBatchJobs = new Map<string, number>()
 
 export const mockProcess = {
   id: 'abc123',
-  // Process reads return orgAddress as unprefixed lowercase hex.
+  // Raw wire value: process reads send orgAddress as unprefixed lowercase hex.
   orgAddress: '1a9ffe1f4c2493578ce4a7dbebd7d95433eee6f0',
   title: { default: 'Test Process' },
   description: { default: 'A test process' },
