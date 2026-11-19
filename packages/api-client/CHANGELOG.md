@@ -1,5 +1,23 @@
 # @vocdoni/api-client
 
+## 2.8.0
+
+### Minor Changes
+
+- 2be5f7e: `jobs.waitFor` waits up to 5 minutes by default (was 60 s), backs off from `intervalMs` to the new `maxIntervalMs` option (default 5 s) with jitter, and retries transient poll failures (network errors, 429, 502, 503, 504) for up to the new `maxFailingMs` (default 1 min) in a row, honouring `Retry-After`. A relayed vote that waits more than a minute for its block is no longer reported as failed while it is still being included. `VocdoniApiError` gains `retryAfterMs`.
+- ec078a9: New network helpers: the `VocdoniNetwork` type (`'dev' | 'stg' | 'prod'`) and the `VOCDONI_NETWORKS` table of gateway and explorer URLs, `isVocdoniNetwork`, `networkFromChainId(chainId)` (`undefined` for an unknown chain, no silent fallback to dev), `resolveNetwork`, `explorerUrl`, and the link builders `explorerVoteUrl`, `explorerElectionUrl` and `explorerOrganizationUrl`. `client.network()` derives the network from `info().chainId`. New id predicates `isProcessId`, `isVochainElectionId`, `isOrganizationAddress`, and `normalizeOrganizationAddress`.
+
+  **Behaviour change:** `normalizeVotingProcess`, and so `elections.get()` and `elections.list()`, now return `orgAddress` `0x`-prefixed and lowercase, as the organization routes use it. Code that compared it to the unprefixed wire value, or prefixed it itself (`'0x' + orgAddress`), must drop that; compare addresses through `normalizeOrganizationAddress`.
+
+### Patch Changes
+
+- ec078a9: Ids interpolated into request paths are now percent-encoded, so an id containing `/`, `?` or `#` can no longer reach another endpoint. An empty, `.` or `..` id rejects with a `TypeError` before any request is sent.
+- Updated dependencies [ec078a9]
+- Updated dependencies [6705c31]
+- Updated dependencies [ec078a9]
+  - @vocdoni/ballot@1.4.0
+  - @vocdoni/api-types@2.6.0
+
 ## 2.7.0
 
 ### Minor Changes

@@ -1,5 +1,15 @@
 # @vocdoni/react-components
 
+## 4.1.0
+
+### Minor Changes
+
+- 8e1b88f: Adds the CSP voter identify flow: `<CspAuth />` renders an Identify button, a modal with the identify and one-time code steps, and a Logout button once connected. Certificate censuses (`census.certAuth`) are not handled: `<CspAuth />` renders nothing for them until the voter is connected by other means. `<CspAuth requireTerms />` enforces a terms acceptance checkbox. `<CspAuthSession />` shares one flow across several buttons. The flow is customizable through the `CspAuthTrigger`, `CspAuthLogout`, `CspAuthModal`, `CspAuthIdentifyForm` and `CspAuthCodeForm` slots. The member password is hashed with `hashMemberPassword` before it is sent.
+
+  Removes `SpreadsheetAccess`, an unused stub that rendered nothing and could not work, its `SpreadsheetAccess` slot, and the `spreadsheet.*` i18n keys. Adds the `csp.*` i18n block: custom slot overrides that read the old keys must move to `csp.*`.
+
+- ec078a9: `ElectionProvider` takes an optional `explorerUrl` (block-explorer base URL) and `useElection()` exposes `explorerUrl`, defaulting to the explorer of the process's own `chainId` (`null` for an unknown chain). `Voted` now links each vote id to `{explorerUrl}/verify/{voteId}` instead of a relative link that led nowhere, renders it as plain text when no explorer is known, and passes the link to slot overrides as `VotedVote.url`.
+
 ## 4.0.2
 
 ## 4.0.1

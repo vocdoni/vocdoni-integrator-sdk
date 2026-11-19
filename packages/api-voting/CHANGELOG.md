@@ -1,5 +1,13 @@
 # @vocdoni/api-voting
 
+## 1.3.3
+
+### Patch Changes
+
+- Updated dependencies [6705c31]
+- Updated dependencies [ec078a9]
+  - @vocdoni/api-types@2.6.0
+
 ## 1.3.2
 
 ### Patch Changes
