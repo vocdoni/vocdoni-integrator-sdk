@@ -90,12 +90,13 @@ Pure helpers, no request. `VocdoniNetwork` is `'dev' | 'stg' | 'prod'`, and
 
 ```ts
 import {
-  networkFromChainId, resolveNetwork, explorerVoteUrl, explorerElectionUrl, explorerOrganizationUrl,
+  isVocdoniNetwork, networkFromChainId, resolveNetwork, explorerVoteUrl, explorerElectionUrl, explorerOrganizationUrl,
 } from '@vocdoni/api-client'
 
 networkFromChainId('vocdoni/LTS/1.3') // 'prod' (LTS → prod, STAGE/STG → stg, DEV → dev)
 networkFromChainId('vocdoni/TEST/1')  // undefined: unknown chains never fall back to dev
 resolveNetwork('stg')                 // 'stg': a network name wins over a chain id
+isVocdoniNetwork(env.NETWORK)         // type guard for 'dev' | 'stg' | 'prod' (case-sensitive)
 
 // Link builders take a network name or a chain id; undefined when it does not resolve or the id is empty
 explorerVoteUrl(process.chainId, voteId)        // {explorer}/verify/{voteId}
