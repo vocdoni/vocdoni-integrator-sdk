@@ -35,6 +35,7 @@ import type {
 } from '@vocdoni/api-types'
 import type { UpFetch } from 'up-fetch'
 import { handleError } from './errors'
+import { path } from './path'
 
 export class OrganizationsClient {
   constructor(private readonly fetch: UpFetch) {}
@@ -42,7 +43,7 @@ export class OrganizationsClient {
   // ─── Organizations ────────────────────────────────────────────────────────
 
   async get(address: string): Promise<Organization> {
-    return this.fetch<Organization>(`/organizations/${address}`).catch(handleError)
+    return this.fetch<Organization>(path`/organizations/${address}`).catch(handleError)
   }
 
   async create(data: CreateOrganizationRequest): Promise<Organization> {
@@ -53,7 +54,7 @@ export class OrganizationsClient {
   }
 
   async update(address: string, data: Partial<CreateOrganizationRequest>): Promise<Organization> {
-    return this.fetch<Organization>(`/organizations/${address}`, {
+    return this.fetch<Organization>(path`/organizations/${address}`, {
       method: 'PUT',
       body: data,
     }).catch(handleError)
@@ -84,7 +85,7 @@ export class OrganizationsClient {
    * 404 if the org is not managed by the caller's integrator.
    */
   async updateManaged(orgAddress: string, body: UpdateManagedOrganizationRequest): Promise<ManagedOrganizationInfo> {
-    return this.fetch<ManagedOrganizationInfo>(`/integrator/organizations/${orgAddress}`, {
+    return this.fetch<ManagedOrganizationInfo>(path`/integrator/organizations/${orgAddress}`, {
       method: 'PUT',
       body,
     }).catch(handleError)
@@ -92,7 +93,7 @@ export class OrganizationsClient {
 
   async deleteManaged(orgAddress: string): Promise<DeleteManagedOrganizationResponse> {
     return this.fetch<DeleteManagedOrganizationResponse>(
-      `/integrator/organizations/${orgAddress}`,
+      path`/integrator/organizations/${orgAddress}`,
       { method: 'DELETE' },
     ).catch(handleError)
   }
@@ -105,7 +106,7 @@ export class OrganizationsClient {
    * no wallet (403 40181): its integrator's pays.
    */
   async getWallet(address: string, params: { page?: number; limit?: number } = {}): Promise<WalletResponse> {
-    const wallet = await this.fetch<WalletResponse>(`/organizations/${address}/wallet`, { params }).catch(handleError)
+    const wallet = await this.fetch<WalletResponse>(path`/organizations/${address}/wallet`, { params }).catch(handleError)
     // An empty ledger arrives as `history: null`.
     return { ...wallet, history: wallet.history ?? [] }
   }
@@ -115,7 +116,7 @@ export class OrganizationsClient {
    * when the verified webhook credits it. Admin JWT only.
    */
   async topUpWallet(address: string, body: WalletTopUpRequest): Promise<ProcessCheckoutResponse> {
-    return this.fetch<ProcessCheckoutResponse>(`/organizations/${address}/wallet/topup`, {
+    return this.fetch<ProcessCheckoutResponse>(path`/organizations/${address}/wallet/topup`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -124,7 +125,7 @@ export class OrganizationsClient {
   // ─── Members (memberbase) ──────────────────────────────────────────────────
 
   async listMembers(address: string, page?: number): Promise<OrganizationMembersResponse> {
-    return this.fetch<OrganizationMembersResponse>(`/organizations/${address}/members`, {
+    return this.fetch<OrganizationMembersResponse>(path`/organizations/${address}/members`, {
       params: page !== undefined ? { page } : undefined,
     }).catch(handleError)
   }
@@ -140,7 +141,7 @@ export class OrganizationsClient {
     members: OrgMember[],
     opts: { async?: boolean } = {},
   ): Promise<AddMembersResponse> {
-    return this.fetch<AddMembersResponse>(`/organizations/${address}/members`, {
+    return this.fetch<AddMembersResponse>(path`/organizations/${address}/members`, {
       method: 'POST',
       params: opts.async !== undefined ? { async: opts.async } : undefined,
       body: { members },
@@ -155,14 +156,14 @@ export class OrganizationsClient {
    * `client.jobs.waitFor(jobId)`.
    */
   async upsertMember(address: string, member: OrgMember): Promise<UpsertOrgMemberResponse> {
-    return this.fetch<UpsertOrgMemberResponse>(`/organizations/${address}/members`, {
+    return this.fetch<UpsertOrgMemberResponse>(path`/organizations/${address}/members`, {
       method: 'PUT',
       body: member,
     }).catch(handleError)
   }
 
   async deleteMembers(address: string, body: DeleteMembersRequest): Promise<DeleteMembersResponse> {
-    return this.fetch<DeleteMembersResponse>(`/organizations/${address}/members`, {
+    return this.fetch<DeleteMembersResponse>(path`/organizations/${address}/members`, {
       method: 'DELETE',
       body,
     }).catch(handleError)
@@ -171,20 +172,20 @@ export class OrganizationsClient {
   // ─── Member groups ─────────────────────────────────────────────────────────
 
   async listGroups(address: string): Promise<OrganizationGroupsResponse> {
-    return this.fetch<OrganizationGroupsResponse>(`/organizations/${address}/groups`).catch(
+    return this.fetch<OrganizationGroupsResponse>(path`/organizations/${address}/groups`).catch(
       handleError,
     )
   }
 
   async createGroup(address: string, body: CreateGroupRequest): Promise<OrganizationGroup> {
-    return this.fetch<OrganizationGroup>(`/organizations/${address}/groups`, {
+    return this.fetch<OrganizationGroup>(path`/organizations/${address}/groups`, {
       method: 'POST',
       body,
     }).catch(handleError)
   }
 
   async getGroup(address: string, groupId: string): Promise<OrganizationGroup> {
-    return this.fetch<OrganizationGroup>(`/organizations/${address}/groups/${groupId}`).catch(
+    return this.fetch<OrganizationGroup>(path`/organizations/${address}/groups/${groupId}`).catch(
       handleError,
     )
   }
@@ -195,7 +196,7 @@ export class OrganizationsClient {
     groupId: string,
     body: UpdateGroupRequest,
   ): Promise<UpdateGroupResponse | undefined> {
-    return this.fetch<UpdateGroupResponse | undefined>(`/organizations/${address}/groups/${groupId}`, {
+    return this.fetch<UpdateGroupResponse | undefined>(path`/organizations/${address}/groups/${groupId}`, {
       method: 'PUT',
       body,
     }).catch(handleError)
@@ -203,53 +204,53 @@ export class OrganizationsClient {
 
   /** Resolves to `undefined` unless there are census resize jobs or errors to report. */
   async deleteGroup(address: string, groupId: string): Promise<UpdateGroupResponse | undefined> {
-    return this.fetch<UpdateGroupResponse | undefined>(`/organizations/${address}/groups/${groupId}`, {
+    return this.fetch<UpdateGroupResponse | undefined>(path`/organizations/${address}/groups/${groupId}`, {
       method: 'DELETE',
     }).catch(handleError)
   }
 
   async listGroupMembers(address: string, groupId: string): Promise<OrganizationMembersResponse> {
     return this.fetch<OrganizationMembersResponse>(
-      `/organizations/${address}/groups/${groupId}/members`,
+      path`/organizations/${address}/groups/${groupId}/members`,
     ).catch(handleError)
   }
 
   // ─── Scoped reads ──────────────────────────────────────────────────────────
 
   async listCensuses(address: string): Promise<OrganizationCensusesResponse> {
-    return this.fetch<OrganizationCensusesResponse>(`/organizations/${address}/censuses`).catch(
+    return this.fetch<OrganizationCensusesResponse>(path`/organizations/${address}/censuses`).catch(
       handleError,
     )
   }
 
   async getSubscription(address: string): Promise<OrganizationSubscriptionInfo> {
     return this.fetch<OrganizationSubscriptionInfo>(
-      `/organizations/${address}/subscription`,
+      path`/organizations/${address}/subscription`,
     ).catch(handleError)
   }
 
   // ─── Meta ──────────────────────────────────────────────────────────────────
 
   async getMeta(address: string): Promise<OrganizationMetaResponse> {
-    return this.fetch<OrganizationMetaResponse>(`/organizations/${address}/meta`).catch(handleError)
+    return this.fetch<OrganizationMetaResponse>(path`/organizations/${address}/meta`).catch(handleError)
   }
 
   async addMeta(address: string, body: OrganizationMetaRequest): Promise<void> {
-    return this.fetch<void>(`/organizations/${address}/meta`, {
+    return this.fetch<void>(path`/organizations/${address}/meta`, {
       method: 'POST',
       body,
     }).catch(handleError)
   }
 
   async updateMeta(address: string, body: OrganizationMetaRequest): Promise<void> {
-    return this.fetch<void>(`/organizations/${address}/meta`, {
+    return this.fetch<void>(path`/organizations/${address}/meta`, {
       method: 'PUT',
       body,
     }).catch(handleError)
   }
 
   async deleteMeta(address: string): Promise<void> {
-    return this.fetch<void>(`/organizations/${address}/meta`, { method: 'DELETE' }).catch(
+    return this.fetch<void>(path`/organizations/${address}/meta`, { method: 'DELETE' }).catch(
       handleError,
     )
   }
@@ -260,7 +261,7 @@ export class OrganizationsClient {
 
   /** Returns the org's API keys' metadata (never the secret). Admin-only. */
   async listApiKeys(address: string): Promise<ListApiKeysResponse> {
-    return this.fetch<ListApiKeysResponse>(`/integrator/organizations/${address}/apikeys`).catch(
+    return this.fetch<ListApiKeysResponse>(path`/integrator/organizations/${address}/apikeys`).catch(
       handleError,
     )
   }
@@ -273,7 +274,7 @@ export class OrganizationsClient {
    * once — it cannot be retrieved again.
    */
   async createApiKey(address: string, body: CreateApiKeyRequest): Promise<CreateApiKeyResponse> {
-    return this.fetch<CreateApiKeyResponse>(`/integrator/organizations/${address}/apikeys`, {
+    return this.fetch<CreateApiKeyResponse>(path`/integrator/organizations/${address}/apikeys`, {
       method: 'POST',
       body,
     }).catch(handleError)
@@ -281,7 +282,7 @@ export class OrganizationsClient {
 
   /** Permanently revokes the given API key. Admin-only. */
   async revokeApiKey(address: string, keyId: string): Promise<void> {
-    return this.fetch<void>(`/integrator/organizations/${address}/apikeys/${keyId}`, {
+    return this.fetch<void>(path`/integrator/organizations/${address}/apikeys/${keyId}`, {
       method: 'DELETE',
     }).catch(handleError)
   }

@@ -467,6 +467,35 @@ describe('VocdoniApiClient', () => {
     })
   })
 
+  describe('path parameter encoding', () => {
+    it('encodes an id that tries to escape its segment', async () => {
+      const urls: string[] = []
+      server.use(
+        http.get(`${BASE_URL}/processes/:id`, ({ request }) => {
+          urls.push(request.url)
+          return HttpResponse.json(mockProcess)
+        }),
+      )
+
+      await client.elections.get('../x')
+      expect(urls).toEqual([`${BASE_URL}/processes/..%2Fx`])
+    })
+
+    it('rejects a "." or ".." id without sending a request', async () => {
+      let requests = 0
+      server.use(
+        http.all('*', () => {
+          requests++
+          return HttpResponse.json(mockProcess)
+        }),
+      )
+
+      await expect(client.elections.get('..')).rejects.toThrow(TypeError)
+      await expect(client.elections.getResults('.')).rejects.toThrow(TypeError)
+      expect(requests).toBe(0)
+    })
+  })
+
   describe('info', () => {
     it('reads GET /info without an API key', async () => {
       let auth: string | null = 'unset'
