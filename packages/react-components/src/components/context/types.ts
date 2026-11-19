@@ -78,32 +78,90 @@ export type ElectionResultsSlotProps = BaseProps<HTMLDivElement> & {
   questions?: ElectionResultQuestion[]
 }
 
-export type SpreadsheetInputField = {
-  id: string
+/** One text input of the CSP identify form (step 0), built by `CspAuth` from the census `authFields`/`twoFaFields`. */
+export type CspAuthField = {
+  name: string
   label: string
-  description?: string
+  /** The HTML input type: `email`, `tel`, `date`, `password` or `text`. */
+  type: string
+  required: boolean
+  helper?: string
+  /** Validation message, set once the field failed validation. */
   error?: string
   inputProps: UseFormRegisterReturn
-  inputAttrs?: {
-    type?: string
-    min?: number
-    max?: number
-  }
 }
 
-export type SpreadsheetAccessSlotProps = BaseProps<HTMLDivElement> & {
-  connected: boolean
-  loading: boolean
-  formError?: string
-  title: string
-  open: boolean
-  onOpen: () => void
+/** The required terms acceptance checkbox, present only when `CspAuth` gets `requireTerms`. */
+export type CspAuthTermsField = {
+  /** Validation message, set once the checkbox was submitted unchecked. */
+  error?: string
+  inputProps: UseFormRegisterReturn
+}
+
+export type CspAuthTriggerSlotProps = BaseProps<HTMLButtonElement> & {
+  label: string
+  onClick: () => void
+  /** True while an auth request is in flight, whichever dialog sent it. Set as `aria-busy`. */
+  loading?: boolean
+}
+
+export type CspAuthLogoutSlotProps = BaseProps<HTMLButtonElement> & {
+  label: string
+  onClick: () => void
+}
+
+/**
+ * The dialog shell. Closes on Escape and on an overlay click. The default has no positioning or
+ * visual styles: it only gives the overlay and dialog class names and roles, so style them in CSS
+ * or override the slot.
+ */
+export type CspAuthModalSlotProps = Omit<BaseProps<HTMLDivElement>, 'content'> & {
+  isOpen: boolean
   onClose: () => void
-  onLogout: () => void
-  onSubmit: (event?: FormEvent<HTMLFormElement>) => void
-  fields: SpreadsheetInputField[]
-  anonymousField?: SpreadsheetInputField
-  extraFields?: ReactNode
+  title: string
+  closeLabel: string
+  /** The current step: the identify form, or the one-time code form. */
+  content: ReactNode
+}
+
+export type CspAuthIdentifyFormSlotProps = BaseProps<HTMLFormElement> & {
+  fields: CspAuthField[]
+  /**
+   * Terms content rendered above the submit button. Without `termsField` it is plain content;
+   * with it (`requireTerms`) it is the label of the required checkbox.
+   */
+  terms?: ReactNode
+  /** The required terms checkbox; set only when `CspAuth` gets `requireTerms`. */
+  termsField?: CspAuthTermsField
+  error?: string
+  loading: boolean
+  submitLabel: string
+  /** Shown under the submit button, e.g. how the one-time code will be delivered. */
+  info?: string
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}
+
+export type CspAuthCodeFormSlotProps = BaseProps<HTMLFormElement> & {
+  title: string
+  helper: string
+  /** The digits typed so far. */
+  code: string
+  /** How many digits the code has; the form submits itself once all of them are filled. */
+  length: number
+  onCodeChange: (code: string) => void
+  error?: string
+  notice?: string
+  loading: boolean
+  submitLabel: string
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  resendLabel: string
+  onResend: () => void
+  resending: boolean
+  startOverLabel: string
+  onStartOver: () => void
+  /** Disables resend and start over while any auth request is in flight. */
+  actionsDisabled: boolean
+  footer?: string
 }
 
 export type ElectionActionsSlotProps = BaseProps<HTMLDivElement> & { actions?: ReactNode }
@@ -284,7 +342,11 @@ export type ComponentsDefinition<ExternalProps extends object = {}> = {
   VoteButton: ComponentType<VoteButtonSlotProps & ExternalProps>
   VoteWeight: ComponentType<VoteWeightSlotProps & ExternalProps>
   ElectionResults: ComponentType<ElectionResultsSlotProps & ExternalProps>
-  SpreadsheetAccess: ComponentType<SpreadsheetAccessSlotProps & ExternalProps>
+  CspAuthTrigger: ComponentType<CspAuthTriggerSlotProps & ExternalProps>
+  CspAuthLogout: ComponentType<CspAuthLogoutSlotProps & ExternalProps>
+  CspAuthModal: ComponentType<CspAuthModalSlotProps & ExternalProps>
+  CspAuthIdentifyForm: ComponentType<CspAuthIdentifyFormSlotProps & ExternalProps>
+  CspAuthCodeForm: ComponentType<CspAuthCodeFormSlotProps & ExternalProps>
   ElectionActions: ComponentType<ElectionActionsSlotProps & ExternalProps>
   ActionContinue: ComponentType<ActionButtonSlotProps & ExternalProps>
   ActionPause: ComponentType<ActionButtonSlotProps & ExternalProps>
@@ -326,7 +388,11 @@ export type ElectionComponentsDefinition = Pick<
   | 'VoteButton'
   | 'VoteWeight'
   | 'ElectionResults'
-  | 'SpreadsheetAccess'
+  | 'CspAuthTrigger'
+  | 'CspAuthLogout'
+  | 'CspAuthModal'
+  | 'CspAuthIdentifyForm'
+  | 'CspAuthCodeForm'
   | 'ElectionActions'
   | 'ActionContinue'
   | 'ActionPause'

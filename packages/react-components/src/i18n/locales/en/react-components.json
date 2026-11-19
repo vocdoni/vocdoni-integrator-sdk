@@ -77,13 +77,56 @@
     "upcoming": "Upcoming",
     "invalid": "Invalid"
   },
-  "spreadsheet": {
-    "access_button": "Identify",
-    "anon_sik_label": "Define a password for your vote",
-    "anon_sik_helper": "This ensures the vote to be anonymous",
-    "close": "Close",
+  "csp": {
+    "identify": "Identify",
     "logout": "Logout",
-    "modal_title": "You must identify first"
+    "modal_title": "Authentication",
+    "close": "Close",
+    "authenticate": "Authenticate",
+    "receive_code": "Receive Code",
+    "code_info": "You will receive a unique code on the selected medium to verify your identity and complete authentication",
+    "code_sent": "Verification code sent",
+    "contact_match_help": "Must match the one registered in the system",
+    "auth_failed": "Authentication failed",
+    "password_unavailable": "The password cannot be checked right now. Reload the page and try again.",
+    "fields": {
+      "memberNumber": "Member Number",
+      "name": "First Name",
+      "surname": "Last Name",
+      "nationalId": "National ID",
+      "birthDate": "Birth Date",
+      "password": "Password",
+      "email": "Email",
+      "phone": "Phone",
+      "email_or_phone": "Email or Phone",
+      "contact": "Contact"
+    },
+    "errors": {
+      "participant_not_found": "The voter is not listed in the census, or the provided credentials are incorrect.",
+      "credentials_or_password_incorrect": "We couldn't verify your identity. Check your credentials and your password and try again.",
+      "too_many_attempts": "Too many attempts. Please try again later.",
+      "too_many_attempts_minutes_one": "Too many attempts. Please try again in {{count}} minute.",
+      "too_many_attempts_minutes_other": "Too many attempts. Please try again in {{count}} minutes.",
+      "too_many_attempts_hours_one": "Too many attempts. Please try again in {{count}} hour.",
+      "too_many_attempts_hours_other": "Too many attempts. Please try again in {{count}} hours.",
+      "requests_on_cooldown": "Too many requests. Please wait a moment before trying again.",
+      "zero_voting_weight": "You don't have enough voting power to access the election."
+    },
+    "step1": {
+      "subtitle": "Enter the verification code",
+      "helper": "We've sent a code to your phone number or email address. If you chose to receive it by email, please check your spam folder.",
+      "resend": "Resend code",
+      "resend_success": "Code resent successfully",
+      "resend_failed": "Failed to resend code",
+      "resend_failed_detail": "Failed to resend code: {{ detail }}",
+      "start_over": "Start over",
+      "footer": "If you experience any issues, contact your organization.",
+      "validation": {
+        "required": "Code is required",
+        "length": "Code must be 6 digits"
+      }
+    },
+    "terms_required": "You must accept the terms to continue."
   },
   "pagination": {
     "page_placeholder": "Page #",

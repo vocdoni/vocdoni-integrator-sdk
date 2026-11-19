@@ -1,7 +1,7 @@
-import { FormEvent, Fragment, HTMLAttributes } from 'react'
+import { Fragment, HTMLAttributes, useEffect, useId, useRef } from 'react'
 import { HR } from '../shared/HR'
 import { linkifyIpfs } from '../shared/ipfs'
-import { ComponentsDefinition } from './types'
+import { ComponentsDefinition, CspAuthField, CspAuthModalSlotProps } from './types'
 
 const ActionButton = ({ label, loading, ...props }: any) => (
   <button {...props}>
@@ -32,6 +32,74 @@ const getTitle = (title: string | Record<string, string> | undefined): string =>
   if (!title) return ''
   if (typeof title === 'string') return title
   return title.default ?? Object.values(title)[0] ?? ''
+}
+
+// One text input, with its helper and error linked to it so screen readers announce both.
+const CspAuthFieldInput = ({ field }: { field: CspAuthField }) => {
+  const id = useId()
+  const helperId = field.helper ? `${id}-helper` : undefined
+  const errorId = field.error ? `${id}-error` : undefined
+  return (
+    <div>
+      <label>
+        {field.label}
+        <input
+          {...field.inputProps}
+          type={field.type}
+          required={field.required}
+          aria-invalid={field.error ? true : undefined}
+          aria-describedby={[helperId, errorId].filter(Boolean).join(' ') || undefined}
+        />
+      </label>
+      {field.helper ? <small id={helperId}>{field.helper}</small> : null}
+      {field.error ? <small id={errorId} role='alert'>{field.error}</small> : null}
+    </div>
+  )
+}
+
+const CspAuthModalShell = ({ isOpen, onClose, title, closeLabel, content, ...props }: CspAuthModalSlotProps) => {
+  const dialogRef = useRef<HTMLDivElement>(null)
+
+  // Focus moves into the dialog on open and returns to the element that had it on close.
+  useEffect(() => {
+    if (!isOpen) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    dialogRef.current?.focus()
+    return () => previous?.focus()
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [isOpen, onClose])
+
+  if (!isOpen) return null
+
+  return (
+    <div className='vocdoni-csp-auth-modal-overlay' role='presentation' onClick={onClose} {...props}>
+      <div
+        ref={dialogRef}
+        className='vocdoni-csp-auth-modal-content'
+        role='dialog'
+        aria-modal='true'
+        aria-label={title}
+        tabIndex={-1}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <h2>{title}</h2>
+          <button type='button' onClick={onClose}>
+            {closeLabel}
+          </button>
+        </header>
+        {content}
+      </div>
+    </div>
+  )
 }
 
 export const defaultComponents: ComponentsDefinition = {
@@ -255,71 +323,105 @@ export const defaultComponents: ComponentsDefinition = {
       ))}
     </div>
   ),
-  SpreadsheetAccess: ({
-    connected,
-    loading,
-    formError,
-    title,
-    open,
-    onOpen,
-    onClose,
-    onLogout,
-    onSubmit,
-    fields,
-    anonymousField,
-    extraFields,
-    ...props
-  }) => {
-    if (connected) {
-      return (
-        <button onClick={onLogout} disabled={loading}>
-          Logout
-        </button>
-      )
-    }
-
-    if (!open) {
-      return (
-        <button onClick={onOpen} disabled={loading}>
-          Identify
-        </button>
-      )
-    }
+  CspAuthTrigger: ({ label, onClick, loading, ...props }) => (
+    <button {...props} type='button' onClick={onClick} aria-busy={loading || undefined}>
+      {label}
+    </button>
+  ),
+  CspAuthLogout: ({ label, onClick, ...props }) => (
+    <button {...props} type='button' onClick={onClick}>
+      {label}
+    </button>
+  ),
+  CspAuthModal: CspAuthModalShell,
+  CspAuthIdentifyForm: ({ fields, terms, termsField, error, loading, submitLabel, info, onSubmit, ...props }) => {
+    const termsId = useId()
+    const termsErrorId = termsField?.error ? `${termsId}-error` : undefined
 
     return (
-      <div {...props}>
-        <h3>{title}</h3>
-        <form
-          onSubmit={(event: FormEvent<HTMLFormElement>) => {
-            onSubmit(event)
-          }}
-        >
-          {fields.map((field) => (
-            <label key={field.id}>
-              {field.label}
-              <input {...field.inputProps} {...field.inputAttrs} />
-              {field.error ? <small>{field.error}</small> : null}
-              {field.description ? <small>{field.description}</small> : null}
-            </label>
-          ))}
-          {anonymousField ? (
+      <form {...props} noValidate onSubmit={onSubmit}>
+        {fields.map((field) => (
+          <CspAuthFieldInput key={field.name} field={field} />
+        ))}
+        {termsField ? (
+          <div>
             <label>
-              {anonymousField.label}
-              <input {...anonymousField.inputProps} {...anonymousField.inputAttrs} />
-              {anonymousField.error ? <small>{anonymousField.error}</small> : null}
-              {anonymousField.description ? <small>{anonymousField.description}</small> : null}
+              <input
+                type='checkbox'
+                {...termsField.inputProps}
+                aria-invalid={termsField.error ? true : undefined}
+                aria-describedby={termsErrorId}
+              />
+              {terms}
             </label>
-          ) : null}
-          {formError ? <small>{formError}</small> : null}
-          {extraFields}
-          <button type='button' onClick={onClose}>
-            Close
-          </button>
-          <button type='submit' disabled={loading}>
-            Identify
-          </button>
-        </form>
-      </div>
+            {termsField.error ? <small id={termsErrorId} role='alert'>{termsField.error}</small> : null}
+          </div>
+        ) : (
+          terms
+        )}
+        {error ? <p role='alert'>{error}</p> : null}
+        <button type='submit' disabled={loading} aria-busy={loading || undefined}>
+          {submitLabel}
+        </button>
+        {info ? <p>{info}</p> : null}
+      </form>
+    )
+  },
+  CspAuthCodeForm: ({
+    title,
+    helper,
+    code,
+    length,
+    onCodeChange,
+    error,
+    notice,
+    loading,
+    submitLabel,
+    onSubmit,
+    resendLabel,
+    onResend,
+    resending,
+    startOverLabel,
+    onStartOver,
+    actionsDisabled,
+    footer,
+    ...props
+  }) => {
+    const id = useId()
+    const helperId = `${id}-helper`
+
+    return (
+      <form {...props} noValidate onSubmit={onSubmit}>
+        <label>
+          {title}
+          <input
+            inputMode='numeric'
+            autoComplete='one-time-code'
+            maxLength={length}
+            value={code}
+            aria-describedby={helperId}
+            onChange={(event) => onCodeChange(event.target.value)}
+          />
+        </label>
+        <p id={helperId}>{helper}</p>
+        {notice ? <p role='status'>{notice}</p> : null}
+        {error ? <p role='alert'>{error}</p> : null}
+        <button type='submit' disabled={loading} aria-busy={loading || undefined}>
+          {submitLabel}
+        </button>
+        <button
+          type='button'
+          onClick={onResend}
+          disabled={actionsDisabled || resending}
+          aria-busy={resending || undefined}
+        >
+          {resendLabel}
+        </button>
+        <button type='button' onClick={onStartOver} disabled={actionsDisabled}>
+          {startOverLabel}
+        </button>
+        {footer ? <p>{footer}</p> : null}
+      </form>
     )
   },
   ElectionActions: ({ actions, ...props }) => <div {...props}>{actions}</div>,

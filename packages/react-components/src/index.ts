@@ -8,6 +8,15 @@ export * from './i18n'
 export { ComponentsProvider } from './components/context/ComponentsProvider'
 export { composeComponents, defineComponent } from './components/context/helpers'
 export type {
+  CspAuthCodeFormSlotProps,
+  CspAuthField,
+  CspAuthTermsField,
+  CspAuthIdentifyFormSlotProps,
+  CspAuthLogoutSlotProps,
+  CspAuthModalSlotProps,
+  CspAuthTriggerSlotProps,
+} from './components/context/types'
+export type {
   AccountComponentsDefinition,
   ComponentsDefinition,
   ComponentsPartialDefinition,
