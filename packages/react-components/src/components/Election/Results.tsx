@@ -1,4 +1,4 @@
-import { decodeQuestionResults, questionReservesAbstain, tryInferQuestionBallotType } from '@vocdoni/ballot'
+import { decodeQuestionResults, isAbstainVisible, tryInferQuestionBallotType } from '@vocdoni/ballot'
 import { questionsEndedAt, resolveEndDate } from '@vocdoni/api-client'
 import { format } from 'date-fns'
 import { ComponentPropsWithoutRef } from 'react'
@@ -71,24 +71,10 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
     const decoded = decodeQuestionResults(question, rawResults)
     const choiceByValue = new Map(question.choices.map((choice) => [choice.value, choice]))
 
-    // The decoder always emits the multichoice abstain bucket, so this is where it
-    // gets suppressed. A protocol that reserves no sentinel headroom gives the chain
-    // nowhere to record an abstention, making that bucket structurally 0 — an
-    // "Abstention: 0" row on a ballot nobody can abstain on. Headroom keeps the row
-    // even at zero, because there the zero is a real measurement.
-    //
-    // Reserving headroom is not quite the same as having sentinel *columns*: those
-    // appear at maxValue >= numChoices, while headroom needs numChoices - 1 + maxCount
-    // (unique ballots). A protocol landing in between can carry real abstentions it
-    // does not formally reserve, so a non-zero bucket is always shown — dropping it
-    // would lose a measurement and leave the remaining percentages summing to under
-    // 100%, since the decoder counts abstain in the denominator either way.
-    const reservesAbstain = questionReservesAbstain(question)
-
     return {
       title,
       choices: decoded
-        .filter((row) => row.choice !== 'abstain' || reservesAbstain || row.votes > 0)
+        .filter((row) => row.choice !== 'abstain' || isAbstainVisible(question, row.votes))
         .map((row) => {
           if (row.choice === 'abstain') {
             return {
