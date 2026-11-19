@@ -405,11 +405,15 @@ one step, so closing the code dialog and reopening it from another button resume
 step. Without it each `<CspAuth />` keeps its own step. A session from an outer `ElectionProvider`
 is reused only when it belongs to the same `ElectionProvider` instance and process; a nested provider
 gets its own flow. A request in flight outlives the dialog that sent it: the trigger gets `loading`
-(rendered as `aria-busy`) until it settles, and only requests of the same session on the same process mark it busy.
+(rendered as `aria-busy`) until it settles, and only requests of the same session mark it busy.
 A failure that settles after the dialog closed is kept in the session and shown when it reopens.
-A process change, start over, or the app clearing the voter while the flow is on step 1 drops a
-request that is still in flight, so its outcome never moves the flow. Clearing the voter during an
-identify request (step 0) does not: if it succeeds, the flow still moves to step 1.
+A process change sends the flow back to identify and drops the typed values, the contact, the notice
+and the error. A request still in flight for the previous process keeps the session busy until it
+settles, but its outcome is ignored: it does not move the flow, nor write the voter session. A process
+change does not clear the voter session itself (`authToken`, a pending challenge): the app calls
+`clear()` or `clearVoter()`. Start over, or the app clearing the voter while the flow is on step 1,
+drops a request that is still in flight, so its outcome never moves the flow. Clearing the voter during
+an identify request (step 0) does not: if it succeeds, the flow still moves to step 1.
 
 `useCspAuthSession()` reads the shared session under a `<CspAuthSession>` (it throws outside one):
 `currentStep` (0 identify, 1 code), `contact`, `error`, `authFields`, `twoFaFields`, `processId` and
@@ -439,8 +443,8 @@ The flow is customizable through five slots, all in `ComponentsProvider`:
 | Slot | Props |
 |---|---|
 | `CspAuthTrigger` | `label`, `onClick`, `loading?` (aria-busy), plus HTML button attributes. Default: `<button>` |
-| `CspAuthLogout` | `label`, `onClick` (calls `clear()`), `disabled?` (true while a vote is being sent). Default: `<button>` |
-| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Rendered whenever `<CspAuth />` renders, with `isOpen` false while closed and once connected (so it sees the close); nothing renders before the election loads, nor for a certificate census before the voter connects. Default: overlay and `role="dialog"`; focus moves into the dialog on open and back on close; Escape and a click that starts and ends on the overlay close it. The default has no positioning or visual styles |
+| `CspAuthLogout` | `label`, `onClick` (calls `clear()`), `disabled?` (true while a vote is being sent), `autoFocus?` (true when it replaces an open dialog; the default takes focus). Default: `<button>` |
+| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Rendered whenever `<CspAuth />` renders, with `isOpen` false while closed and once connected (so it sees the close); nothing renders before the election loads, nor for a certificate census before the voter connects. Default: overlay and `role="dialog"`; focus moves into the dialog on open, Tab and Shift+Tab stay inside it, and focus returns to the opening element on close unless it has left the page; Escape and a click that starts and ends on the overlay close it. The default has no positioning or visual styles |
 | `CspAuthIdentifyForm` (step 0) | `fields: CspAuthField[]`, `terms?`, `termsField?: { error?, inputProps }` (set with `requireTerms`), `error?`, `loading`, `submitLabel`, `info?`, `onSubmit(event)` |
 | `CspAuthCodeForm` (step 1) | `title`, `helper`, `code`, `length`, `onCodeChange(code)`, `error?`, `notice?`, `loading`, `submitLabel`, `onSubmit(event)`, `resendLabel`, `onResend`, `resending`, `startOverLabel`, `onStartOver`, `actionsDisabled`, `footer?` |
 
@@ -549,8 +553,8 @@ Each slot receives the props typed as `<SlotName>SlotProps` (exported from `@voc
 ```tsx
 import { ComponentsProvider, CspAuth, type CspAuthTriggerSlotProps } from '@vocdoni/react-components'
 
-const Trigger = ({ label, loading, ...props }: CspAuthTriggerSlotProps) => (
-  <button className='btn btn-primary' aria-busy={loading || undefined} {...props}>
+const Trigger = ({ label, loading, className, ...props }: CspAuthTriggerSlotProps) => (
+  <button {...props} className={`btn btn-primary ${className ?? ''}`.trim()} aria-busy={loading || undefined}>
     {label}
   </button>
 )
