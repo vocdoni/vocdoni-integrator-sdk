@@ -61,6 +61,7 @@ export const Voted = () => {
 
   if (entries.length === 0) return null
 
+  // Mirrors api-client's `explorerVoteUrl`, which takes a network rather than a base URL.
   const verifyUrl = (id: string) => (explorerUrl && id ? `${explorerUrl}/verify/${encodeURIComponent(id)}` : undefined)
 
   const votes: VotedVote[] = entries.map((entry) => {

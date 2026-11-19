@@ -254,7 +254,7 @@ export interface ElectionProviderBaseProps {
   resultsQueryOptions?: ElectionResultsQueryOptions
   /** Vote relay tuning — see {@link VoteOptions}. */
   voteOptions?: VoteOptions
-  /** Block-explorer base URL, overriding the default of the process's network. */
+  /** Block-explorer base URL, overriding the network default. An empty value falls back to the default. */
   explorerUrl?: string
 }
 
@@ -504,8 +504,8 @@ export function ElectionProvider({
   const chainId = election?.chainId ?? null
 
   const explorer = useMemo(() => {
-    const base = (explorerOverride ?? explorerBaseUrl(chainId))?.replace(/\/+$/, '')
-    return base || null
+    const override = explorerOverride?.replace(/\/+$/, '')
+    return (override || explorerBaseUrl(chainId)) ?? null
   }, [explorerOverride, chainId])
 
   const status = useProcessStatus(election)
