@@ -11,6 +11,16 @@ export const getContactFieldLabel = (t: CspAuthTranslate, twoFaFields: readonly 
   return t('csp.fields.contact')
 }
 
+// The single contact input takes the type of the only channel it can carry, `text` when both are allowed.
+export const getContactInputType = (twoFaFields: readonly string[]): string => {
+  const email = twoFaFields.includes('email')
+  const phone = twoFaFields.includes('phone')
+
+  if (email && !phone) return getAuthFieldInputType('email')
+  if (phone && !email) return getAuthFieldInputType('phone')
+  return 'text'
+}
+
 export const getAuthFieldLabel = (t: CspAuthTranslate, field: string): string =>
   ['memberNumber', 'name', 'surname', 'nationalId', 'birthDate', 'password'].includes(field)
     ? t(`csp.fields.${field}`)

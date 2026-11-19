@@ -27,6 +27,7 @@ const ORG = '0x00000000000000000000000000000000000000AA'
 type ElectionScope = {
   election: { id: string; orgAddress: string; census: { authFields: string[]; twoFaFields: string[] } } | null
   connected: boolean
+  challengePending: boolean
   auth0: Mock
   auth1: Mock
   resend: Mock
@@ -36,6 +37,8 @@ type ElectionScope = {
 const makeScope = (over: Partial<ElectionScope> = {}): ElectionScope => ({
   election: { id: 'proc-1', orgAddress: ORG, census: { authFields: ['memberNumber'], twoFaFields: [] } },
   connected: false,
+  // Step 0 leaves the challenge pending; a test clears it to model the app calling clear().
+  challengePending: true,
   auth0: vi.fn(async () => {}),
   auth1: vi.fn(async () => {}),
   resend: vi.fn(async () => {}),
@@ -102,7 +105,7 @@ describe('CspAuth', () => {
     openIdentify()
     expect(fieldNames()).toEqual(['memberNumber', 'name', 'password', 'contact'])
     expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password')
-    expect(screen.getByLabelText(/^Email/)).toBeInTheDocument()
+    expect(screen.getByLabelText(/^Email/)).toHaveAttribute('type', 'email')
   })
 
   it('sends the password as its hash, never the plaintext', async () => {
@@ -394,7 +397,9 @@ describe('CspAuth', () => {
     renderCsp(<CspAuth />, makeScope())
     openIdentify()
 
-    fireEvent.click(document.querySelector('.vocdoni-csp-auth-modal-overlay')!)
+    const overlay = document.querySelector('.vocdoni-csp-auth-modal-overlay')!
+    fireEvent.mouseDown(overlay)
+    fireEvent.click(overlay)
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
@@ -539,7 +544,7 @@ describe('CspAuth', () => {
         info: expect.any(String),
         fields: [
           expect.objectContaining({ name: 'memberNumber', label: 'Member Number', type: 'text', required: true }),
-          expect.objectContaining({ name: 'contact', label: 'Phone', type: 'text', required: true }),
+          expect.objectContaining({ name: 'contact', label: 'Phone', type: 'tel', required: true }),
         ],
         onSubmit: expect.any(Function),
       }),
@@ -554,5 +559,224 @@ describe('CspAuth', () => {
       expect.objectContaining({ label: 'Logout', onClick: expect.any(Function) }),
       undefined,
     )
+  })
+  it('keeps the dialog open when a drag starts inside it and ends on the overlay', () => {
+    renderCsp(<CspAuth />, makeScope())
+    openIdentify()
+
+    fireEvent.mouseDown(screen.getByRole('dialog'))
+    fireEvent.click(document.querySelector('.vocdoni-csp-auth-modal-overlay')!)
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('uses the email input type for an email-only census and text when both channels are allowed', () => {
+    renderCsp(<CspAuth />, makeScope({ election: twoFa({ twoFaFields: ['email'] }) }))
+    openIdentify()
+    expect(screen.getByLabelText('Email')).toHaveAttribute('type', 'email')
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Identify' }))
+    expect(screen.getByLabelText('Email')).toHaveAttribute('type', 'email')
+  })
+
+  it('uses the text input type when both channels are allowed', () => {
+    renderCsp(<CspAuth />, makeScope({ election: twoFa({ twoFaFields: ['email', 'phone'] }) }))
+    openIdentify()
+    expect(screen.getByLabelText('Email or Phone')).toHaveAttribute('type', 'text')
+  })
+
+  it('rejects a whitespace-only value as required, without sending it', async () => {
+    const scope = makeScope()
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('This field is required')
+    expect(scope.auth0).not.toHaveBeenCalled()
+  })
+
+  it('does not mark a flow busy for a request on another process', async () => {
+    const pending = deferred()
+    const procA = makeScope({ election: { id: 'proc-A', orgAddress: ORG, census: { authFields: ['memberNumber'], twoFaFields: [] } } })
+    const procB = makeScope({ election: { id: 'proc-B', orgAddress: ORG, census: { authFields: ['memberNumber'], twoFaFields: [] } } })
+    procA.auth0.mockReturnValueOnce(pending.promise)
+    renderCsp(
+      <>
+        <electionScope.context.Provider value={procA}>
+          <CspAuth />
+        </electionScope.context.Provider>
+        <electionScope.context.Provider value={procB}>
+          <CspAuth />
+        </electionScope.context.Provider>
+      </>,
+      procA,
+    )
+    const [triggerA, triggerB] = screen.getAllByRole('button', { name: 'Identify' })
+    fireEvent.click(triggerA)
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }))
+    await waitFor(() => expect(procA.auth0).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(triggerB).not.toHaveAttribute('aria-busy')
+    fireEvent.click(triggerB)
+    expect(screen.getByRole('button', { name: 'Authenticate' })).toBeEnabled()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '7' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }))
+    await waitFor(() => expect(procB.auth0).toHaveBeenCalledWith({ memberNumber: '7' }))
+
+    await act(async () => pending.resolve())
+  })
+
+  it('gives each ElectionProvider for the same process its own flow', async () => {
+    const outer = makeScope({ election: twoFa() })
+    const inner = makeScope({
+      election: { id: 'proc-1', orgAddress: ORG, census: { authFields: ['memberNumber'], twoFaFields: [] } },
+    })
+    renderCsp(
+      <CspAuthSession>
+        <CspAuth />
+        <electionScope.context.Provider value={inner}>
+          <CspAuth />
+        </electionScope.context.Provider>
+      </CspAuthSession>,
+      outer,
+    )
+    const [outerTrigger, innerTrigger] = screen.getAllByRole('button', { name: 'Identify' })
+    fireEvent.click(outerTrigger)
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    await screen.findByLabelText('Enter the verification code')
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    // The outer flow is on its code step; the inner provider is auth-only and starts at identify.
+    fireEvent.click(innerTrigger)
+    expect(screen.queryByLabelText('Enter the verification code')).not.toBeInTheDocument()
+    expect(fieldNames()).toEqual(['memberNumber'])
+  })
+
+  it('drops the step change of a request that settles after the process changed', async () => {
+    const pending = deferred()
+    const scope = makeScope({ election: twoFa() })
+    scope.auth0.mockReturnValueOnce(pending.promise)
+    const { setScope } = renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    await waitFor(() => expect(scope.auth0).toHaveBeenCalledTimes(1))
+
+    setScope({ ...scope, election: { ...twoFa()!, id: 'proc-2' } })
+    await act(async () => pending.resolve())
+
+    expect(screen.queryByLabelText('Enter the verification code')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Member Number')).toBeInTheDocument()
+  })
+
+  it('shows a failure that settles after the dialog closed when it reopens', async () => {
+    const pending = deferred()
+    const scope = makeScope()
+    scope.auth0.mockReturnValueOnce(pending.promise)
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }))
+    await waitFor(() => expect(scope.auth0).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    await act(async () => pending.reject(new VocdoniApiError(401, { code: 40802 }, 'not found', 40802)))
+    openIdentify()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The voter is not listed in the census, or the provided credentials are incorrect.',
+    )
+  })
+
+  it('submits a complete code typed during a resend once the resend settles', async () => {
+    const pending = deferred()
+    const scope = makeScope({ election: twoFa() })
+    scope.resend.mockReturnValueOnce(pending.promise)
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    const code = await screen.findByLabelText('Enter the verification code')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
+    await waitFor(() => expect(scope.resend).toHaveBeenCalledTimes(1))
+    fireEvent.change(code, { target: { value: '123456' } })
+    expect(scope.auth1).not.toHaveBeenCalled()
+
+    await act(async () => pending.resolve())
+    await waitFor(() => expect(scope.auth1).toHaveBeenCalledWith('123456'))
+    expect(scope.auth1).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the code input without a maxLength, so a pasted code is filtered rather than cut', async () => {
+    const scope = makeScope({ election: twoFa() })
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    const code = await screen.findByLabelText('Enter the verification code')
+    expect(code).not.toHaveAttribute('maxLength')
+
+    fireEvent.change(code, { target: { value: '123 456' } })
+
+    await waitFor(() => expect(scope.auth1).toHaveBeenCalledWith('123456'))
+  })
+
+  it('tells the voter to start over when a resend hits the per-token resend cap', async () => {
+    const scope = makeScope({ election: twoFa() })
+    scope.resend.mockRejectedValueOnce(new VocdoniApiError(429, { code: 40017 }, 'limited', 40017))
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    await screen.findByLabelText('Enter the verification code')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Failed to resend code: You can't request more codes for this attempt. Start over to get a new one.",
+    )
+  })
+
+  it('tells the voter the code is not valid when the code step rejects it', async () => {
+    const scope = makeScope({ election: twoFa() })
+    scope.auth1.mockRejectedValueOnce(new VocdoniApiError(401, { code: 40001 }, 'unauthorized', 40001))
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    const code = await screen.findByLabelText('Enter the verification code')
+
+    fireEvent.change(code, { target: { value: '123456' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The code is not valid or has expired. Check it, or start over to get a new one.',
+    )
+  })
+
+  it('starts over when the app clears the pending challenge on the code step', async () => {
+    const scope = makeScope({ election: twoFa() })
+    const { setScope } = renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    await screen.findByLabelText('Enter the verification code')
+
+    setScope({ ...scope, challengePending: false })
+
+    expect(screen.queryByLabelText('Enter the verification code')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Member Number')).toBeInTheDocument()
   })
 })

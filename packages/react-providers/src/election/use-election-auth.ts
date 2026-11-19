@@ -59,6 +59,11 @@ export interface ElectionAuthContextValue {
   authToken: string | null
   /** true once the voter holds a verified auth token. */
   connected: boolean
+  /**
+   * true while a step-0 token awaits {@link auth1}: the identify is done and the code is still due.
+   * False again once connected, and after {@link clear}.
+   */
+  challengePending: boolean
   /** Census weight (decoded), populated after auth/check. */
   weight: number | null
   /**
@@ -282,6 +287,7 @@ export function useVoterSession(
       owner,
       authToken,
       connected: !!authToken,
+      challengePending: !!pendingToken && !authToken,
       weight,
       auth0,
       auth1,
@@ -291,7 +297,7 @@ export function useVoterSession(
       signBatch,
       clear,
     }),
-    [owner, authToken, weight, auth0, auth1, resend, check, sign, signBatch, clear],
+    [owner, authToken, pendingToken, weight, auth0, auth1, resend, check, sign, signBatch, clear],
   )
 }
 

@@ -2,6 +2,9 @@ import { VocdoniApiError } from '@vocdoni/api-client'
 
 export type CspAuthTranslate = (key: string, substitutions?: Record<string, unknown>) => string
 
+/** The request that failed: step 0 (identify), step 1 (the one-time code) or a resend. */
+export type CspAuthErrorStep = 'identify' | 'code' | 'resend'
+
 // Seconds until a rate-limited voter may retry, from the 40017 body's `data.retryAfter`.
 const retryAfterSeconds = (body: unknown): number | undefined => {
   if (typeof body !== 'object' || body === null || !('data' in body)) return undefined
@@ -12,7 +15,11 @@ const retryAfterSeconds = (body: unknown): number | undefined => {
 }
 
 // Maps the SaaS CSP auth error codes to voter-facing messages. Any other failure keeps its own message.
-export const translateCspAuthError = (error: unknown, t: CspAuthTranslate, hasPassword: boolean): Error => {
+export const translateCspAuthError = (
+  error: unknown,
+  t: CspAuthTranslate,
+  { step, hasPassword }: { step: CspAuthErrorStep; hasPassword: boolean }
+): Error => {
   if (error instanceof VocdoniApiError) {
     switch (error.code) {
       // 40802 covers both an unknown participant and a contact mismatch; older backends send 40029.
@@ -23,9 +30,20 @@ export const translateCspAuthError = (error: unknown, t: CspAuthTranslate, hasPa
         return new Error(
           hasPassword ? t('csp.errors.credentials_or_password_incorrect') : t('csp.errors.participant_not_found')
         )
+      case 40001:
+        // Wrong code, expired token or too many attempts: the code step only.
+        if (step === 'code') return new Error(t('csp.errors.code_rejected'))
+        break
+      case 40005:
+        // Required auth data is missing: the identify step only.
+        if (step === 'identify') return new Error(t('csp.errors.missing_data'))
+        break
       case 40017: {
         const retryAfter = retryAfterSeconds(error.body)
-        if (retryAfter === undefined) return new Error(t('csp.errors.too_many_attempts'))
+        // A resend without a retryAfter has hit the token's resend cap: only a new attempt gets a new code.
+        if (retryAfter === undefined) {
+          return new Error(t(step === 'resend' ? 'csp.errors.resend_limit' : 'csp.errors.too_many_attempts'))
+        }
         if (retryAfter < 3600) {
           const count = Math.max(1, Math.ceil(retryAfter / 60))
           return new Error(t('csp.errors.too_many_attempts_minutes', { count }))

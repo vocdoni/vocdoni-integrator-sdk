@@ -59,6 +59,8 @@ const CspAuthFieldInput = ({ field }: { field: CspAuthField }) => {
 
 const CspAuthModalShell = ({ isOpen, onClose, title, closeLabel, content, ...props }: CspAuthModalSlotProps) => {
   const dialogRef = useRef<HTMLDivElement>(null)
+  // A drag that starts inside the dialog and ends on the overlay also clicks the overlay: only a press on it closes.
+  const pressedOverlay = useRef(false)
 
   // Focus moves into the dialog on open and returns to the element that had it on close.
   useEffect(() => {
@@ -80,7 +82,17 @@ const CspAuthModalShell = ({ isOpen, onClose, title, closeLabel, content, ...pro
   if (!isOpen) return null
 
   return (
-    <div className='vocdoni-csp-auth-modal-overlay' role='presentation' onClick={onClose} {...props}>
+    <div
+      className='vocdoni-csp-auth-modal-overlay'
+      role='presentation'
+      onMouseDown={(event) => {
+        pressedOverlay.current = event.target === event.currentTarget
+      }}
+      onClick={(event) => {
+        if (pressedOverlay.current && event.target === event.currentTarget) onClose()
+      }}
+      {...props}
+    >
       <div
         ref={dialogRef}
         className='vocdoni-csp-auth-modal-content'
@@ -385,6 +397,8 @@ export const defaultComponents: ComponentsDefinition = {
     onStartOver,
     actionsDisabled,
     footer,
+    // Not on the input: a maxLength would cut a pasted "123 456" before its digits are filtered.
+    length: _length,
     ...props
   }) => {
     const id = useId()
@@ -397,7 +411,6 @@ export const defaultComponents: ComponentsDefinition = {
           <input
             inputMode='numeric'
             autoComplete='one-time-code'
-            maxLength={length}
             value={code}
             aria-describedby={helperId}
             onChange={(event) => onCodeChange(event.target.value)}

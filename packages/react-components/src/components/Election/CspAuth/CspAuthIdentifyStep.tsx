@@ -1,13 +1,13 @@
 import { hashMemberPassword } from '@vocdoni/api-client'
 import type { AuthRequest } from '@vocdoni/api-types'
 import { useElection } from '@vocdoni/react-providers'
-import { type ReactNode, useRef, useState } from 'react'
+import { type ReactNode, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { useReactComponentsLocalize } from '../../../i18n/localize'
 import type { CspAuthField } from '../../context/types'
 import { useComponents } from '../../context/useComponents'
 import { useCspAuthSession } from './CspAuthSession'
-import { getAuthFieldInputType, getAuthFieldLabel, getContactFieldLabel } from './fields'
+import { getAuthFieldInputType, getAuthFieldLabel, getContactFieldLabel, getContactInputType } from './fields'
 import { useCspAuth0, useCspAuthPending, useIsCspAuthBusy } from './mutations'
 
 type IdentifyValues = Record<string, string | boolean | undefined>
@@ -18,7 +18,8 @@ const text = (value: IdentifyValues[string]) => (typeof value === 'string' ? val
 export const CspAuthIdentifyStep = ({ terms, requireTerms }: { terms?: ReactNode; requireTerms?: boolean }) => {
   const t = useReactComponentsLocalize()
   const { election } = useElection()
-  const { setCurrentStep, setContact, setPendingNotice, authFields, twoFaFields } = useCspAuthSession()
+  const { setCurrentStep, setContact, setPendingNotice, error, setError, getFlowGeneration, authFields, twoFaFields } =
+    useCspAuthSession()
   const { CspAuthIdentifyForm: Slot } = useComponents()
   const {
     register,
@@ -28,7 +29,6 @@ export const CspAuthIdentifyStep = ({ terms, requireTerms }: { terms?: ReactNode
   const auth = useCspAuth0()
   const authPending = useCspAuthPending()
   const isAuthBusy = useIsCspAuthBusy()
-  const [error, setError] = useState<string>()
   // Set synchronously: the busy flag only turns on once the mutation starts, after the password hash is awaited.
   const submitting = useRef(false)
   const is2Factor = twoFaFields.length > 0
@@ -66,10 +66,13 @@ export const CspAuthIdentifyStep = ({ terms, requireTerms }: { terms?: ReactNode
     if (submitting.current || isAuthBusy()) return
     submitting.current = true
     setError(undefined)
+    // A reset while the request is in flight (process change, logout, start over) makes its outcome stale.
+    const flow = getFlowGeneration()
 
     try {
       const request = await buildRequest(values)
       await auth.mutateAsync(request)
+      if (flow !== getFlowGeneration()) return
       setContact({ email: request.email, phone: request.phone })
       // Without 2FA the provider is already connected, so there is no next step.
       if (is2Factor) {
@@ -77,7 +80,7 @@ export const CspAuthIdentifyStep = ({ terms, requireTerms }: { terms?: ReactNode
         setCurrentStep(1)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('csp.auth_failed'))
+      if (flow === getFlowGeneration()) setError(err instanceof Error ? err.message : t('csp.auth_failed'))
     } finally {
       submitting.current = false
     }
@@ -94,17 +97,17 @@ export const CspAuthIdentifyStep = ({ terms, requireTerms }: { terms?: ReactNode
     type: getAuthFieldInputType(field),
     required: true,
     error: errors[field] ? t('validation.required') : undefined,
-    inputProps: register(field, { required: true }),
+    inputProps: register(field, { required: true, validate: (value) => text(value) !== '' }),
   }))
   if (is2Factor) {
     fields.push({
       name: 'contact',
       label: getContactFieldLabel(t, twoFaFields),
-      type: 'text',
+      type: getContactInputType(twoFaFields),
       required: true,
       helper: t('csp.contact_match_help'),
       error: errors.contact ? t('validation.required') : undefined,
-      inputProps: register('contact', { required: true }),
+      inputProps: register('contact', { required: true, validate: (value) => text(value) !== '' }),
     })
   }
 

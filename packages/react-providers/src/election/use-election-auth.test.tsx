@@ -79,6 +79,30 @@ describe('useElectionAuth', () => {
       })
       expect(result.current.auth.connected).toBe(false)
     })
+
+    it('reports challengePending from step 0 until step 1 or clear()', async () => {
+      const { result } = renderHook(useHooks, { wrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+      expect(result.current.auth.challengePending).toBe(false)
+
+      await act(async () => {
+        await result.current.auth.auth0({ email: 'voter@example.com' })
+      })
+      expect(result.current.auth.challengePending).toBe(true)
+      expect(result.current.election.challengePending).toBe(true)
+
+      await act(async () => {
+        await result.current.auth.auth1(['123456'])
+      })
+      expect(result.current.auth.challengePending).toBe(false)
+
+      await act(async () => {
+        await result.current.auth.auth0({ email: 'voter@example.com' })
+      })
+      act(() => result.current.auth.clear())
+      expect(result.current.auth.challengePending).toBe(false)
+      expect(result.current.election.challengePending).toBe(false)
+    })
   })
 
   describe('auth-only census', () => {

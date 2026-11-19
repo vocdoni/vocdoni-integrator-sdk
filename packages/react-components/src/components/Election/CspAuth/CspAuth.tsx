@@ -27,13 +27,14 @@ export type CspAuthProps = {
  */
 export const CspAuth = (props: CspAuthProps) => {
   const { election } = useElection()
+  const { clear } = useElectionAuth()
   const session = useOptionalCspAuthSession()
 
   if (!election) return null
 
-  // Reuse a session only when it is scoped to this process: a CspAuth under a nested ElectionProvider must not borrow
-  // another process' census fields or step.
-  if (session?.processId === election.id) return <CspAuthControls {...props} />
+  // Reuse a session only when it belongs to this ElectionProvider and process: a CspAuth under a nested provider
+  // must not borrow another provider's tokens, nor its step.
+  if (session?.processId === election.id && session.providerClear === clear) return <CspAuthControls {...props} />
 
   return (
     <CspAuthSession>

@@ -1,6 +1,6 @@
 import type { OrgMemberAuthField, OrgMemberTwoFaField } from '@vocdoni/api-types'
 import { useElection, useElectionAuth } from '@vocdoni/react-providers'
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 /** The contact the one-time code was sent to, kept so step 1 can resend it. */
 export type CspAuthContact = {
@@ -22,11 +22,21 @@ export type CspAuthSessionValue = {
    */
   pendingNotice?: string
   setPendingNotice: (key?: string) => void
+  /** The last step error. Kept here, not in the step, so a request that fails after the dialog closed still shows. */
+  error?: string
+  setError: (message?: string) => void
+  /** The current flow generation: `resetFlow` bumps it, so a request that settles after a reset can tell it is stale. */
+  getFlowGeneration: () => number
   authFields: OrgMemberAuthField[]
   twoFaFields: OrgMemberTwoFaField[]
   /** The process this flow authenticates against. */
   processId?: string
-  /** Back to step 0 with no stored contact. */
+  /**
+   * The `clear` of the ElectionProvider this session belongs to. It is stable per provider instance,
+   * so it tells apart two providers for the same process.
+   */
+  providerClear: () => void
+  /** Back to step 0 with no stored contact, and no error. */
   resetFlow: () => void
 }
 
@@ -39,24 +49,36 @@ const CspAuthSessionContext = createContext<CspAuthSessionValue | undefined>(und
  */
 export const CspAuthSession = ({ children }: { children: ReactNode }) => {
   const { election } = useElection()
-  const { connected } = useElectionAuth()
+  const { connected, challengePending, clear } = useElectionAuth()
   const [currentStep, setCurrentStep] = useState<CspAuthStep>(0)
   const [contact, setContact] = useState<CspAuthContact>({})
   const [pendingNotice, setPendingNotice] = useState<string>()
+  const [error, setError] = useState<string>()
+  const flowGeneration = useRef(0)
   const processId = election?.id
 
   // Bails out when the flow is already at its start, so the mount-time run does not re-render every consumer.
   const resetFlow = useCallback(() => {
+    flowGeneration.current += 1
     setCurrentStep(0)
     setContact((prev) => (prev.email || prev.phone ? {} : prev))
     setPendingNotice(undefined)
+    setError(undefined)
   }, [])
+
+  const getFlowGeneration = useCallback(() => flowGeneration.current, [])
 
   // Once the voter connects, the next identify starts from scratch:
   // after a logout, step 1 would point at a cleared token.
   useEffect(() => {
     if (connected) resetFlow()
   }, [connected, resetFlow])
+
+  // Step 1 needs the challenge that step 0 left pending. When the app cleared it (clear, clearVoter), the code
+  // can no longer be confirmed, so the flow starts over. auth0 sets the challenge before step 0 moves to step 1.
+  useEffect(() => {
+    if (currentStep === 1 && !challengePending && !connected) resetFlow()
+  }, [currentStep, challengePending, connected, resetFlow])
 
   useEffect(() => {
     resetFlow()
@@ -71,12 +93,16 @@ export const CspAuthSession = ({ children }: { children: ReactNode }) => {
       setContact,
       pendingNotice,
       setPendingNotice,
+      error,
+      setError,
+      getFlowGeneration,
       authFields: census?.authFields ?? [],
       twoFaFields: census?.twoFaFields ?? [],
       processId,
+      providerClear: clear,
       resetFlow,
     }),
-    [currentStep, contact, pendingNotice, census, processId, resetFlow]
+    [currentStep, contact, pendingNotice, error, census, processId, clear, getFlowGeneration, resetFlow]
   )
 
   return <CspAuthSessionContext.Provider value={value}>{children}</CspAuthSessionContext.Provider>

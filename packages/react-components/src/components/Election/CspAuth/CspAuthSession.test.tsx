@@ -1,5 +1,5 @@
 import { act, fireEvent, renderHook, screen } from '@testing-library/react'
-import { type Context, type ReactNode, useEffect } from 'react'
+import { type Context, type ReactNode, useEffect, useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { renderWithComponents } from '../../../test-utils'
 
@@ -16,11 +16,13 @@ import { CspAuthSession, useCspAuthSession } from './CspAuthSession'
 type ElectionScope = {
   election: { id: string; census?: { authFields?: string[]; twoFaFields?: string[] } } | null
   connected: boolean
+  challengePending: boolean
 }
 
 const processOne: ElectionScope = {
   election: { id: 'proc-1', census: { authFields: ['memberNumber', 'password'], twoFaFields: ['email'] } },
   connected: false,
+  challengePending: true,
 }
 
 const mounts = vi.hoisted(() => ({ count: 0 }))
@@ -48,6 +50,29 @@ const Probe = () => {
         advance
       </button>
     </>
+  )
+}
+
+// Holds the scope in state, so a test can change it in the same event as a step change, the way auth0 and the identify step do.
+const driver = vi.hoisted(() => ({ setScope: null as null | ((next: ElectionScope) => void) }))
+const Driver = ({ initial, children }: { initial: ElectionScope; children: ReactNode }) => {
+  const [scope, setScope] = useState(initial)
+  driver.setScope = setScope
+  return <electionScope.context.Provider value={scope}>{children}</electionScope.context.Provider>
+}
+
+// Sets the challenge and moves to step 1 in one event, as the identify step does after auth0 resolves.
+const IdentifyButton = () => {
+  const session = useCspAuthSession()
+  return (
+    <button
+      onClick={() => {
+        driver.setScope?.({ ...processOne, challengePending: true })
+        session.setCurrentStep(1)
+      }}
+    >
+      identify step
+    </button>
   )
 }
 
@@ -87,7 +112,7 @@ describe('CspAuthSession', () => {
   it('stays mounted, so its children do not remount, when the election loads', () => {
     mounts.count = 0
     const { setScope } = renderSession(
-      { election: null, connected: false },
+      { election: null, connected: false, challengePending: false },
       <Mounted>
         <Probe />
       </Mounted>,
@@ -112,8 +137,35 @@ describe('CspAuthSession', () => {
     const { setScope } = renderSession(processOne)
     fireEvent.click(screen.getByRole('button', { name: 'advance' }))
 
-    act(() => setScope({ election: { id: 'proc-2', census: { authFields: ['name'] } }, connected: false }))
+    act(() =>
+      setScope({ election: { id: 'proc-2', census: { authFields: ['name'] } }, connected: false, challengePending: true }),
+    )
 
     expect(session()).toBe('0|-|proc-2|name|')
+  })
+
+  it('goes back to step 0 when the app clears the pending challenge on step 1', () => {
+    const { setScope } = renderSession(processOne)
+    fireEvent.click(screen.getByRole('button', { name: 'advance' }))
+    expect(session()).toBe('1|jane@example.com|proc-1|memberNumber,password|email')
+
+    setScope({ ...processOne, challengePending: false })
+
+    expect(session()).toBe('0|-|proc-1|memberNumber,password|email')
+  })
+
+  it('stays on step 1 when the challenge is set in the same batch as the step change', () => {
+    renderWithComponents(
+      <Driver initial={{ ...processOne, challengePending: false }}>
+        <CspAuthSession>
+          <Probe />
+          <IdentifyButton />
+        </CspAuthSession>
+      </Driver>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'identify step' }))
+
+    expect(session()).toBe('1|-|proc-1|memberNumber,password|email')
   })
 })

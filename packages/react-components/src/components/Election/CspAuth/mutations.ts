@@ -3,25 +3,27 @@ import type { AuthRequest } from '@vocdoni/api-types'
 import { useElectionAuth } from '@vocdoni/react-providers'
 import { useReactComponentsLocalize } from '../../../i18n/localize'
 import { useOptionalCspAuthSession } from './CspAuthSession'
-import { translateCspAuthError } from './errors'
+import { type CspAuthErrorStep, translateCspAuthError } from './errors'
 
 // Every auth request shares this key prefix, so an in-flight request outlives the dialog that sent it:
 // closing the modal unmounts the step (and its mutation observer), not the request.
-const cspAuthMutationKey = ['vocdoni', 'csp-auth']
+// The process id is part of the key, so a request on one process does not mark another process' flow busy.
+const cspAuthMutationKey = (processId?: string) => ['vocdoni', 'csp-auth', processId]
 
-const useCspAuthErrorTranslator = () => {
+const useCspAuthErrorTranslator = (step: CspAuthErrorStep) => {
   const t = useReactComponentsLocalize()
   const hasPassword = !!useOptionalCspAuthSession()?.authFields.includes('password')
-  return (error: unknown) => translateCspAuthError(error, t, hasPassword)
+  return (error: unknown) => translateCspAuthError(error, t, { step, hasPassword })
 }
 
 // Step 0: identify the participant. For auth-only censuses the provider is connected right after.
 export const useCspAuth0 = () => {
   const { auth0 } = useElectionAuth()
-  const translateError = useCspAuthErrorTranslator()
+  const processId = useOptionalCspAuthSession()?.processId
+  const translateError = useCspAuthErrorTranslator('identify')
 
   return useMutation<void, Error, AuthRequest>({
-    mutationKey: [...cspAuthMutationKey, 0],
+    mutationKey: [...cspAuthMutationKey(processId), 0],
     mutationFn: async (participant) => {
       try {
         await auth0(participant)
@@ -35,10 +37,11 @@ export const useCspAuth0 = () => {
 // Step 1: confirm the one-time code; marks the voter connected.
 export const useCspAuth1 = () => {
   const { auth1 } = useElectionAuth()
-  const translateError = useCspAuthErrorTranslator()
+  const processId = useOptionalCspAuthSession()?.processId
+  const translateError = useCspAuthErrorTranslator('code')
 
   return useMutation<void, Error, string>({
-    mutationKey: [...cspAuthMutationKey, 1],
+    mutationKey: [...cspAuthMutationKey(processId), 1],
     mutationFn: async (code) => {
       try {
         await auth1(code)
@@ -51,10 +54,11 @@ export const useCspAuth1 = () => {
 
 export const useCspResend = () => {
   const { resend } = useElectionAuth()
-  const translateError = useCspAuthErrorTranslator()
+  const processId = useOptionalCspAuthSession()?.processId
+  const translateError = useCspAuthErrorTranslator('resend')
 
   return useMutation<void, Error, { email?: string; phone?: string }>({
-    mutationKey: [...cspAuthMutationKey, 'resend'],
+    mutationKey: [...cspAuthMutationKey(processId), 'resend'],
     mutationFn: async (contact) => {
       try {
         await resend(contact)
@@ -65,12 +69,16 @@ export const useCspResend = () => {
   })
 }
 
-// True while any auth request (identify, code or resend) is in flight, whichever dialog sent it.
-export const useCspAuthPending = () => useIsMutating({ mutationKey: cspAuthMutationKey }) > 0
+// True while any auth request (identify, code or resend) on this process is in flight, whichever dialog sent it.
+export const useCspAuthPending = () => {
+  const processId = useOptionalCspAuthSession()?.processId
+  return useIsMutating({ mutationKey: cspAuthMutationKey(processId) }) > 0
+}
 
 // The same check read at call time: a handler such as the code auto-submit can run before
 // the render that would show a request just sent.
 export const useIsCspAuthBusy = () => {
   const client = useQueryClient()
-  return () => client.isMutating({ mutationKey: cspAuthMutationKey }) > 0
+  const processId = useOptionalCspAuthSession()?.processId
+  return () => client.isMutating({ mutationKey: cspAuthMutationKey(processId) }) > 0
 }
