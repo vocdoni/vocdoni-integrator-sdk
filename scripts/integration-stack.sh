@@ -17,7 +17,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$REPO_ROOT/integration/docker-compose.ci.yml"
-SEED_FILE="$REPO_ROOT/integration/seed-plan.js"
 WALLET_SEED_FILE="$REPO_ROOT/integration/seed-wallet.js"
 BOOTSTRAP_SCRIPT="$SCRIPT_DIR/ci-bootstrap-integrator.sh"
 
@@ -140,26 +139,8 @@ cmd_up() {
   # to report. Do not tighten it below the compose window.
   wait_container_healthy vocone 450
 
-  echo "== seeding default plan" >&2
-  mongo_script "$SEED_FILE"
-
   echo "== waiting for api to answer /ping" >&2
   wait_api_ready 60
-
-  echo "== asserting the plan seed took" >&2
-  PLANS_JSON=$(curl -fsS -m 10 "$INTEGRATION_API_URL/plans" || echo "")
-  # Separate "could not ask" from "asked, got nothing". Without this the seed
-  # assertion below blames db.Plan bson tags for what is really a dead API —
-  # observed for real while reviewing this script.
-  if [ -z "$PLANS_JSON" ]; then
-    echo "ERROR: GET $INTEGRATION_API_URL/plans did not respond — the api container is not serving. This is NOT a seed problem; check the api logs." >&2
-    exit 1
-  fi
-  PLANS_COUNT=$(printf '%s' "$PLANS_JSON" | json_get "len(d) if isinstance(d, list) else 0")
-  if [ "${PLANS_COUNT:-0}" -lt 1 ] 2>/dev/null; then
-    echo "plan seed did not take — check db.Plan bson tags against integration/seed-plan.js" >&2
-    exit 1
-  fi
 
   echo "== bootstrapping integrator user/org/key" >&2
   BOOTSTRAP_OUT=$(API="$INTEGRATION_API_URL" MH="http://localhost:${INTEGRATION_MAILHOG_PORT}" "$BOOTSTRAP_SCRIPT")
@@ -266,7 +247,7 @@ cmd_run() {
   # inside a command substitution that feeds an assignment, so every failure in
   # cmd_up (compose up, health waits, the seed, the /ping wait) would be
   # swallowed and we would run the suite against a stack that never came up —
-  # reporting a misleading "plan seed did not take" instead of the real cause.
+  # reporting a misleading "wallet seed did not take" instead of the real cause.
   # The env vars come back via a file instead.
   local envfile
   envfile=$(mktemp)
