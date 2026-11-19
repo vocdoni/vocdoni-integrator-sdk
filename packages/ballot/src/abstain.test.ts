@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import type { Election } from '@vocdoni/api-types'
+import type { BallotProtocol, Election } from '@vocdoni/api-types'
 import {
+  isAbstainVisible,
   multichoiceReservesAbstain,
   questionReservesAbstain,
   questionSelectionRange,
@@ -153,5 +154,37 @@ describe('questionSelectionRange', () => {
       min: 1,
       max: 1,
     })
+  })
+})
+
+describe('isAbstainVisible', () => {
+  const bp = (overrides: Partial<BallotProtocol> = {}): BallotProtocol => ({
+    maxCount: 3,
+    maxValue: 1,
+    maxVoteOverwrites: 0,
+    maxTotalCost: 0,
+    costExponent: 1,
+    uniqueValues: false,
+    costFromWeight: false,
+    ...overrides,
+  })
+  const choices = Array.from({ length: 3 }, (_, j) => ({ title: { default: `C${j}` }, value: j }))
+
+  it('shows the abstain row at zero when the question reserves headroom', () => {
+    // Repeatable multichoice with maxValue 3 over 3 choices reserves sentinel headroom.
+    const withHeadroom = { ballotProtocol: bp({ maxCount: 3, maxValue: 3 }), choices }
+    expect(questionReservesAbstain(withHeadroom)).toBe(true)
+    expect(isAbstainVisible(withHeadroom, 0)).toBe(true)
+  })
+
+  it('hides the abstain row at zero when the question has no headroom', () => {
+    const noHeadroom = { ballotProtocol: bp({ maxCount: 3, maxValue: 2, uniqueValues: true }), choices }
+    expect(questionReservesAbstain(noHeadroom)).toBe(false)
+    expect(isAbstainVisible(noHeadroom, 0)).toBe(false)
+  })
+
+  it('shows the abstain row without headroom once someone abstained', () => {
+    const noHeadroom = { ballotProtocol: bp({ maxCount: 3, maxValue: 2, uniqueValues: true }), choices }
+    expect(isAbstainVisible(noHeadroom, 2)).toBe(true)
   })
 })

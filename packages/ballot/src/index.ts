@@ -34,4 +34,5 @@ export {
 export { encodeBallot, encodeQuestionBallot, encodeQuestionSelections, rankedOrderToScores } from './encode'
 export { decodeResults, decodeQuestionResults } from './decode'
 export { validateSelections } from './validate'
-export { multichoiceReservesAbstain, questionReservesAbstain, questionSelectionRange } from './abstain'
+export { isAbstainVisible, multichoiceReservesAbstain, questionReservesAbstain, questionSelectionRange } from './abstain'
+export { castVotingPower } from './power'
