@@ -378,6 +378,48 @@ Key election components (all from `@vocdoni/react-components`):
 | `<ElectionResults />` | Results histogram; respects `secretUntilTheEnd`; renders the abstain row only when it is meaningful |
 | `<Voted />` | The voter's vote ids — one line per voted question, each linked to the explorer |
 | `<ElectionEnvelope />` | Vote envelope / nullifier display |
+| `<CspAuth />` | The voter's identify flow: an Identify button opening a modal (census fields, then the one-time code when the census has 2FA), or a Logout button once connected. Renders nothing until the election loads. See below |
+
+**CSP voter identify — `<CspAuth />` and `<CspAuthSession />`.** `<CspAuth />` asks for
+the census `authFields` (the password always last). When `twoFaFields` is set, one contact
+input follows, routed to `email` if it contains `@` and both channels are allowed, otherwise
+to `phone`; step 1 then asks for the 6-digit one-time code, which submits itself once all six
+digits are in and offers resend and start over. An auth-only census is connected after step 0.
+Props: `terms?: ReactNode` (content above the submit button), `requireTerms?: boolean` (makes
+`terms` the label of a required checkbox, so submit is blocked until it is checked), `className?`.
+
+```tsx
+<CspAuthSession>
+  <CspAuth requireTerms terms={<>I accept the <a href="/terms">terms</a></>} />
+  <CspAuth />
+</CspAuthSession>
+```
+
+Wrap a page's identify buttons in one `<CspAuthSession>`: every `<CspAuth />` under it shares
+one step, so closing the code dialog and reopening it from another button resumes the same
+step. Without it each `<CspAuth />` keeps its own step. A session from an outer `ElectionProvider`
+is reused only when it is for the same process. A request in flight outlives the dialog that sent
+it: the trigger gets `loading` (rendered as `aria-busy`) until it settles.
+
+**The password is never sent in plaintext.** It is hashed with
+`hashMemberPassword(orgAddress, password)` from `@vocdoni/api-client` before the identify request.
+If the election has no org address, or hashing fails, the form shows "the password cannot be
+checked right now" and sends nothing.
+
+The flow is customizable through five slots, all in `ComponentsProvider`:
+
+| Slot | Props |
+|---|---|
+| `CspAuthTrigger` | `label`, `onClick`, `loading?` (aria-busy), plus HTML button attributes. Default: `<button>` |
+| `CspAuthLogout` | `label`, `onClick` (calls `clear()`). Default: `<button>` |
+| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Always rendered, with `isOpen` false while closed. Default: overlay and `role="dialog"`; focus moves into the dialog on open and back on close; Escape and an overlay click close it. The default has no positioning or visual styles |
+| `CspAuthIdentifyForm` (step 0) | `fields: CspAuthField[]`, `terms?`, `termsField?: { error?, inputProps }` (set with `requireTerms`), `error?`, `loading`, `submitLabel`, `info?`, `onSubmit(event)` |
+| `CspAuthCodeForm` (step 1) | `title`, `helper`, `code`, `length`, `onCodeChange(code)`, `error?`, `notice?`, `loading`, `submitLabel`, `onSubmit(event)`, `resendLabel`, `onResend`, `resending`, `startOverLabel`, `onStartOver`, `actionsDisabled`, `footer?` |
+
+`CspAuthField` is `{ name, label, type, required, helper?, error?, inputProps }`; spread
+`inputProps` (react-hook-form's `register` result) on the input. Whatever a custom slot passes to
+`onCodeChange`, the component keeps only its digits, up to the code length. Labels and messages live under the
+`csp.*` keys of the `react-components` i18n namespace.
 
 **A question with no inferable ballot type degrades instead of crashing.** Legacy
 elections projected by `GET /processes` can carry questions with an empty `type`, no

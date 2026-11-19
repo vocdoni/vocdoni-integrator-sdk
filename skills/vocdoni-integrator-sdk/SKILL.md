@@ -87,6 +87,7 @@ Steps 5–6 are handled by `@vocdoni/api-voting` (`VotingClient` or `buildVoteTr
 In React, `ElectionProvider` automates the whole flow — election data, the
 voter's CSP auth session (`useElectionAuth`) and voting (`useElection`).
 (There is no separate `ProcessProvider` — it was merged into `ElectionProvider`.)
+For the voter identify UI, `<CspAuth />` (`@vocdoni/react-components`) renders the Identify button, the modal and the one-time code step; wrap a page's identify buttons in `<CspAuthSession>`. See `references/react.md`.
 
 There is no bundle flow anymore: the legacy `/process/bundle/*` routes were
 removed from the backend along with `BundleClient` — everything is
