@@ -238,6 +238,8 @@ election.questions
 
 ### Voter authentication
 
+For a ready-made UI, `<CspAuth />` from `@vocdoni/react-components` runs this whole flow (fields, one-time code, resend, logout); see "CSP voter identify" below. The calls here are what it uses, for a custom flow.
+
 **Auth-only census** (no 2FA): `election?.census?.twoFaFields` is empty/absent. `auth0()` sets `connected = true` immediately; skip `auth1`.
 
 **2FA census**: `auth0()` sends the challenge; call `auth1(otp)` to confirm. `connected` becomes `true` after `auth1`. While the challenge awaits, `challengePending` is `true`; `clear()` drops it, so a code step must go back to identify.
@@ -405,8 +407,14 @@ is reused only when it belongs to the same `ElectionProvider` instance and proce
 gets its own flow. A request in flight outlives the dialog that sent it: the trigger gets `loading`
 (rendered as `aria-busy`) until it settles, and only requests of the same session on the same process mark it busy.
 A failure that settles after the dialog closed is kept in the session and shown when it reopens.
-A process change, logout or start over drops a request that is still in flight, so its outcome
-never moves the flow.
+A process change, start over, or the app clearing the voter while the flow is on step 1 drops a
+request that is still in flight, so its outcome never moves the flow. Clearing the voter during an
+identify request (step 0) does not: if it succeeds, the flow still moves to step 1.
+
+`useCspAuthSession()` reads the shared session under a `<CspAuthSession>` (it throws outside one):
+`currentStep` (0 identify, 1 code), `contact`, `error`, `authFields`, `twoFaFields`, `processId` and
+`resetFlow()`, which goes back to step 0. Use it to show the current step elsewhere on the page; its
+other fields are the components' own bookkeeping.
 
 The code step maps the backend codes to these messages: a resend that hits the per-token cap
 (40017 without a `retryAfter`) says to start over (`csp.errors.resend_limit`); a rejected code
@@ -432,7 +440,7 @@ The flow is customizable through five slots, all in `ComponentsProvider`:
 |---|---|
 | `CspAuthTrigger` | `label`, `onClick`, `loading?` (aria-busy), plus HTML button attributes. Default: `<button>` |
 | `CspAuthLogout` | `label`, `onClick` (calls `clear()`), `disabled?` (true while a vote is being sent). Default: `<button>` |
-| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Always rendered, with `isOpen` false while closed and once connected. Default: overlay and `role="dialog"`; focus moves into the dialog on open and back on close; Escape and a click that starts and ends on the overlay close it. The default has no positioning or visual styles |
+| `CspAuthModal` | `isOpen`, `onClose`, `title`, `closeLabel`, `content`. Rendered whenever `<CspAuth />` renders, with `isOpen` false while closed and once connected (so it sees the close); nothing renders before the election loads, nor for a certificate census before the voter connects. Default: overlay and `role="dialog"`; focus moves into the dialog on open and back on close; Escape and a click that starts and ends on the overlay close it. The default has no positioning or visual styles |
 | `CspAuthIdentifyForm` (step 0) | `fields: CspAuthField[]`, `terms?`, `termsField?: { error?, inputProps }` (set with `requireTerms`), `error?`, `loading`, `submitLabel`, `info?`, `onSubmit(event)` |
 | `CspAuthCodeForm` (step 1) | `title`, `helper`, `code`, `length`, `onCodeChange(code)`, `error?`, `notice?`, `loading`, `submitLabel`, `onSubmit(event)`, `resendLabel`, `onResend`, `resending`, `startOverLabel`, `onStartOver`, `actionsDisabled`, `footer?` |
 
@@ -535,9 +543,26 @@ voter count — same as it already does for budget/quadratic amounts.
 
 **Slot customization** — every component accepts a slot override for rendering:
 
+Pass overrides to `<ComponentsProvider components={…}>`; slots you leave out keep their default.
+Each slot receives the props typed as `<SlotName>SlotProps` (exported from `@vocdoni/react-components`):
+
 ```tsx
-// Not yet documented — check packages/react-components/src/components/ for the current API
+import { ComponentsProvider, CspAuth, type CspAuthTriggerSlotProps } from '@vocdoni/react-components'
+
+const Trigger = ({ label, loading, ...props }: CspAuthTriggerSlotProps) => (
+  <button className='btn btn-primary' aria-busy={loading || undefined} {...props}>
+    {label}
+  </button>
+)
+
+<ComponentsProvider components={{ CspAuthTrigger: Trigger }}>
+  <ElectionProvider id={processId}>
+    <CspAuth />
+  </ElectionProvider>
+</ComponentsProvider>
 ```
+
+The full list of slots is the `ComponentsDefinition` type.
 
 Default slots render every metadata text (election, question, choice and organization descriptions) as plain text with line breaks, never as HTML, because any account can write it. To show Markdown or HTML, override the slot and sanitize the output (for example, react-markdown without raw HTML, or DOMPurify).
 
