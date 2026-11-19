@@ -29,7 +29,7 @@ pnpm test:integration:stack
 ```
 
 This boots `mongo` + `vocone` + `saas-backend` (`integration/docker-compose.ci.yml`),
-seeds a default plan, mints an integrator API key, funds that integrator's prepaid
+mints an integrator API key, funds that integrator's prepaid
 wallet (`integration/seed-wallet.js`), and runs the suite against it — identical to
 what CI does. Tear it down afterwards with:
 
