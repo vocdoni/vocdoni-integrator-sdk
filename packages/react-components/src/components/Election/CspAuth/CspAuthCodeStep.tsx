@@ -39,6 +39,8 @@ export const CspAuthCodeStep = () => {
     }
 
     setError(undefined)
+    // A submit supersedes the last resend's result, so "Code resent" does not sit beside its rejection.
+    setNotice(undefined)
     const flow = getFlowGeneration()
     try {
       // auth1 verifies the challenge and marks the voter connected; CspAuth then swaps the modal for Logout.

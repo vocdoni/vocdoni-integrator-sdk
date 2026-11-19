@@ -65,7 +65,14 @@ const CspAuthControls = ({ terms, requireTerms, className }: CspAuthProps) => {
     <>
       {connected ? (
         // Disabled while voting: a vote in flight still writes to this session, and would leak into the next voter's.
-        <CspAuthLogout className={className} label={t('csp.logout')} onClick={() => clear()} disabled={voting} />
+        // Focused when it replaces an open dialog: the trigger that had focus is gone.
+        <CspAuthLogout
+          className={className}
+          label={t('csp.logout')}
+          onClick={() => clear()}
+          disabled={voting}
+          autoFocus={open}
+        />
       ) : (
         <CspAuthTrigger
           className={className}

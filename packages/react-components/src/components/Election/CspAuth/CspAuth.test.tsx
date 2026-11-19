@@ -1,9 +1,12 @@
 import { hashMemberPassword, VocdoniApiError } from '@vocdoni/api-client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { type Context, type ReactNode } from 'react'
+import { I18nextProvider } from 'react-i18next'
 import { describe, expect, it, vi, type Mock } from 'vitest'
+import { createTestI18n } from '../../../i18n/test-i18n'
 import { renderWithComponents } from '../../../test-utils'
+import { ComponentsProvider } from '../../context/ComponentsProvider'
 import type { ComponentsPartialDefinition } from '../../context/types'
 
 // `useElection` / `useElectionAuth` read a real React context, so one test can nest two elections.
@@ -246,6 +249,54 @@ describe('CspAuth', () => {
     )
   })
 
+  it('shows the translated resend detail with its apostrophes, under an escaping i18next', async () => {
+    // Default i18next escapes interpolated values; the detail is already translated text, so it must not be escaped.
+    const i18n = createTestI18n({ interpolation: { escapeValue: true } })
+    const scope = makeScope({ election: twoFa() })
+    scope.resend.mockRejectedValueOnce(new VocdoniApiError(403, { code: 40801 }, 'no weight', 40801))
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    render(
+      <I18nextProvider i18n={i18n}>
+        <ComponentsProvider>
+          <QueryClientProvider client={queryClient}>
+            <electionScope.context.Provider value={scope}>
+              <CspAuth />
+            </electionScope.context.Provider>
+          </QueryClientProvider>
+        </ComponentsProvider>
+      </I18nextProvider>,
+    )
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    await screen.findByLabelText('Enter the verification code')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Failed to resend code: You don't have enough voting power to access the election.",
+    )
+  })
+
+  it('clears the resend notice when a code is submitted', async () => {
+    const scope = makeScope({ election: twoFa() })
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    const code = await screen.findByLabelText('Enter the verification code')
+    fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
+    expect(await screen.findByText('Code resent successfully')).toBeInTheDocument()
+
+    scope.auth1.mockRejectedValueOnce(new VocdoniApiError(400, { code: 40001 }, 'bad code', 40001))
+    fireEvent.change(code, { target: { value: '123456' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The code is not valid or has expired.')
+    expect(screen.queryByText('Code resent successfully')).not.toBeInTheDocument()
+  })
+
   it('start over returns to the identify step', async () => {
     const scope = makeScope({ election: twoFa() })
     renderCsp(<CspAuth />, scope)
@@ -296,6 +347,23 @@ describe('CspAuth', () => {
 
     await act(async () => pending.resolve())
     await waitFor(() => expect(screen.getByRole('button', { name: 'Identify' })).not.toHaveAttribute('aria-busy'))
+  })
+
+  it('keeps the session busy after a process change while an identify is in flight', async () => {
+    const pending = deferred()
+    const scope = makeScope()
+    scope.auth0.mockReturnValueOnce(pending.promise)
+    const { setScope } = renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate' }))
+    await waitFor(() => expect(scope.auth0).toHaveBeenCalledTimes(1))
+
+    setScope(makeScope({ election: { id: 'proc-2', orgAddress: ORG, census: { authFields: ['memberNumber'], twoFaFields: [] } } }))
+
+    expect(screen.getByRole('button', { name: 'Authenticate' })).toBeDisabled()
+    await act(async () => pending.resolve())
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Authenticate' })).toBeEnabled())
   })
 
   it('sends one identify request for a double submit', async () => {
@@ -420,6 +488,20 @@ describe('CspAuth', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(trigger).toHaveFocus()
+  })
+
+  it('moves focus to the logout button when the voter connects while the dialog is open', () => {
+    const scope = makeScope()
+    const { setScope } = renderCsp(<CspAuth />, scope)
+    const trigger = screen.getByRole('button', { name: 'Identify' })
+    trigger.focus()
+    openIdentify()
+
+    setScope(makeScope({ connected: true }))
+
+    // The trigger the dialog would return focus to has been replaced by Logout.
+    expect(trigger).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Logout' })).toHaveFocus()
   })
 
   it('shows a rate-limit message with its wait time, through the real translations', async () => {
@@ -576,7 +658,7 @@ describe('CspAuth', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('uses the email input type for an email-only census and text when both channels are allowed', () => {
+  it('uses the email input type for an email-only census, also when the dialog reopens', () => {
     renderCsp(<CspAuth />, makeScope({ election: twoFa({ twoFaFields: ['email'] }) }))
     openIdentify()
     expect(screen.getByLabelText('Email')).toHaveAttribute('type', 'email')

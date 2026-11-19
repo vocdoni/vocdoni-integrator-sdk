@@ -5,7 +5,7 @@ import type {
   VotingProcessResponse,
 } from '@vocdoni/api-types'
 import { signBlindCspBallots } from '@vocdoni/api-voting'
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useClient } from '../client/ClientProvider'
 
 /** Decodes a hex-encoded weight ("2a") into a number; empty/invalid → null. */
@@ -151,6 +151,11 @@ export function useVoterSession(
   const [pendingToken, setPendingToken] = useState<string | null>(null)
   const [authToken, setAuthToken] = useState<string | null>(null)
   const [weight, setWeight] = useState<number | null>(null)
+  // The process the auth callbacks below belong to. A request that settles after a process change is for the previous one.
+  const currentId = useRef(id)
+  useEffect(() => {
+    currentId.current = id
+  }, [id])
 
   // Auth-only censuses (no twoFaFields) issue a verified token at step 0.
   const isAuthOnly = useMemo(
@@ -166,12 +171,14 @@ export function useVoterSession(
       if (!id || !process) throw new Error('Election is not loaded yet — cannot authenticate')
       const res = await client.elections.authStep0(id, participant)
       if (!res.authToken) throw new Error('Process auth step 0 did not return a token')
+      const owner = res.voterRef ?? (await ownerHash(participant))
+      if (currentId.current !== id) return
       // A new identification replaces the session: drop the previous voter's
       // token first, so no render (and no ElectionProvider check or re-send)
       // sees the new owner paired with the old voter's token. The session stays
       // disconnected until auth1 (or, auth-only, the token set below).
       setAuthToken(null)
-      setOwner(res.voterRef ?? (await ownerHash(participant)))
+      setOwner(owner)
       if (isAuthOnly) {
         // No challenge step: the step-0 token is already verified.
         setAuthToken(res.authToken)
@@ -189,6 +196,9 @@ export function useVoterSession(
       if (!pendingToken) throw new Error('Must complete auth step 0 first')
       const authData = Array.isArray(solution) ? solution : [solution]
       const res = await client.elections.authStep1(id, { authToken: pendingToken, authData })
+      if (currentId.current !== id) return
+      // The challenge is spent once confirmed: a later auth1 must not redeem the same token again.
+      setPendingToken(null)
       setAuthToken(res.authToken ?? pendingToken)
       if (res.weight) setWeight(parseWeight(res.weight))
     },

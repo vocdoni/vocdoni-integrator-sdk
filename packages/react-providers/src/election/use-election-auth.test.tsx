@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { mockProcess } from '../../../../mocks/handlers'
 import { server } from '../../../../mocks/server'
 import { TestProvider } from '../test-utils'
@@ -65,6 +65,19 @@ describe('useElectionAuth', () => {
     it('auth1 before auth0 throws', async () => {
       const { result } = renderHook(useHooks, { wrapper })
       await waitFor(() => expect(result.current.election.election).not.toBeNull())
+      await expect(result.current.auth.auth1(['123456'])).rejects.toThrow('step 0 first')
+    })
+
+    it('does not redeem a confirmed step-0 token a second time', async () => {
+      const { result } = renderHook(useHooks, { wrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+      await act(async () => {
+        await result.current.auth.auth0({ email: 'voter@example.com' })
+      })
+      await act(async () => {
+        await result.current.auth.auth1(['123456'])
+      })
+
       await expect(result.current.auth.auth1(['123456'])).rejects.toThrow('step 0 first')
     })
 
@@ -225,6 +238,82 @@ describe('useElectionAuth', () => {
     // the one-shot authorization is already spent.
     await expect(result.current.auth.sign('aa'.repeat(32), '0x' + '11'.repeat(20))).rejects.toThrow(/signBatch/)
     expect(signCalls).toBe(0)
+  })
+
+  describe('process change while a request is in flight', () => {
+    // The process the wrapper renders: changed in place, then re-rendered.
+    let processId = mockProcess.id
+    beforeEach(() => {
+      processId = mockProcess.id
+    })
+    const processWrapper = ({ children }: { children: React.ReactNode }) => (
+      <TestProvider>
+        <ElectionProvider id={processId}>{children}</ElectionProvider>
+      </TestProvider>
+    )
+    // Holds a msw response until `release()`.
+    const gated = () => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return { gate, release }
+    }
+
+    it('ignores a step-0 result that settles after the process changed', async () => {
+      const { gate, release } = gated()
+      server.use(
+        http.post('http://localhost/processes/:processId/auth/0', async () => {
+          await gate
+          return HttpResponse.json({ authToken: 'late-step0-token' })
+        }),
+      )
+      const { result, rerender } = renderHook(useHooks, { wrapper: processWrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+
+      let identify!: Promise<void>
+      act(() => {
+        identify = result.current.auth.auth0({ email: 'voter@example.com' })
+      })
+      processId = 'other-process'
+      rerender()
+      await act(async () => {
+        release()
+        await identify
+      })
+
+      expect(result.current.auth.challengePending).toBe(false)
+      expect(result.current.auth.connected).toBe(false)
+    })
+
+    it('ignores a step-1 result that settles after the process changed', async () => {
+      const { result, rerender } = renderHook(useHooks, { wrapper: processWrapper })
+      await waitFor(() => expect(result.current.election.election).not.toBeNull())
+      await act(async () => {
+        await result.current.auth.auth0({ email: 'voter@example.com' })
+      })
+
+      const { gate, release } = gated()
+      server.use(
+        http.post('http://localhost/processes/:processId/auth/1', async () => {
+          await gate
+          return HttpResponse.json({ authToken: 'late-confirmed', weight: '2a' })
+        }),
+      )
+      let confirm!: Promise<void>
+      act(() => {
+        confirm = result.current.auth.auth1(['123456'])
+      })
+      processId = 'other-process'
+      rerender()
+      await act(async () => {
+        release()
+        await confirm
+      })
+
+      expect(result.current.auth.connected).toBe(false)
+      expect(result.current.auth.weight).toBeNull()
+    })
   })
 
   describe('signBatch', () => {

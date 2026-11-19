@@ -57,23 +57,44 @@ const CspAuthFieldInput = ({ field }: { field: CspAuthField }) => {
   )
 }
 
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+// Tab cycles inside the dialog: focus that would leave it, or sits on the dialog itself, wraps to the other end.
+const trapTab = (dialog: HTMLElement, event: KeyboardEvent) => {
+  const focusable = dialog.querySelectorAll<HTMLElement>(FOCUSABLE)
+  const first = focusable[0] ?? dialog
+  const last = focusable[focusable.length - 1] ?? dialog
+  const active = document.activeElement
+  const atEdge = event.shiftKey ? active === first || active === dialog : active === last
+  if (atEdge || !dialog.contains(active)) {
+    event.preventDefault()
+    const target = event.shiftKey ? last : first
+    target.focus()
+  }
+}
+
 const CspAuthModalShell = ({ isOpen, onClose, title, closeLabel, content, ...props }: CspAuthModalSlotProps) => {
   const dialogRef = useRef<HTMLDivElement>(null)
   // A drag that starts inside the dialog and ends on the overlay also clicks the overlay: only a press on it closes.
   const pressedOverlay = useRef(false)
 
-  // Focus moves into the dialog on open and returns to the element that had it on close.
+  // Focus moves into the dialog on open and returns to the element that had it on close, unless that element
+  // has left the page (a trigger the connected voter's Logout replaced).
   useEffect(() => {
     if (!isOpen) return
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
     dialogRef.current?.focus()
-    return () => previous?.focus()
+    return () => {
+      if (previous?.isConnected) previous.focus()
+    }
   }, [isOpen])
 
   useEffect(() => {
     if (!isOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose()
+      if (event.key === 'Tab' && dialogRef.current) trapTab(dialogRef.current, event)
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
@@ -340,8 +361,8 @@ export const defaultComponents: ComponentsDefinition = {
       {label}
     </button>
   ),
-  CspAuthLogout: ({ label, onClick, disabled, ...props }) => (
-    <button {...props} type='button' onClick={onClick} disabled={disabled}>
+  CspAuthLogout: ({ label, onClick, disabled, autoFocus, ...props }) => (
+    <button {...props} type='button' onClick={onClick} disabled={disabled} autoFocus={autoFocus}>
       {label}
     </button>
   ),

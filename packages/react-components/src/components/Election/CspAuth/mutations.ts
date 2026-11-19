@@ -7,13 +7,9 @@ import { type CspAuthErrorStep, translateCspAuthError } from './errors'
 
 // Every auth request shares this key prefix, so an in-flight request outlives the dialog that sent it:
 // closing the modal unmounts the step (and its mutation observer), not the request.
-// The session and process ids are part of the key, so a request in one session or process does not mark another busy.
-const cspAuthMutationKey = (session?: { sessionId: string; processId?: string }) => [
-  'vocdoni',
-  'csp-auth',
-  session?.sessionId,
-  session?.processId,
-]
+// The session id is part of the key, so a request in one session does not mark another busy. The process is not:
+// a request still in flight for the previous process keeps the session busy until it settles.
+const cspAuthMutationKey = (session?: { sessionId: string }) => ['vocdoni', 'csp-auth', session?.sessionId]
 
 const useCspAuthErrorTranslator = (step: CspAuthErrorStep) => {
   const t = useReactComponentsLocalize()

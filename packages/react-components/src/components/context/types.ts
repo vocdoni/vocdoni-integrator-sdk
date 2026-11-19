@@ -110,6 +110,8 @@ export type CspAuthLogoutSlotProps = BaseProps<HTMLButtonElement> & {
   onClick: () => void
   /** True while a vote is being sent: clearing the session then would leak the vote into the next voter's. */
   disabled?: boolean
+  /** True when this button replaces an open auth dialog: take focus, since the dialog's trigger is gone. */
+  autoFocus?: boolean
 }
 
 /**
