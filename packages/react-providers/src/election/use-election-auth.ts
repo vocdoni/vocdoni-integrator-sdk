@@ -109,9 +109,10 @@ export interface VoterSession extends ElectionAuthContextValue {
    * The step-0 `voterRef` when the backend returns one (certificate censuses,
    * whose payload changes on every login), else sha256 hex of the canonical
    * (sorted-key JSON) auth0 participant payload, so the same person
-   * re-identifying in this tab gets the same value. Null
-   * before auth0, after `clear()`, or where Web Crypto is unavailable
-   * (insecure context) — the pending-vote store is then not used.
+   * re-identifying in this tab gets the same value. Null before auth0, after
+   * `clear()`, or when there is no `voterRef` and Web Crypto is unavailable
+   * for the payload hash (insecure context) — the pending-vote store is then
+   * not used. A `voterRef` needs no hashing, so it is never null for that.
    */
   owner: string | null
 }
