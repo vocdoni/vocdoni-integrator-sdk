@@ -6,9 +6,15 @@ const state = vi.hoisted(() => ({
   election: null as ReturnType<typeof makeProcess> | null,
   voteIds: {} as Record<string, string>,
   voteId: null as string | null,
+  explorerUrl: null as string | null,
 }))
 vi.mock('@vocdoni/react-providers', () => ({
-  useElection: () => ({ election: state.election, voteIds: state.voteIds, voteId: state.voteId }),
+  useElection: () => ({
+    election: state.election,
+    voteIds: state.voteIds,
+    voteId: state.voteId,
+    explorerUrl: state.explorerUrl,
+  }),
 }))
 
 import { Voted } from './Voted'
@@ -33,11 +39,13 @@ function setup(
   election: ReturnType<typeof makeProcess> | null,
   voteIds: Record<string, string>,
   voteId: string | null = null,
+  explorerUrl: string | null = 'https://explorer.vote',
 ) {
   captured = undefined
   state.election = election
   state.voteIds = voteIds
   state.voteId = voteId
+  state.explorerUrl = explorerUrl
 }
 
 describe('Voted', () => {
@@ -60,7 +68,35 @@ describe('Voted', () => {
     expect(screen.getByText(/Your vote id for "Favourite veg" is/)).toBeInTheDocument()
     const links = screen.getAllByRole('link')
     expect(links.map((a) => a.textContent)).toEqual(['null-a', 'null-b'])
-    expect(links[0]).toHaveAttribute('href', 'null-a')
+    expect(links[0]).toHaveAttribute('href', 'https://explorer.vote/verify/null-a')
+    expect(links[0]).toHaveAttribute('target', '_blank')
+    expect(links[0]).toHaveAttribute('rel', 'noreferrer')
+  })
+
+  it('links each vote to its explorer verify page, with the id encoded', () => {
+    setup(makeProcess({ questions: [twoQuestions[0]] }), { 'q-0': 'a/b c' }, null, 'https://dev.explorer.vote')
+    renderWithComponents(<Voted />)
+    expect(screen.getByRole('link')).toHaveAttribute('href', 'https://dev.explorer.vote/verify/a%2Fb%20c')
+  })
+
+  it('exposes the explorer verify link as `url` on each vote for slot overrides', () => {
+    setup(makeProcess({ questions: [twoQuestions[0]] }), { 'q-0': 'null-a' })
+    renderWithComponents(<Voted />, capture)
+    expect(captured!.votes[0].url).toBe('https://explorer.vote/verify/null-a')
+  })
+
+  it('renders the vote id as plain text, with no link, when the explorer is unknown', () => {
+    setup(makeProcess({ questions: [twoQuestions[0]] }), { 'q-0': 'null-a' }, null, null)
+    renderWithComponents(<Voted />)
+
+    expect(screen.getByText(/Your vote id is null-a/)).toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('leaves `url` absent on each vote when the explorer is unknown', () => {
+    setup(makeProcess({ questions: twoQuestions }), { 'q-0': 'null-a' }, null, null)
+    renderWithComponents(<Voted />, capture)
+    expect(captured!.votes[0].url).toBeUndefined()
   })
 
   it('single question: reads exactly as the singular sentence, id still link-ified', () => {
@@ -69,7 +105,7 @@ describe('Voted', () => {
 
     expect(screen.getByText(/Your vote id is/)).toBeInTheDocument()
     expect(screen.queryByText(/Favourite fruit/)).not.toBeInTheDocument()
-    expect(screen.getByRole('link')).toHaveAttribute('href', 'null-a')
+    expect(screen.getByRole('link')).toHaveAttribute('href', 'https://explorer.vote/verify/null-a')
   })
 
   it('renders nothing when the voter holds no vote id', () => {
