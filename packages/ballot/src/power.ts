@@ -1,4 +1,4 @@
-import type { BallotProtocol, Choice, QuestionTypeSetup } from '@vocdoni/api-types'
+import type { BallotProtocol, Choice } from '@vocdoni/api-types'
 import { BallotType } from './types'
 import { tryInferQuestionBallotType } from './infer'
 
@@ -12,7 +12,6 @@ export function castVotingPower(
     ballotProtocol?: BallotProtocol
     type?: string
     metadata?: Record<string, unknown>
-    typeSetup?: QuestionTypeSetup
     choices: Choice[]
   },
   results: string[][] | null | undefined,

@@ -116,4 +116,36 @@ describe('castVotingPower', () => {
   it('undeterminable ballot type returns null', () => {
     expect(castVotingPower({ choices: choices(3) }, [['1', '2']])).toBeNull()
   })
+
+  it('ranked: every option row sums to the total weight', () => {
+    // Ballot A (weight 10) ranks options 0, 1, 2 as 2, 1, 0; ballot B (weight 5) as 0, 2, 1.
+    // results[option][rank], so each option row sums to 15.
+    const question = {
+      ballotProtocol: bp({ maxCount: 3, maxValue: 2, uniqueValues: true }),
+      metadata: { type: { name: 'ranked' } },
+      choices: choices(3),
+    }
+    const results = [
+      ['5', '0', '10'],
+      ['0', '10', '5'],
+      ['10', '5', '0'],
+    ]
+    expect(castVotingPower(question, results)).toBe(15)
+  })
+
+  it('name-only budget-based and quadratic questions return null', () => {
+    for (const name of ['budget-based', 'quadratic']) {
+      const question = { metadata: { type: { name } }, choices: choices(3) }
+      expect(castVotingPower(question, [['30'], ['20'], ['0']])).toBeNull()
+    }
+  })
+
+  it('maxValue 0 with a conflicting singlechoice type returns null', () => {
+    const question = {
+      ballotProtocol: bp({ maxCount: 3, maxValue: 0, costExponent: 1 }),
+      type: 'singlechoice',
+      choices: choices(3),
+    }
+    expect(castVotingPower(question, [['30'], ['20'], ['0']])).toBeNull()
+  })
 })

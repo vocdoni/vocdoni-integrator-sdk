@@ -187,4 +187,10 @@ describe('isAbstainVisible', () => {
     const noHeadroom = { ballotProtocol: bp({ maxCount: 3, maxValue: 2, uniqueValues: true }), choices }
     expect(isAbstainVisible(noHeadroom, 2)).toBe(true)
   })
+
+  it('does not throw on an un-inferable question: shows the row only with votes', () => {
+    const unknown = { choices }
+    expect(isAbstainVisible(unknown, 0)).toBe(false)
+    expect(isAbstainVisible(unknown, 1)).toBe(true)
+  })
 })
