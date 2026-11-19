@@ -1,5 +1,12 @@
 # @vocdoni/api-types
 
+## 2.6.0
+
+### Minor Changes
+
+- 6705c31: Certificate voter authentication: `CensusSpec` and `OrganizationCensus` gain `certAuth`, `AuthRequest` gains `certCode` and `codeVerifier`, and `AuthResponse` gains `voterRef`. `auth0` binds the tab's pending votes to the step-0 `voterRef` when the backend returns one, so a certificate voter (whose step-0 payload changes on every login) gets their pending vote re-sent after a reload.
+- ec078a9: `ApiErrorCode` gains the CSP voter codes `CensusParticipantNotFound` (40029), `CspAuthFailed` (40802), `VerificationMaxAttempts` (40017), `AttemptCooldown` (40103) and `ZeroWeightVoter` (40801), plus `InvalidData` (40037). `ApiErrorDataByCode` types their data, so `isApiError` narrows it: `RateLimitedData` (`retryAfter`, seconds) for 40017, `AttemptCooldownData` (`coolDownTime`, ms) for 40103, and `CensusValidationErrorData` (`memberIds`, `duplicates`, `missingData`, `notFound`) for the 40037 of `elections.validateCensus`.
+
 ## 2.5.1
 
 ### Patch Changes

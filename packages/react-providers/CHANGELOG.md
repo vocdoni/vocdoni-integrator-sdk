@@ -1,5 +1,17 @@
 # @vocdoni/react-providers
 
+## 4.1.0
+
+### Minor Changes
+
+- 8e1b88f: Adds `challengePending` to the voter session (`useElectionAuth()` and `useElection()`): `true` after a 2FA `auth0()` until `auth1()` confirms the code, and back to `false` once connected or after `clear()`. Apps can use it to show the code step only while a code is due. A confirmed challenge is spent, so a second `auth1()` without a new `auth0()` throws. An `auth0()` or `auth1()` that settles after the process changed is ignored, and does not connect or identify the voter for the new process.
+- ec078a9: `ElectionProvider` takes an optional `explorerUrl` (block-explorer base URL) and `useElection()` exposes `explorerUrl`, defaulting to the explorer of the process's own `chainId` (`null` for an unknown chain). `Voted` now links each vote id to `{explorerUrl}/verify/{voteId}` instead of a relative link that led nowhere, renders it as plain text when no explorer is known, and passes the link to slot overrides as `VotedVote.url`.
+
+### Patch Changes
+
+- 6705c31: Certificate voter authentication: `CensusSpec` and `OrganizationCensus` gain `certAuth`, `AuthRequest` gains `certCode` and `codeVerifier`, and `AuthResponse` gains `voterRef`. `auth0` binds the tab's pending votes to the step-0 `voterRef` when the backend returns one, so a certificate voter (whose step-0 payload changes on every login) gets their pending vote re-sent after a reload.
+- 2be5f7e: `jobs.waitFor` waits up to 5 minutes by default (was 60 s), backs off from `intervalMs` to the new `maxIntervalMs` option (default 5 s) with jitter, and retries transient poll failures (network errors, 429, 502, 503, 504) for up to the new `maxFailingMs` (default 1 min) in a row, honouring `Retry-After`. A relayed vote that waits more than a minute for its block is no longer reported as failed while it is still being included. `VocdoniApiError` gains `retryAfterMs`.
+
 ## 4.0.2
 
 ## 4.0.1

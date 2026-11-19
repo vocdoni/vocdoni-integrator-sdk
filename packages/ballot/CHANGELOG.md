@@ -1,5 +1,17 @@
 # @vocdoni/ballot
 
+## 1.4.0
+
+### Minor Changes
+
+- ec078a9: New `castVotingPower(question, results)` reads the voting power cast on one question from its raw results matrix, or returns `null` when it is not recoverable (no tally, undeterminable type, budget or quadratic). New `isAbstainVisible(question, abstainVotes)` tells whether a multichoice abstain row should be shown.
+
+### Patch Changes
+
+- Updated dependencies [6705c31]
+- Updated dependencies [ec078a9]
+  - @vocdoni/api-types@2.6.0
+
 ## 1.3.4
 
 ### Patch Changes
