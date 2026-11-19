@@ -132,8 +132,8 @@ import { ElectionProvider, useElection } from '@vocdoni/react-providers'
   resultsQueryOptions={{ refetchInterval: 10_000 }} // live tallies
 >...</ElectionProvider>
 
-// Block-explorer base URL (no trailing slash) for the vote-id links. Defaults to the
-// explorer of the process's own chainId, so pass it only to override that.
+// Block-explorer base URL for the vote-id links (trailing slashes are stripped; empty falls
+// back). Defaults to the explorer of the process's own chainId, so pass it only to override that.
 <ElectionProvider id="<processMongoId>" explorerUrl="https://explorer.example">...</ElectionProvider>
 
 const {
