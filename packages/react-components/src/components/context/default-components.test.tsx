@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import type { ComponentProps } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
@@ -143,6 +143,43 @@ describe('server rendering of plain text', () => {
       errorSpy.mockRestore()
       document.body.removeChild(container)
     }
+  })
+})
+
+describe('default CspAuth slots', () => {
+  it('CspAuthLogout takes focus when autoFocus is set', () => {
+    const { CspAuthLogout } = defaultComponents
+    render(<CspAuthLogout label='Logout' onClick={() => {}} autoFocus />)
+    expect(screen.getByRole('button', { name: 'Logout' })).toHaveFocus()
+  })
+
+  it('CspAuthModal keeps Tab and Shift+Tab inside the dialog', () => {
+    const { CspAuthModal } = defaultComponents
+    render(
+      <CspAuthModal
+        isOpen
+        onClose={() => {}}
+        title='Authentication'
+        closeLabel='Close'
+        content={
+          <>
+            <button>first</button>
+            <button>last</button>
+          </>
+        }
+      />,
+    )
+    // The header's close button comes first, the content's last button last.
+    const buttons = screen.getAllByRole('button')
+    const first = buttons[0]
+    const last = buttons[buttons.length - 1]
+
+    last.focus()
+    fireEvent.keyDown(last, { key: 'Tab' })
+    expect(first).toHaveFocus()
+
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true })
+    expect(last).toHaveFocus()
   })
 })
 

@@ -29,6 +29,7 @@ A monorepo of TypeScript packages that replaces the `@vocdoni/sdk` with a SaaS-f
 | Set up the CSP auth flow manually | `references/client.md` + `references/voting.md` | `recipes/single-choice-vote.ts` |
 | Cast a vote on an anonymous (blind CSP) census | `references/voting.md` | `recipes/anonymous-vote.ts` |
 | Add voting to a React app | `references/react.md` | — |
+| Add a voter login / identify UI in React (`<CspAuth />`, its slots) | `references/react.md` (CSP voter identify) | — |
 | Manage election lifecycle (pause/end/cancel) | `references/react.md` + `references/client.md` | — |
 | Price a process, pay for publish or census growth, manage wallets and spend caps | `references/client.md` (Pay-per-process billing) | — |
 | Link to the block explorer, map a chain id to a network, check ids or addresses | `references/client.md` (Network helpers and ids) | — |
@@ -87,6 +88,7 @@ Steps 5–6 are handled by `@vocdoni/api-voting` (`VotingClient` or `buildVoteTr
 In React, `ElectionProvider` automates the whole flow — election data, the
 voter's CSP auth session (`useElectionAuth`) and voting (`useElection`).
 (There is no separate `ProcessProvider` — it was merged into `ElectionProvider`.)
+For the voter identify UI, `<CspAuth />` (`@vocdoni/react-components`) renders the Identify button, the modal and the one-time code step; wrap a page's identify buttons in `<CspAuthSession>`. See `references/react.md`.
 
 There is no bundle flow anymore: the legacy `/process/bundle/*` routes were
 removed from the backend along with `BundleClient` — everything is

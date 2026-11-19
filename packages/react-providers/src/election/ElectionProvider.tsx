@@ -1080,6 +1080,7 @@ export function ElectionProvider({
       error: error ?? null,
       authToken: session.authToken,
       connected: session.connected,
+      challengePending: session.challengePending,
       weight: session.weight,
       auth0: session.auth0,
       auth1: session.auth1,
