@@ -1,4 +1,4 @@
-import { decodeQuestionResults, isAbstainVisible, tryInferQuestionBallotType } from '@vocdoni/ballot'
+import { decodeQuestionResults, questionReservesAbstain, tryInferQuestionBallotType } from '@vocdoni/ballot'
 import { questionsEndedAt, resolveEndDate } from '@vocdoni/api-client'
 import { format } from 'date-fns'
 import { ComponentPropsWithoutRef } from 'react'
@@ -74,7 +74,9 @@ export const ElectionResults = ({ forceRender, ...rest }: ElectionResultsProps) 
     return {
       title,
       choices: decoded
-        .filter((row) => row.choice !== 'abstain' || isAbstainVisible(question, row.votes))
+        // Same rule as ballot's isAbstainVisible, inlined while the ballot peer range
+        // still admits releases without it.
+        .filter((row) => row.choice !== 'abstain' || row.votes > 0 || questionReservesAbstain(question))
         .map((row) => {
           if (row.choice === 'abstain') {
             return {
