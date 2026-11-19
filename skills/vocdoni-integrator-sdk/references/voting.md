@@ -464,7 +464,7 @@ over hand-building this array — it infers the ballot type from
 
 ### Voting power per question
 
-`castVotingPower(question, results)` from `@vocdoni/ballot` works for every ballot type. It takes the
+`castVotingPower(question, results)` from `@vocdoni/ballot` works for single-choice, approval, multichoice and ranked. It takes the
 **raw** `results` matrix (`question.results.results`), not the decoded tally: decoding drops the
 `notSelected` column of a dense question. It returns `null` when the power is not recoverable: no
 tally, a type that cannot be inferred, or budget/quadratic (`value × weight` shares one cell).
