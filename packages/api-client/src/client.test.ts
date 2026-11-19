@@ -513,4 +513,26 @@ describe('VocdoniApiClient', () => {
       expect(auth).toBeNull()
     })
   })
+
+  describe('network', () => {
+    it('derives the network from the service chain id', async () => {
+      server.use(
+        http.get(`${BASE_URL}/info`, () =>
+          HttpResponse.json({ chainId: 'vocdoni/LTS/1.3', version: '1.2.3', goVersion: 'go1.22' }),
+        ),
+      )
+
+      expect(await client.network()).toBe('prod')
+    })
+
+    it('returns undefined for a chain it does not know', async () => {
+      server.use(
+        http.get(`${BASE_URL}/info`, () =>
+          HttpResponse.json({ chainId: 'vocdoni/TEST/1', version: '1.2.3', goVersion: 'go1.22' }),
+        ),
+      )
+
+      expect(await client.network()).toBeUndefined()
+    })
+  })
 })

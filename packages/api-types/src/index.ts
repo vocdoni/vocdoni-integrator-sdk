@@ -615,11 +615,9 @@ export interface VotingProcessBase {
   /** Process id, a Mongo ObjectID (24-hex chars) — never a `0x…` hex id. */
   id: string
   /**
-   * Owner organization address as UNPREFIXED lowercase hex (e.g.
-   * `"1a9ffe1f4c2493578ce4a7dbebd7d95433eee6f0"`). Beware: other endpoints
-   * (`GET /auth/addresses`, `GET /organizations/{address}`) return the same
-   * logical value `0x`-prefixed, so never compare the raw strings across
-   * endpoints — strip/normalize the `0x` prefix first.
+   * Owner organization address as UNPREFIXED lowercase hex on the wire. The
+   * `@vocdoni/api-client` reads return it `0x`-prefixed (see
+   * `normalizeOrganizationAddress`), like the other endpoints: compare through it.
    */
   orgAddress: string
   title: MultiLangString
