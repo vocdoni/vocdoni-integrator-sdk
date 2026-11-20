@@ -5,7 +5,7 @@
 # Usage:
 #   printf '%s' "$COMMENT_BODY" | scripts/integration-pins.sh
 #
-# Example first line: /integration vocdoni-node=1a2b3c4 saas-backend=795
+# Example first line: /integration vochain-sequencer=1a2b3c4 saas-backend=795
 #   or: /integration reset
 # A ref is a commit SHA (7-40 hex), a branch or tag, or a PR: #<N>, or a bare
 # <N> of 1-6 digits. Both are output as #<N> without leading zeros. A branch or
@@ -15,7 +15,7 @@
 #
 # Env: none. Input: the comment body on stdin.
 # Output (stdout, exit 0):
-#   vocdoni_node_ref=<ref or empty>
+#   vochain_sequencer_ref=<ref or empty>
 #   saas_backend_ref=<ref or empty>
 #   sticky=true|false
 #   reset=true|false
@@ -42,13 +42,13 @@ read -ra tokens <<<"${line#/integration}" || true
 
 if [ "${#tokens[@]}" -gt 0 ] && [ "${tokens[0]}" = reset ]; then
   [ "${#tokens[@]}" = 1 ] || fail "'reset' takes no other tokens"
-  printf 'vocdoni_node_ref=\nsaas_backend_ref=\nsticky=false\nreset=true\n'
+  printf 'vochain_sequencer_ref=\nsaas_backend_ref=\nsticky=false\nreset=true\n'
   exit 0
 fi
 
-node_ref=""
+seq_ref=""
 saas_ref=""
-seen_node=0
+seen_seq=0
 seen_saas=0
 sticky_refs=0
 sha_refs=0
@@ -59,16 +59,19 @@ for tok in ${tokens[@]+"${tokens[@]}"}; do
   key="${tok%%=*}"
   ref="${tok#*=}"
   case "$key" in
-    vocdoni-node)
-      [ "$seen_node" = 0 ] || fail "vocdoni-node given twice"
-      seen_node=1
+    vochain-sequencer)
+      [ "$seen_seq" = 0 ] || fail "vochain-sequencer given twice"
+      seen_seq=1
       ;;
     saas-backend)
       [ "$seen_saas" = 0 ] || fail "saas-backend given twice"
       seen_saas=1
       ;;
+    vocdoni-node)
+      fail "'vocdoni-node' is replaced by 'vochain-sequencer'"
+      ;;
     *)
-      fail "unknown key '$key' (expected vocdoni-node or saas-backend)"
+      fail "unknown key '$key' (expected vochain-sequencer or saas-backend)"
       ;;
   esac
   # A bare PR number means the same as #N: GitHub autolinks #N to this repo.
@@ -93,8 +96,8 @@ for tok in ${tokens[@]+"${tokens[@]}"}; do
   else
     fail "invalid ref '$ref' for '$key'"
   fi
-  if [ "$key" = vocdoni-node ]; then
-    node_ref="$ref"
+  if [ "$key" = vochain-sequencer ]; then
+    seq_ref="$ref"
   else
     saas_ref="$ref"
   fi
@@ -105,4 +108,4 @@ if [ "$sticky_refs" -gt 0 ] && [ "$sha_refs" = 0 ]; then
   sticky=true
 fi
 
-printf 'vocdoni_node_ref=%s\nsaas_backend_ref=%s\nsticky=%s\nreset=false\n' "$node_ref" "$saas_ref" "$sticky"
+printf 'vochain_sequencer_ref=%s\nsaas_backend_ref=%s\nsticky=%s\nreset=false\n' "$seq_ref" "$saas_ref" "$sticky"

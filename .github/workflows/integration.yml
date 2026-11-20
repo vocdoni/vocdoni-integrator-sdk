@@ -6,7 +6,7 @@ name: Integration
 # externally-published images and a live chain, so a red run often means
 # "upstream moved" rather than "this repo is broken" — that must not block npm
 # publishing (release gating stays on .github/workflows/test.yml only).
-# A maintainer comment `/integration vocdoni-node=<ref> saas-backend=<ref>` on a PR
+# A maintainer comment `/integration vochain-sequencer=<ref> saas-backend=<ref>` on a PR
 # runs it once against images built from source at those refs; refs that are
 # branches, tags or #PRs also stick to the PR until `/integration reset`
 # (see integration/README.md). The pull_request event re-resolves sticky refs on
@@ -18,8 +18,8 @@ on:
     - cron: '37 3 * * *'
   workflow_dispatch:
     inputs:
-      vocdoni_node_ref:
-        description: 'vocdoni-node commit SHA, branch, tag, #PR or bare PR number to build from source (empty = :main image)'
+      vochain_sequencer_ref:
+        description: 'vochain-sequencer commit SHA, branch, tag, #PR or bare PR number to build from source (empty = :main image)'
         type: string
         required: false
         default: ''
@@ -56,7 +56,7 @@ jobs:
       sticky: ${{ steps.refs.outputs.sticky }}
       checkout_ref: ${{ steps.refs.outputs.checkout_ref }}
       head_sha: ${{ steps.refs.outputs.head_sha }}
-      vocdoni_node_ref: ${{ steps.refs.outputs.vocdoni_node_ref }}
+      vochain_sequencer_ref: ${{ steps.refs.outputs.vochain_sequencer_ref }}
       saas_backend_ref: ${{ steps.refs.outputs.saas_backend_ref }}
     steps:
       # Default ref: on issue_comment that is main, so the parser runs trusted code.
@@ -77,7 +77,7 @@ jobs:
           COMMENT_BODY: ${{ github.event.comment.body }}
           PR: ${{ github.event.issue.number }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          DISPATCH_NODE: ${{ inputs.vocdoni_node_ref }}
+          DISPATCH_SEQ: ${{ inputs.vochain_sequencer_ref }}
           DISPATCH_SAAS: ${{ inputs.saas_backend_ref }}
           DISPATCH_SDK: ${{ inputs.integrator_sdk_ref }}
         run: |
@@ -130,15 +130,15 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           else
             # Whitespace would let one input smuggle a second key into the line below.
-            for value in "$DISPATCH_NODE" "$DISPATCH_SAAS" "$DISPATCH_SDK"; do
+            for value in "$DISPATCH_SEQ" "$DISPATCH_SAAS" "$DISPATCH_SDK"; do
               if [[ "$value" =~ [[:space:]] ]]; then
                 echo "::error::ref inputs must not contain whitespace" >&2
                 exit 1
               fi
             done
             line="/integration"
-            if [ -n "$DISPATCH_NODE" ]; then
-              line="$line vocdoni-node=$DISPATCH_NODE"
+            if [ -n "$DISPATCH_SEQ" ]; then
+              line="$line vochain-sequencer=$DISPATCH_SEQ"
             fi
             if [ -n "$DISPATCH_SAAS" ]; then
               line="$line saas-backend=$DISPATCH_SAAS"
@@ -172,10 +172,10 @@ jobs:
     # cleared `/integration reset` builds nothing, so it skips this job as well.
     if: ${{ !cancelled() && needs.resolve.outputs.reset != 'true' && (needs.resolve.result == 'success' || (needs.resolve.result == 'skipped' && github.event_name != 'issue_comment')) }}
     runs-on: ubuntu-latest
-    # Runs on every PR, unconditionally. Pinned saas-backend builds need the
-    # SAAS_BACKEND_DEPLOY_KEY secret, which fork pull_request runs don't get: a fork
-    # PR with a sticky saas-backend pin fails until a maintainer's /integration comment
-    # runs it. Unpinned runs use no secrets.
+    # Runs on every PR, unconditionally. Pinned source builds need the
+    # VOCHAIN_SEQUENCER_DEPLOY_KEY or SAAS_BACKEND_DEPLOY_KEY secrets, which fork
+    # pull_request runs don't get: a fork PR with a sticky source pin fails until a
+    # maintainer's /integration comment runs it. Unpinned runs use no secrets.
     #
     # Measured cost on a real runner: ~3.5 min end to end (12s image pulls, 29s
     # to a booted-and-bootstrapped stack, 144s suite) — close enough to the
@@ -183,14 +183,14 @@ jobs:
     # a regression merging green.
     #
     # The known downside: this consumes two moving `:main` images, so an
-    # upstream saas-backend or vocdoni-node regression can redden every open PR
+    # upstream saas-backend or vochain-sequencer regression can redden every open PR
     # with nothing wrong in this repo. That is a deliberate trade — the digests
     # printed below tell you immediately whether upstream moved. If it ever
     # becomes a nuisance, gate PR runs behind a label rather than deleting the
     # job.
     #
     # Source builds of the Go images (pinned refs) add a lot of time, hence 60.
-    timeout-minutes: ${{ (needs.resolve.outputs.vocdoni_node_ref != '' || needs.resolve.outputs.saas_backend_ref != '') && 60 || 25 }}
+    timeout-minutes: ${{ (needs.resolve.outputs.vochain_sequencer_ref != '' || needs.resolve.outputs.saas_backend_ref != '') && 60 || 25 }}
     # Every comment and dispatch run gets its own group, so a pinned run is never
     # cancelled by a push, the nightly run or another comment. Queue order between
     # groups is not guaranteed, so "newest wins" could not be relied on.
@@ -201,7 +201,7 @@ jobs:
       contents: read
       packages: read # pull ghcr.io/vocdoni/saas-backend
     outputs:
-      vocdoni_node_sha: ${{ steps.pins.outputs.vocdoni_node_sha }}
+      vochain_sequencer_sha: ${{ steps.pins.outputs.vochain_sequencer_sha }}
       saas_backend_sha: ${{ steps.pins.outputs.saas_backend_sha }}
     steps:
       - name: Checkout
@@ -226,10 +226,11 @@ jobs:
       # (pnpm install runs install scripts): they handle the deploy key and the ghcr.io token.
       - name: Build pinned images
         id: pins
-        if: needs.resolve.outputs.vocdoni_node_ref != '' || needs.resolve.outputs.saas_backend_ref != ''
+        if: needs.resolve.outputs.vochain_sequencer_ref != '' || needs.resolve.outputs.saas_backend_ref != ''
         env:
+          VOCHAIN_SEQUENCER_DEPLOY_KEY: ${{ secrets.VOCHAIN_SEQUENCER_DEPLOY_KEY }}
           SAAS_BACKEND_DEPLOY_KEY: ${{ secrets.SAAS_BACKEND_DEPLOY_KEY }}
-          NODE_REF: ${{ needs.resolve.outputs.vocdoni_node_ref }}
+          SEQ_REF: ${{ needs.resolve.outputs.vochain_sequencer_ref }}
           SAAS_REF: ${{ needs.resolve.outputs.saas_backend_ref }}
         run: |
           set -euo pipefail
@@ -247,9 +248,9 @@ jobs:
           }
           names=()
           pids=()
-          if [ -n "$NODE_REF" ]; then
-            build vocdoni-node "$NODE_REF" VOCDONI_NODE_IMAGE vocdoni_node_sha &
-            names+=(vocdoni-node)
+          if [ -n "$SEQ_REF" ]; then
+            build vochain-sequencer "$SEQ_REF" VOCHAIN_SEQUENCER_IMAGE vochain_sequencer_sha &
+            names+=(vochain-sequencer)
             pids+=("$!")
           fi
           if [ -n "$SAAS_REF" ]; then
@@ -282,11 +283,11 @@ jobs:
           set -euo pipefail
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
           trap 'docker logout ghcr.io' EXIT
-          if [ -n "${VOCDONI_NODE_IMAGE:-}" ]; then
-            echo "vocdoni-node built from source: $VOCDONI_NODE_IMAGE"
+          if [ -n "${VOCHAIN_SEQUENCER_IMAGE:-}" ]; then
+            echo "vochain-sequencer built from source: $VOCHAIN_SEQUENCER_IMAGE"
           else
-            docker pull ghcr.io/vocdoni/vocdoni-node:main
-            docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/vocdoni/vocdoni-node:main
+            docker pull ghcr.io/vocdoni/vochain-sequencer:main
+            docker inspect --format '{{index .RepoDigests 0}}' ghcr.io/vocdoni/vochain-sequencer:main
           fi
           if [ -n "${SAAS_BACKEND_IMAGE:-}" ]; then
             echo "saas-backend built from source: $SAAS_BACKEND_IMAGE"
@@ -309,18 +310,18 @@ jobs:
 
       - name: Summarize tested refs
         env:
-          NODE_REF: ${{ needs.resolve.outputs.vocdoni_node_ref }}
-          NODE_SHA: ${{ steps.pins.outputs.vocdoni_node_sha }}
+          SEQ_REF: ${{ needs.resolve.outputs.vochain_sequencer_ref }}
+          SEQ_SHA: ${{ steps.pins.outputs.vochain_sequencer_sha }}
           SAAS_REF: ${{ needs.resolve.outputs.saas_backend_ref }}
           SAAS_SHA: ${{ steps.pins.outputs.saas_backend_sha }}
         run: |
           {
             echo "### Tested refs"
             echo "- integrator-sdk: \`$(git rev-parse --short HEAD)\`"
-            if [ -n "$NODE_REF" ]; then
-              echo "- vocdoni-node: \`$NODE_REF\` → \`$NODE_SHA\`"
+            if [ -n "$SEQ_REF" ]; then
+              echo "- vochain-sequencer: \`$SEQ_REF\` → \`$SEQ_SHA\`"
             else
-              echo "- vocdoni-node: :main image"
+              echo "- vochain-sequencer: :main image"
             fi
             if [ -n "$SAAS_REF" ]; then
               echo "- saas-backend: \`$SAAS_REF\` → \`$SAAS_SHA\`"
@@ -381,9 +382,9 @@ jobs:
           STICKY: ${{ needs.resolve.outputs.sticky }}
           CHECKOUT: ${{ needs.resolve.outputs.checkout_ref }}
           HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
-          NODE_REF: ${{ needs.resolve.outputs.vocdoni_node_ref }}
+          SEQ_REF: ${{ needs.resolve.outputs.vochain_sequencer_ref }}
           SAAS_REF: ${{ needs.resolve.outputs.saas_backend_ref }}
-          NODE_SHA: ${{ needs.integration.outputs.vocdoni_node_sha }}
+          SEQ_SHA: ${{ needs.integration.outputs.vochain_sequencer_sha }}
           SAAS_SHA: ${{ needs.integration.outputs.saas_backend_sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SERVER_URL: ${{ github.server_url }}
@@ -429,7 +430,7 @@ jobs:
               else
                 echo "- SDK: not resolved"
               fi
-              upstream vocdoni-node "$NODE_REF" "$NODE_SHA"
+              upstream vochain-sequencer "$SEQ_REF" "$SEQ_SHA"
               upstream saas-backend "$SAAS_REF" "$SAAS_SHA"
               echo "- Run: $RUN_URL"
               if [ "$STICKY" = true ]; then

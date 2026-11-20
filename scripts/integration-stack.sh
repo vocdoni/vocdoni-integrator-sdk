@@ -128,7 +128,7 @@ cmd_up() {
   fi
 
   echo "== starting stack" >&2
-  echo "== images: ${VOCDONI_NODE_IMAGE:-ghcr.io/vocdoni/vocdoni-node:main} ${SAAS_BACKEND_IMAGE:-ghcr.io/vocdoni/saas-backend:main}" >&2
+  echo "== images: ${VOCHAIN_SEQUENCER_IMAGE:-ghcr.io/vocdoni/vochain-sequencer:main} ${SAAS_BACKEND_IMAGE:-ghcr.io/vocdoni/saas-backend:main}" >&2
   compose up -d
 
   echo "== waiting for mongo and vocone to be healthy" >&2
