@@ -28,17 +28,17 @@ To run the same stack locally:
 pnpm test:integration:stack
 ```
 
-This boots `mongo` + `vocone` + `saas-backend` (`integration/docker-compose.ci.yml`),
-mints an integrator API key, funds that integrator's prepaid
-wallet (`integration/seed-wallet.js`), and runs the suite against it — identical to
-what CI does. Tear it down afterwards with:
+This boots `mongo` + `vocone` + `saas-backend` (`integration/docker-compose.ci.yml`,
+where `vocone` runs `ghcr.io/vocdoni/vochain-sequencer:main`), mints an integrator API
+key, funds that integrator's prepaid wallet (`integration/seed-wallet.js`), and runs
+the suite against it — identical to what CI does. Tear it down afterwards with:
 
 ```bash
 scripts/integration-stack.sh down
 ```
 
-The stack pins `ghcr.io/vocdoni/vocdoni-node:main` and
-`ghcr.io/vocdoni/saas-backend:main`. Override either with `VOCDONI_NODE_IMAGE`
+The stack pins `ghcr.io/vocdoni/vochain-sequencer:main` and
+`ghcr.io/vocdoni/saas-backend:main`. Override either with `VOCHAIN_SEQUENCER_IMAGE`
 or `SAAS_BACKEND_IMAGE` to run against an unmerged build. Neither upstream
 publishes per-commit images, so build one from source; see
 [Pinning upstream commits](#pinning-upstream-commits).
@@ -56,11 +56,11 @@ lasts about 300 runs.
 
 ## Pinning upstream commits
 
-Comment on a pull request to run the suite against `vocdoni-node` and/or
+Comment on a pull request to run the suite against `vochain-sequencer` and/or
 `saas-backend` built from source at a given ref:
 
 ```text
-/integration vocdoni-node=1a2b3c4 saas-backend=feat/wallets
+/integration vochain-sequencer=1a2b3c4 saas-backend=feat/wallets
 ```
 
 - Each key is optional; a bare `/integration` uses the published `:main` images.
@@ -96,29 +96,29 @@ Comment on a pull request to run the suite against `vocdoni-node` and/or
 
 ### Actions tab
 
-The "Run workflow" form takes `vocdoni_node_ref`, `saas_backend_ref` (same forms
+The "Run workflow" form takes `vochain_sequencer_ref`, `saas_backend_ref` (same forms
 as above) and `integrator_sdk_ref`: the SDK commit, branch or `#PR` to test.
 Leave it empty to test the branch picked in "Use workflow from".
 
 Locally, build an image and point the stack at it:
 
 ```bash
-image=$(scripts/integration-build-image.sh vocdoni-node <ref> | sed -n 's/^image=//p')
-[ -n "$image" ] && VOCDONI_NODE_IMAGE=$image pnpm test:integration:stack
+image=$(scripts/integration-build-image.sh vochain-sequencer <ref> | sed -n 's/^image=//p')
+[ -n "$image" ] && VOCHAIN_SEQUENCER_IMAGE=$image pnpm test:integration:stack
 ```
 
 The `up` step prints the two images it is using, so a run shows what it tested.
 
 Use `SAAS_BACKEND_IMAGE` and `saas-backend` the same way.
 
-saas-backend is private, so building it locally needs your own SSH access to
-`vocdoni/saas-backend`. If the `ghcr.io/vocdoni/saas-backend` package is private
-too, run `docker login ghcr.io` before pulling it.
+Both upstreams are private, so building them locally needs your own SSH access to
+the respective repository. If the ghcr.io packages are private, run
+`docker login ghcr.io` before pulling them.
 
-CI needs the `SAAS_BACKEND_DEPLOY_KEY` repo secret (a read-only deploy key on
-saas-backend) and read access to that package for this repo. Fork PR pushes
-get no secrets, so they cannot build a pinned saas-backend; a maintainer's
-`/integration` comment can.
+CI needs the `VOCHAIN_SEQUENCER_DEPLOY_KEY` and `SAAS_BACKEND_DEPLOY_KEY` repo
+secrets (read-only deploy keys) and read access to those packages for this repo.
+Fork PR pushes get no secrets, so they cannot build a pinned source image; a
+maintainer's `/integration` comment can.
 
 ## What it covers
 

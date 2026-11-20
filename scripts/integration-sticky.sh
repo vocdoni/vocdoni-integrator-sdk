@@ -9,7 +9,7 @@
 #
 # Input: JSON array of issue comments on stdin, oldest first ({body, user: {login}}).
 # Env: REPO (owner/repo), GH_TOKEN for gh.
-# Output (stdout, exit 0): vocdoni_node_ref=<ref or empty>, saas_backend_ref=<ref or empty>
+# Output (stdout, exit 0): vochain_sequencer_ref=<ref or empty>, saas_backend_ref=<ref or empty>
 set -euo pipefail
 
 if [ -z "${REPO:-}" ]; then
@@ -43,7 +43,7 @@ allowed() {
 # Each comment is base64-encoded so newlines and quotes survive the shell loop.
 encoded="$(jq -r '.[] | {login: (.user.login // ""), body: (.body // "")} | @base64')"
 
-node_ref=""
+seq_ref=""
 saas_ref=""
 while IFS= read -r b64; do
   [ -n "$b64" ] || continue
@@ -52,18 +52,21 @@ while IFS= read -r b64; do
   # Cheap check first: the lookup below runs only for /integration comments.
   first="${body%%$'\n'*}"
   [[ "$first" == /integration* ]] || continue
-  allowed "$(jq -r '.login' <<<"$item")" || continue
+  login="$(jq -r '.login' <<<"$item")"
+  allowed "$login" || continue
   # Only the first line goes to the parser: a long body must not SIGPIPE the pipe.
-  if ! parsed="$(printf '%s\n' "$first" | "$pins" 2>/dev/null)"; then
+  # A rejected comment is skipped, so the state stays as it was; the warning says why.
+  if ! parsed="$(printf '%s\n' "$first" | "$pins" 2>&1)"; then
+    echo "::warning::skipped /integration comment by $login: ${parsed#ERROR: }" >&2
     continue
   fi
   if [ "$(sed -n 's/^reset=//p' <<<"$parsed")" = true ]; then
-    node_ref=""
+    seq_ref=""
     saas_ref=""
   elif [ "$(sed -n 's/^sticky=//p' <<<"$parsed")" = true ]; then
-    node_ref="$(sed -n 's/^vocdoni_node_ref=//p' <<<"$parsed")"
+    seq_ref="$(sed -n 's/^vochain_sequencer_ref=//p' <<<"$parsed")"
     saas_ref="$(sed -n 's/^saas_backend_ref=//p' <<<"$parsed")"
   fi
 done <<<"$encoded"
 
-printf 'vocdoni_node_ref=%s\nsaas_backend_ref=%s\n' "$node_ref" "$saas_ref"
+printf 'vochain_sequencer_ref=%s\nsaas_backend_ref=%s\n' "$seq_ref" "$saas_ref"
