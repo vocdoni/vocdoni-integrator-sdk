@@ -166,15 +166,32 @@ describe('integration-sticky.sh', () => {
     expect(res.stderr).toContain('usage: REPO=owner/repo')
   })
 
-  it('ignores malformed /integration comments', () => {
-    expect(
-      sticky([
-        { body: '/integration saas-backend=#760', user: { login: WRITER } },
-        { body: '/integration saas-backend=#abc', user: { login: WRITER } },
-        { body: '/integration reset now', user: { login: WRITER } },
-        { body: 'just chatting', user: { login: WRITER } },
-      ]),
-    ).toBe(refs('', '#760'))
+  it('ignores malformed /integration comments, warning about each one', () => {
+    const res = run([
+      { body: '/integration saas-backend=#760', user: { login: WRITER } },
+      { body: '/integration saas-backend=#abc', user: { login: WRITER } },
+      { body: '/integration reset now', user: { login: WRITER } },
+      { body: 'just chatting', user: { login: WRITER } },
+    ])
+    expect(res.status, res.stderr).toBe(0)
+    expect(res.stdout).toBe(refs('', '#760'))
+    expect(res.stderr.match(/::warning::skipped/g)).toHaveLength(2)
+  })
+
+  it('warns about a rejected comment and keeps the earlier state', () => {
+    const res = run([
+      { body: '/integration saas-backend=#1', user: { login: WRITER } },
+      { body: '/integration vocdoni-node=#5 saas-backend=#760', user: { login: WRITER } },
+    ])
+    expect(res.status, res.stderr).toBe(0)
+    expect(res.stdout).toBe(refs('', '#1'))
+    expect(res.stderr).toContain(
+      `::warning::skipped /integration comment by ${WRITER}: 'vocdoni-node' is replaced by 'vochain-sequencer'`,
+    )
+  })
+
+  it('stays silent about a malformed comment from a user without write access', () => {
+    expect(sticky([{ body: '/integration saas-backend=#abc', user: { login: READER } }])).toBe(refs('', ''))
   })
 
   it('a bare PR number sets the sticky state as #N', () => {

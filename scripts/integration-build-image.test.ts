@@ -38,6 +38,7 @@ describe('integration-build-image.sh', () => {
     const envs = [
       { GITHUB_ACTIONS: 'true', VOCHAIN_SEQUENCER_DEPLOY_KEY: '' },
       { GITHUB_ACTIONS: 'true' },
+      { GITHUB_ACTIONS: 'true', SAAS_BACKEND_DEPLOY_KEY: 'x' },
     ]
     for (const extraEnv of envs) {
       const res = run(['vochain-sequencer', 'main'], extraEnv)
@@ -49,7 +50,11 @@ describe('integration-build-image.sh', () => {
   })
 
   it('exits before any git call when saas-backend has no deploy key in GitHub Actions', () => {
-    const envs = [{ GITHUB_ACTIONS: 'true', SAAS_BACKEND_DEPLOY_KEY: '' }, { GITHUB_ACTIONS: 'true' }]
+    const envs = [
+      { GITHUB_ACTIONS: 'true', SAAS_BACKEND_DEPLOY_KEY: '' },
+      { GITHUB_ACTIONS: 'true' },
+      { GITHUB_ACTIONS: 'true', VOCHAIN_SEQUENCER_DEPLOY_KEY: 'x' },
+    ]
     for (const extraEnv of envs) {
       const res = run(['saas-backend', 'main'], extraEnv)
       expect(res.status).toBe(1)

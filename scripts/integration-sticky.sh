@@ -52,9 +52,12 @@ while IFS= read -r b64; do
   # Cheap check first: the lookup below runs only for /integration comments.
   first="${body%%$'\n'*}"
   [[ "$first" == /integration* ]] || continue
-  allowed "$(jq -r '.login' <<<"$item")" || continue
+  login="$(jq -r '.login' <<<"$item")"
+  allowed "$login" || continue
   # Only the first line goes to the parser: a long body must not SIGPIPE the pipe.
-  if ! parsed="$(printf '%s\n' "$first" | "$pins" 2>/dev/null)"; then
+  # A rejected comment is skipped, so the state stays as it was; the warning says why.
+  if ! parsed="$(printf '%s\n' "$first" | "$pins" 2>&1)"; then
+    echo "::warning::skipped /integration comment by $login: ${parsed#ERROR: }" >&2
     continue
   fi
   if [ "$(sed -n 's/^reset=//p' <<<"$parsed")" = true ]; then
