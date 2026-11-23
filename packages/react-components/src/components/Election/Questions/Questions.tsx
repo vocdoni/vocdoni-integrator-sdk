@@ -29,7 +29,7 @@ export const ElectionQuestionsForm = ({ onInvalid, ...rest }: ElectionQuestionsF
 }
 
 const QuestionsFormContents = ({ onInvalid }: { onInvalid?: (errors: unknown) => void }) => {
-  const { election, status, hasVoted, isAbleToVote, pendingVotes, voteStatus } = useElection()
+  const { election, status, hasVoted, isAbleToVote, pendingVotes, voteStatus, voterQuestions } = useElection()
   const { QuestionsEmpty, QuestionsError } = useComponents()
   const t = useReactComponentsLocalize()
   const { fmethods, vote } = useQuestionsForm()
@@ -57,6 +57,7 @@ const QuestionsFormContents = ({ onInvalid }: { onInvalid?: (errors: unknown) =>
         const notice = lockedQuestionNotice(question.id, pendingVotes, voteStatus, {
           questionStatus: question.status,
           processStatus: status,
+          voted: voterQuestions?.some((q) => q.questionId === question.id && q.hasVoted),
         })
         return notice ? (
           <QuestionsError key={index} error={t(notice)} variant='field' data-question-id={question.id} />

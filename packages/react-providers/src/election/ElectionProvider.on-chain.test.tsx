@@ -588,6 +588,8 @@ describe('ElectionProvider — questions that are not open', () => {
       if (!anonymous) expect(signed.map((b) => b.upstreamId)).toEqual([UPSTREAM_A])
       expect(batches).toEqual([[expect.any(String)]])
       expect(result.current.hasVoted).toBe(false)
+      // The skipped question is not left at 'signing'.
+      expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed' })
     })
   }
 

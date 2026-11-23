@@ -969,7 +969,15 @@ export function ElectionProvider({
         )
       }
 
-      setVoteStatus(Object.fromEntries(election.questions.map((q) => [q.id, initialStatus[stateOf(q)]])))
+      // Only the questions this call handles: a skipped one (not open) would
+      // otherwise sit at 'signing'/'submitting' with nothing to settle it.
+      setVoteStatus(
+        Object.fromEntries(
+          election.questions
+            .filter((q) => (stateOf(q) !== 'open' && stateOf(q) !== 'pending') || isOpen(q))
+            .map((q) => [q.id, initialStatus[stateOf(q)]]),
+        ),
+      )
 
       // Consume the open questions' one-shot CSP signatures — all in ONE
       // sign-batch call — and build and store every transaction BEFORE

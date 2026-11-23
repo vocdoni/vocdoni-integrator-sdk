@@ -166,7 +166,8 @@
       "upcoming_at": "Voting opens on {{ date }}",
       "upcoming_date_format": "PPp",
       "voted": "You have already voted",
-      "waiting_question": "Your vote is recorded. The next question is not open yet."
+      "waiting_question": "Your vote is recorded. The next question is not open yet.",
+      "waiting_question_none": "No question is open for voting right now."
     },
     "pending_resend": "Your vote for this question is being sent again.",
     "rank_position": "#{{ position }}",

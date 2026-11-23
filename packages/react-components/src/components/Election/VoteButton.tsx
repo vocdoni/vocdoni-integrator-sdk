@@ -10,7 +10,8 @@ import { useElection } from '@vocdoni/react-providers'
 
 export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<string, unknown>) => {
   const externalDisabled = Boolean(props.disabled)
-  const { election, status, isAbleToVote, voting, connected, isInCensus, hasVoted, voteStatus } = useElection()
+  const { election, status, isAbleToVote, voting, connected, isInCensus, hasVoted, voteStatus, voterQuestions } =
+    useElection()
   const { VoteButton: Slot } = useComponents()
   const t = useReactComponentsLocalize()
   const isHydrationRender = useIsHydrationRender()
@@ -54,8 +55,15 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     const statuses = Object.values(voteStatus ?? {})
     if (statuses.includes('unconfirmed')) return t('vote.disabled.unconfirmed')
     if (statuses.includes('signed')) return t('vote.disabled.signed')
-    // Question by question: what the voter has left is not open yet.
-    if (election.questions.some((q) => q.status !== 'ONGOING')) return t('vote.disabled.waiting_question')
+    // Question by question: what the voter has left is not open yet (it can
+    // still open; an ENDED one never will).
+    const voted = (id: string) => voteStatus?.[id] === 'confirmed' || voterQuestions?.some((q) => q.questionId === id && q.hasVoted)
+    const waiting = election.questions.some((q) => (q.status === 'PAUSED' || q.status === 'UPCOMING') && !voted(q.id))
+    if (waiting) {
+      return election.questions.some((q) => voted(q.id))
+        ? t('vote.disabled.waiting_question')
+        : t('vote.disabled.waiting_question_none')
+    }
     return undefined
   }
 

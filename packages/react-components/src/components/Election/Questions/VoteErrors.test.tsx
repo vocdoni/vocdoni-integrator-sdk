@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   confirmResult: true,
   pendingVotes: {} as Record<string, true>,
   voteStatus: {} as Record<string, string>,
+  voterQuestions: [] as Array<{ questionId: string; hasVoted: boolean }>,
 }))
 vi.mock('@vocdoni/react-providers', () => ({
   useElection: () => ({
@@ -19,6 +20,7 @@ vi.mock('@vocdoni/react-providers', () => ({
     voteIds: {},
     pendingVotes: state.pendingVotes,
     voteStatus: state.voteStatus,
+    voterQuestions: state.voterQuestions,
   }),
 }))
 vi.mock('../../../confirm/useConfirm', () => ({
@@ -50,6 +52,7 @@ function render(questions = oneQuestion) {
   state.confirmResult = true
   state.pendingVotes = {}
   state.voteStatus = {}
+  state.voterQuestions = []
   return renderWithComponents(<ElectionQuestions />)
 }
 
@@ -202,6 +205,21 @@ describe('a question-by-question vote (#111)', () => {
     expect(screen.getByText('You have already voted this question.')).toBeInTheDocument()
     expect(screen.queryByLabelText('A')).toBeNull()
     expect(screen.getByLabelText('C')).toBeInTheDocument()
+  })
+
+  it('locks a question voted in an earlier session (voter state, not voteStatus)', async () => {
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: twoQuestions })
+    state.confirmResult = true
+    state.pendingVotes = {}
+    state.voteStatus = {}
+    state.voterQuestions = [{ questionId: state.election.questions[0].id, hasVoted: true }]
+    const { container } = renderWithComponents(<ElectionQuestions />)
+    expect(screen.getByText('You have already voted this question.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('A')).toBeNull()
+    submit(container, ['C'])
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], [0]]))
+    state.voterQuestions = []
   })
 
   it('explains a NoOpenQuestionError without the provider wording', async () => {

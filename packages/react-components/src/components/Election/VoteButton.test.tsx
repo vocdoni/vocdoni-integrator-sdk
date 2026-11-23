@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   connected: true,
   isInCensus: true,
   voteStatus: {} as Record<string, string>,
+  voterQuestions: [] as Array<{ questionId: string; hasVoted: boolean }>,
 }))
 vi.mock('@vocdoni/react-providers', () => ({ useElection: () => state }))
 
@@ -36,6 +37,7 @@ function setVoter(over: Partial<typeof state>) {
       connected: true,
       isInCensus: true,
       voteStatus: {},
+      voterQuestions: [],
     },
     over,
   )
@@ -206,6 +208,37 @@ describe('VoteButton', () => {
         'title',
         'Your vote is recorded. The next question is not open yet.',
       )
+    })
+
+    it('reads the vote recorded from the voter state too (voted in an earlier session)', () => {
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2', status: 'PAUSED' }] })
+      setVoter({ election, voterQuestions: [{ questionId: election.questions[0].id, hasVoted: true }] })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute(
+        'title',
+        'Your vote is recorded. The next question is not open yet.',
+      )
+    })
+
+    it('does not claim a recorded vote when the voter voted nothing', () => {
+      // q-0 ended unvoted, q-1 paused.
+      const election = makeProcess({
+        questions: [
+          { title: 'Q1', status: 'ENDED' },
+          { title: 'Q2', status: 'PAUSED' },
+        ],
+      })
+      setVoter({ election })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'No question is open for voting right now.')
+    })
+
+    it('gives no waiting reason when the only question left has ended', () => {
+      // q-0 ended unvoted, q-1 voted: nothing will open again.
+      const election = makeProcess({ questions: [{ title: 'Q1', status: 'ENDED' }, { title: 'Q2' }] })
+      setVoter({ election, voteStatus: { [election.questions[1].id]: 'confirmed' } })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).not.toHaveAttribute('title')
     })
   })
 })

@@ -13,15 +13,17 @@ import { describeVoteError } from './vote-error'
  * when the voter can still answer it. Pass `open` (the question's and the
  * process's status) to also lock a question that is not open while the process
  * is: `vote()` only signs open questions, so an answer to it would be dropped.
+ * Pass `voted` (the voter state's `hasVoted`) to lock a question cast in an
+ * earlier session, which this session's `voteStatus` never reads as confirmed.
  */
 export const lockedQuestionNotice = (
   questionId: string,
   pendingVotes: Record<string, true> | undefined,
   voteStatus: Record<string, string> | undefined,
-  open?: { questionStatus?: string; processStatus?: string | null },
+  open?: { questionStatus?: string; processStatus?: string | null; voted?: boolean },
 ): string | undefined => {
   const status = voteStatus?.[questionId]
-  if (status === 'confirmed') return 'vote.disabled.question_voted'
+  if (status === 'confirmed' || open?.voted) return 'vote.disabled.question_voted'
   if (pendingVotes?.[questionId]) return 'vote.pending_resend'
   if (status === 'unconfirmed') return 'vote.disabled.unconfirmed'
   if (status === 'signed') return 'vote.disabled.signed'
@@ -57,7 +59,7 @@ export const QuestionsFormProvider = (props: PropsWithChildren<QuestionsFormProv
 const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFormProviderProps>) => {
   const fmethods = useForm()
   const { confirm } = useConfirm()
-  const { election, status, vote: baseVote, pendingVotes, voteStatus } = useElection()
+  const { election, status, vote: baseVote, pendingVotes, voteStatus, voterQuestions } = useElection()
   const t = useReactComponentsLocalize()
 
   const vote = async (values: FieldValues) => {
@@ -86,6 +88,7 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       lockedQuestionNotice(question.id, pendingVotes, voteStatus, {
         questionStatus: question.status,
         processStatus: status,
+        voted: voterQuestions?.some((q) => q.questionId === question.id && q.hasVoted),
       })
         ? [index]
         : []
