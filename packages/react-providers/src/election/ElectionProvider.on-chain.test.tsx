@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { MOCK_CSP_SIGNATURE, MOCK_WEIGHT_HEX, mockProcess } from '../../../../mocks/handlers'
 import { server } from '../../../../mocks/server'
 import { TestProvider } from '../test-utils'
-import { ElectionProvider, PartialVoteError, UnconfirmedVoteError, useElection } from './ElectionProvider'
+import { ElectionProvider, NoOpenQuestionError, PartialVoteError, UnconfirmedVoteError, useElection } from './ElectionProvider'
 import { listPendingVotes, savePendingVote } from './pending-votes'
 
 // Verified vote status: a question counts as voted only on on-chain evidence,
@@ -18,8 +18,8 @@ const OWNER = '8167d5dc4919186f999eb3dd105c40ebf7f29ff46ba329a0232a7fbcdabd1549'
 
 type Q = { questionId: string; upstreamId: string; canVote: boolean; hasVoted: boolean; hasSigned?: boolean }
 
-/** Two-question process, plain or anonymous census. */
-function useTwoQuestions(anonymous = false) {
+/** Two-question process, plain or anonymous census; `statuses` overrides each question's wire status. */
+function useTwoQuestions(anonymous = false, statuses: [string, string] = ['READY', 'READY']) {
   server.use(
     http.get('http://localhost/processes/:id', ({ params }) =>
       HttpResponse.json({
@@ -27,8 +27,8 @@ function useTwoQuestions(anonymous = false) {
         id: params.id as string,
         census: { ...mockProcess.census, anonymous },
         questions: [
-          { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A },
-          { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B },
+          { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+          { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
         ],
       }),
     ),
@@ -567,5 +567,46 @@ describe('ElectionProvider — verified vote status', () => {
     expect(batches[1]).toHaveLength(2)
     expect(batches[1][1]).toBe(storedTx)
     expect(result.current.hasVoted).toBe(true)
+  })
+})
+
+// #111: the CSP refuses a whole batch if any question in it is not open.
+describe('ElectionProvider — questions that are not open', () => {
+  for (const anonymous of [false, true]) {
+    it(`signs and relays only the open question (${anonymous ? 'anonymous' : 'plain'} census)`, async () => {
+      useTwoQuestions(anonymous, ['READY', 'PAUSED'])
+      mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)])
+      const { signed, batches } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+      const { result } = renderHook(useVoter, { wrapper })
+      await connect(result)
+      await waitFor(() => expect(result.current.isAbleToVote).toBe(true))
+
+      await act(async () => {
+        await result.current.vote([[0], [1]])
+      })
+      if (!anonymous) expect(signed.map((b) => b.upstreamId)).toEqual([UPSTREAM_A])
+      expect(batches).toEqual([[expect.any(String)]])
+      expect(result.current.hasVoted).toBe(false)
+    })
+  }
+
+  it('throws NoOpenQuestionError and isAbleToVote is false when no unvoted question is open', async () => {
+    useTwoQuestions(false, ['PAUSED', 'PAUSED'])
+    mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)])
+    const { batches, signCalls } = mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(result.current.isAbleToVote).toBe(false)
+
+    const err = await result.current.vote([[0], [1]]).catch((e) => e)
+    expect(err).toBeInstanceOf(NoOpenQuestionError)
+    expect(err.questions).toEqual([
+      { questionId: 'q-0', status: 'PAUSED' },
+      { questionId: 'q-1', status: 'PAUSED' },
+    ])
+    expect(signCalls.count).toBe(0)
+    expect(batches).toHaveLength(0)
   })
 })

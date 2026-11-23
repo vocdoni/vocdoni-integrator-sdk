@@ -170,10 +170,14 @@ const {
   hasVoted,      // boolean — true once EVERY question is on chain
   pendingVotes,  // Record<questionId, true> — signed txs stored in this tab, not on chain yet;
                  //   re-sent on connect and by the next vote(); render those questions read-only
-  isAbleToVote,  // boolean — connected && isInCensus && !hasVoted && some eligible question is
-                 //   not signed yet or pending a re-send
+  isAbleToVote,  // boolean — connected && isInCensus && !hasVoted && some eligible, open (ONGOING)
+                 //   question is not signed yet or pending a re-send
   vote,          // (encodedBallots: number[][]) => Promise<string> — per-question ballots
-                 //   (a pending question's ballot is ignored: its stored tx is re-sent)
+                 //   (a pending question's ballot is ignored: its stored tx is re-sent). Only open
+                 //   (ONGOING) questions are signed and relayed; the ballots of paused/upcoming/ended
+                 //   ones are ignored and can be voted by a later call once they open. Throws
+                 //   NoOpenQuestionError (`questions: {questionId, status}[]`) when unvoted questions
+                 //   remain but none is open (e.g. between questions of a question-by-question vote)
   voting,        // boolean — true while vote() or the re-send on connect is in flight
   voteStatus,    // Record<questionId, 'signing'|'submitting'|'confirming'|'confirmed'|'failed'
                  //   |'unconfirmed'|'signed'> — per-question progress of the current/last vote()

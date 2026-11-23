@@ -141,7 +141,10 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * relayed, then the whole batch is relayed in ONE call (`POST /votes`) that
    * the backend accepts or rejects as a unit. Questions already on chain are
    * skipped. Questions in {@link pendingVotes} re-send their stored tx — their
-   * entry in `encodedBallots` is ignored. A question is confirmed only on
+   * entry in `encodedBallots` is ignored. Only questions whose status is
+   * `ONGOING` are signed or re-sent; the rest are left for a later call, and
+   * when none of the voter's remaining questions is open the call throws
+   * {@link NoOpenQuestionError} without signing. A question is confirmed only on
    * on-chain evidence (the relay job, the check's `hasVoted`, or
    * `POST /votes/verify` for an anonymous census). If some votes land and
    * others fail, throws {@link PartialVoteError} naming both sets; if nothing
@@ -183,8 +186,9 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    */
   voteId: string | null
   /**
-   * Connected, in the census, not fully voted, and some question the voter is
-   * eligible for is either not signed yet or pending a re-send.
+   * Connected, in the census, not fully voted, and some open (`ONGOING`)
+   * question the voter is eligible for is either not signed yet or pending a
+   * re-send.
    */
   isAbleToVote: boolean
   /** Clears the voter's auth session and vote state (the tab's stored txs are kept). */
@@ -296,6 +300,20 @@ export class UnconfirmedVoteError extends Error {
         'were signed but cannot be confirmed on chain from this tab',
     )
     this.name = 'UnconfirmedVoteError'
+  }
+}
+
+/**
+ * Thrown by `vote()` when the voter still has questions to vote but none of
+ * them is open (`PAUSED`, `UPCOMING`, `ENDED`…), e.g. a question-by-question
+ * vote between two questions. Nothing was signed; retry once one opens.
+ */
+export class NoOpenQuestionError extends Error {
+  constructor(readonly questions: Array<{ questionId: string; status: QuestionStatus }>) {
+    super(
+      `No question open for voting: ${questions.map((q) => `${q.questionId} (${q.status})`).join(', ')}`,
+    )
+    this.name = 'NoOpenQuestionError'
   }
 }
 
@@ -509,6 +527,12 @@ export function ElectionProvider({
   }, [explorerOverride, chainId])
 
   const status = useProcessStatus(election)
+  // The CSP authorises a batch as a unit and refuses it whole if any question
+  // in it is not open, so only open questions are ever signed or relayed.
+  // `status` folds in the start date: live questions before it read UPCOMING.
+  const isOpen = (question: Question) => status === 'ONGOING' && question.status === 'ONGOING'
+  // Re-runs the stored-tx re-send when a question opens or closes mid-process.
+  const questionStatuses = election?.questions.map((q) => q.status).join() ?? ''
 
   const [voteId, setVoteId] = useState<string | null>(null)
   const [voteIds, setVoteIds] = useState<Record<string, string>>({})
@@ -789,10 +813,10 @@ export function ElectionProvider({
     [],
   )
 
-  /** The stored txs of the pending questions, in question order. */
+  /** The stored txs of the open pending questions, in question order. */
   const pendingItems = (vs: VoterState): RelayItem[] =>
     (election?.questions ?? []).flatMap((question, i) =>
-      vs.states[question.id] === 'pending'
+      vs.states[question.id] === 'pending' && isOpen(question)
         ? [{ question, i, txPayload: vs.own[question.id].txPayload!, nullifier: vs.own[question.id].nullifier }]
         : [],
     )
@@ -854,7 +878,7 @@ export function ElectionProvider({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.authToken, session.owner, election?.id, status])
+  }, [session.authToken, session.owner, election?.id, status, questionStatuses])
 
   const castVotes = useCallback(
     async (encodedBallots: number[][], memos?: (string | undefined)[]): Promise<string> => {
@@ -895,7 +919,7 @@ export function ElectionProvider({
         if (!question.upstreamId) {
           throw new Error(`Question ${i} has no upstreamId; process may not be published yet`)
         }
-        if (question.secretUntilTheEnd && !question.encryptionKeys?.length) {
+        if (isOpen(question) && question.secretUntilTheEnd && !question.encryptionKeys?.length) {
           throw new Error(
             `Question ${i} ("${question.id}") is secret but its encryption keys are not published yet; retry once the keykeepers publish them`,
           )
@@ -919,13 +943,16 @@ export function ElectionProvider({
         throw new Error('Every question of this process has already been voted')
       }
       const reused = pendingItems(vs)
-      if (reused.length > 0 && status !== 'ONGOING') {
-        throw new Error('Voting is not open — the stored vote cannot be re-sent')
-      }
       const open = election.questions
         .map((question, i) => ({ question, i }))
-        .filter(({ question }) => stateOf(question) === 'open')
+        .filter(({ question }) => stateOf(question) === 'open' && isOpen(question))
       if (reused.length + open.length === 0) {
+        const waiting = election.questions.filter((q) => stateOf(q) === 'open' || stateOf(q) === 'pending')
+        if (waiting.length > 0) {
+          throw new NoOpenQuestionError(
+            waiting.map((q) => ({ questionId: q.id, status: status === 'ONGOING' ? q.status : status! })),
+          )
+        }
         throw new UnconfirmedVoteError(
           election.questions.flatMap((q) => {
             const st = stateOf(q)
@@ -1067,7 +1094,16 @@ export function ElectionProvider({
     session.connected &&
     isInCensus &&
     !hasVoted &&
-    voterQuestions.some((q) => q.canVote && !q.hasVoted && (!q.hasSigned || !!pendingVotes[q.questionId]))
+    voterQuestions.some((q) => {
+      const question = election?.questions.find((eq) => eq.id === q.questionId)
+      return (
+        !!question &&
+        isOpen(question) &&
+        q.canVote &&
+        !q.hasVoted &&
+        (!q.hasSigned || !!pendingVotes[q.questionId])
+      )
+    })
 
   const value = useMemo<ElectionContextValue>(
     () => ({
