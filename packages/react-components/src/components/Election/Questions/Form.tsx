@@ -24,10 +24,11 @@ export const lockedQuestionNotice = (
 ): string | undefined => {
   const status = voteStatus?.[questionId]
   if (status === 'confirmed' || open?.voted) return 'vote.disabled.question_voted'
+  // Before the pending check: a stored tx is only re-sent while its question is open.
+  if (open?.processStatus === 'ONGOING' && open.questionStatus !== 'ONGOING') return 'vote.disabled.question_not_open'
   if (pendingVotes?.[questionId]) return 'vote.pending_resend'
   if (status === 'unconfirmed') return 'vote.disabled.unconfirmed'
   if (status === 'signed') return 'vote.disabled.signed'
-  if (open?.processStatus === 'ONGOING' && open.questionStatus !== 'ONGOING') return 'vote.disabled.question_not_open'
   return undefined
 }
 

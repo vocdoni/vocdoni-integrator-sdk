@@ -548,6 +548,9 @@ export function ElectionProvider({
   // questions with a FRESH ephemeral signer and race the in-flight batch; a
   // StrictMode double effect would relay the stored txs twice.
   const castInFlightRef = useRef(false)
+  // The connect effect's identity. A re-run for a question opening or closing
+  // keeps it, so an in-flight re-send still publishes what it confirmed.
+  const connectKeyRef = useRef('')
 
   /** Publishes a fresh voter state: membership, per-question state, recovered vote ids. */
   const applyVoterState = useCallback((vs: VoterState) => {
@@ -835,6 +838,8 @@ export function ElectionProvider({
   // signing. The disconnect branch also resets the vote state, so clearing the
   // session from useElectionAuth() propagates here.
   useEffect(() => {
+    const key = `${session.connected}|${session.authToken}|${session.owner}|${election?.id}|${status}`
+    connectKeyRef.current = key
     if (!session.connected || !election) {
       setIsInCensus(false)
       setVoterQuestions([])
@@ -847,6 +852,7 @@ export function ElectionProvider({
     }
 
     let cancelled = false
+    const stale = () => cancelled && connectKeyRef.current !== key
     session
       .check()
       .then(async (checked) => {
@@ -862,8 +868,8 @@ export function ElectionProvider({
         setVoting(true)
         setVoteStatus((prev) => ({ ...prev, ...Object.fromEntries(items.map((it) => [it.question.id, 'submitting'])) }))
         try {
-          const { succeeded } = await relay(items, () => cancelled)
-          if (!cancelled) applyRelayResult(vs, succeeded)
+          const { succeeded } = await relay(items, stale)
+          if (!stale()) applyRelayResult(vs, succeeded)
         } catch {
           // statuses are already `failed`; the entries stay for the next try
         } finally {

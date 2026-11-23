@@ -494,10 +494,11 @@ message reads `errors.vote_failed_unknown`, and an unknown outcome (`could not c
 reads `errors.vote_unconfirmed`, and a `NoOpenQuestionError` reads
 `errors.vote_no_open_question`. `<ElectionQuestions />` replaces the fields of a
 question already voted (`voteStatus` `confirmed`, or `voterQuestions` `hasVoted` for a vote cast in an earlier session) with `vote.disabled.question_voted`,
-of one in `pendingVotes` with `vote.pending_resend`, of an `unconfirmed`/`signed` one
-with the matching `vote.disabled.*` text, and — while the process is `ONGOING` — of a
-question that is not open itself (question by question: paused, upcoming, ended) with
-`vote.disabled.question_not_open`, through the `QuestionsError` slot
+— while the process is `ONGOING` — of a question that is not open itself (question by
+question: paused, upcoming, ended; even one in `pendingVotes`, whose stored tx waits
+until it reopens) with `vote.disabled.question_not_open`, of an open one in
+`pendingVotes` with `vote.pending_resend`, and of an `unconfirmed`/`signed` one with the
+matching `vote.disabled.*` text, through the `QuestionsError` slot
 (`variant='field'`, `data-question-id`); those questions get a placeholder ballot, need
 no answer to submit, and are left out of the confirmation (`QuestionsConfirmation`'s
 `skip` prop, the indexes it omits from `answersView`). `lockedQuestionNotice(id,

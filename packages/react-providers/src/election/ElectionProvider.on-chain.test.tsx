@@ -626,3 +626,64 @@ describe('ElectionProvider — questions that are not open', () => {
     expect(err.questions).toEqual([{ questionId: 'q-1', status: 'PAUSED' }])
   })
 })
+
+describe('ElectionProvider — a question opens or closes while a stored tx is re-sent', () => {
+  it('still publishes what the in-flight re-send confirmed', async () => {
+    const NULLIFIER = '5a'.repeat(32)
+    let statuses = ['ONGOING', 'PAUSED']
+    let landed = false
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          questions: [
+            { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+            { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
+          ],
+        }),
+      ),
+      http.post('http://localhost/votes', async () => {
+        // The organizer pauses q-0 and opens q-1 while the relay is in flight.
+        statuses = ['PAUSED', 'ONGOING']
+        await new Promise((r) => setTimeout(r, 300))
+        landed = true
+        return HttpResponse.json({ jobId: 'job-0' }, { status: 202 })
+      }),
+      http.get('http://localhost/jobs/:jobId', () =>
+        HttpResponse.json({
+          jobId: 'job-0',
+          status: 'completed',
+          type: 'relay_votes',
+          result: { votes: [{ processId: 'p', nullifier: NULLIFIER, status: 'completed', voteID: NULLIFIER }] },
+        }),
+      ),
+    )
+    mockCheck(() => [q('q-0', UPSTREAM_A, { hasSigned: true, hasVoted: landed }), q('q-1', UPSTREAM_B)])
+    mockSignInfo(() => [{ questionId: 'q-0', nullifier: NULLIFIER }])
+    savePendingVote(UPSTREAM_A, { owner: OWNER, nullifier: '0x' + NULLIFIER, txPayload: 'cafebabe', savedAt: 1 })
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider
+            id={mockProcess.id}
+            queryOptions={{ refetchInterval: 20 }}
+            voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+          >
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+    await waitFor(() => expect(result.current.election?.questions[0].status).toBe('PAUSED'))
+    await waitFor(() => expect(landed).toBe(true))
+    await waitFor(() => expect(result.current.voting).toBe(false))
+
+    expect(result.current.pendingVotes).toEqual({})
+    expect(result.current.voteStatus['q-0']).toBe('confirmed')
+    expect(result.current.voteIds['q-0']).toBe(NULLIFIER)
+    expect(result.current.voterQuestions.find((v) => v.questionId === 'q-0')?.hasVoted).toBe(true)
+  })
+})

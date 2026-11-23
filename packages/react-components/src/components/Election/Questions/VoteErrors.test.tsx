@@ -197,6 +197,17 @@ describe('a question-by-question vote (#111)', () => {
     await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[0], []]))
   })
 
+  it('says a pending question that is not open waits, not that it is being re-sent', () => {
+    state.election = makeProcess({ questions: [twoQuestions[0], { ...twoQuestions[1], status: 'PAUSED' }] })
+    state.pendingVotes = { 'q-1': true }
+    state.voteStatus = {}
+    state.voterQuestions = []
+    renderWithComponents(<ElectionQuestions />)
+
+    expect(screen.getByText('This question is not open for voting right now.')).toBeInTheDocument()
+    expect(screen.queryByText('Your vote for this question is being sent again.')).toBeNull()
+  })
+
   it('locks a question already voted once the next one opens', () => {
     state.election = makeProcess({ questions: twoQuestions })
     state.pendingVotes = {}
