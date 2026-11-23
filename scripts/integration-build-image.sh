@@ -6,25 +6,25 @@
 # own SSH key otherwise.
 #
 # Usage:
-#   scripts/integration-build-image.sh <vochain-sequencer|saas-backend> <ref|#PR>
+#   scripts/integration-build-image.sh <vocdoni-sequencer|saas-backend> <ref|#PR>
 #
 # Output (stdout; everything else goes to stderr):
 #   image=integrator-sdk-integration/<repo>:<sha>
 #   sha=<full commit sha>
-# Feed the image to the stack as VOCHAIN_SEQUENCER_IMAGE or SAAS_BACKEND_IMAGE.
+# Feed the image to the stack as VOCDONI_SEQUENCER_IMAGE or SAAS_BACKEND_IMAGE.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
-  echo "usage: $0 <vochain-sequencer|saas-backend> <ref>" >&2
+  echo "usage: $0 <vocdoni-sequencer|saas-backend> <ref>" >&2
   exit 1
 fi
 repo="$1"
 ref="$2"
 
 case "$repo" in
-  vochain-sequencer | saas-backend) ;;
+  vocdoni-sequencer | saas-backend) ;;
   *)
-    echo "ERROR: unknown repo '$repo' (expected vochain-sequencer or saas-backend)" >&2
+    echo "ERROR: unknown repo '$repo' (expected vocdoni-sequencer or saas-backend)" >&2
     exit 1
     ;;
 esac
@@ -33,8 +33,8 @@ if ! [[ "$ref" =~ ^#[0-9]{1,9}$ || "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ 
   exit 1
 fi
 
-if [ "$repo" = vochain-sequencer ] && [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${VOCHAIN_SEQUENCER_DEPLOY_KEY:-}" ]; then
-  echo "ERROR: VOCHAIN_SEQUENCER_DEPLOY_KEY is empty: vochain-sequencer is private. Fork PRs get no secrets, so a maintainer's /integration comment must run it." >&2
+if [ "$repo" = vocdoni-sequencer ] && [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${VOCDONI_SEQUENCER_DEPLOY_KEY:-}" ]; then
+  echo "ERROR: VOCDONI_SEQUENCER_DEPLOY_KEY is empty: vocdoni-sequencer is private. Fork PRs get no secrets, so a maintainer's /integration comment must run it." >&2
   exit 1
 fi
 
@@ -51,8 +51,8 @@ trap 'rm -rf "$dir"' EXIT
 # every branch, tag and PR head (no trees or blobs), so a short SHA only resolves if one of
 # them reaches it.
 url="git@github.com:vocdoni/$repo.git"
-if [ "$repo" = vochain-sequencer ] && [ -n "${VOCHAIN_SEQUENCER_DEPLOY_KEY:-}" ]; then
-  printf '%s\n' "$VOCHAIN_SEQUENCER_DEPLOY_KEY" > "$dir/deploy_key"
+if [ "$repo" = vocdoni-sequencer ] && [ -n "${VOCDONI_SEQUENCER_DEPLOY_KEY:-}" ]; then
+  printf '%s\n' "$VOCDONI_SEQUENCER_DEPLOY_KEY" > "$dir/deploy_key"
   chmod 600 "$dir/deploy_key"
   echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$dir/known_hosts"
   export GIT_SSH_COMMAND="ssh -i '$dir/deploy_key' -o IdentitiesOnly=yes -o UserKnownHostsFile='$dir/known_hosts'"

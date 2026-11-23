@@ -11,7 +11,7 @@ const scriptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'i
 function run(args: string[], extraEnv: Record<string, string> = {}) {
   const env: NodeJS.ProcessEnv = { ...process.env }
   delete env.GITHUB_ACTIONS
-  delete env.VOCHAIN_SEQUENCER_DEPLOY_KEY
+  delete env.VOCDONI_SEQUENCER_DEPLOY_KEY
   delete env.SAAS_BACKEND_DEPLOY_KEY
   Object.assign(env, extraEnv)
   const res = spawnSync('bash', [scriptPath, ...args], { env, encoding: 'utf8' })
@@ -28,23 +28,23 @@ describe('integration-build-image.sh', () => {
 
   it('rejects an invalid ref', () => {
     for (const ref of ['-rf', 'a..b', 'a;b', '#abc']) {
-      const res = run(['vochain-sequencer', ref])
+      const res = run(['vocdoni-sequencer', ref])
       expect(res.status).toBe(1)
       expect(res.stderr).toMatch(/^ERROR: invalid ref/)
     }
   })
 
-  it('exits before any git call when vochain-sequencer has no deploy key in GitHub Actions', () => {
+  it('exits before any git call when vocdoni-sequencer has no deploy key in GitHub Actions', () => {
     const envs = [
-      { GITHUB_ACTIONS: 'true', VOCHAIN_SEQUENCER_DEPLOY_KEY: '' },
+      { GITHUB_ACTIONS: 'true', VOCDONI_SEQUENCER_DEPLOY_KEY: '' },
       { GITHUB_ACTIONS: 'true' },
       { GITHUB_ACTIONS: 'true', SAAS_BACKEND_DEPLOY_KEY: 'x' },
     ]
     for (const extraEnv of envs) {
-      const res = run(['vochain-sequencer', 'main'], extraEnv)
+      const res = run(['vocdoni-sequencer', 'main'], extraEnv)
       expect(res.status).toBe(1)
       expect(res.stdout).toBe('')
-      expect(res.stderr).toMatch(/^ERROR: VOCHAIN_SEQUENCER_DEPLOY_KEY is empty: vochain-sequencer is private/)
+      expect(res.stderr).toMatch(/^ERROR: VOCDONI_SEQUENCER_DEPLOY_KEY is empty: vocdoni-sequencer is private/)
       expect(res.stderr.trim().split('\n')).toHaveLength(1)
     }
   })
@@ -53,7 +53,7 @@ describe('integration-build-image.sh', () => {
     const envs = [
       { GITHUB_ACTIONS: 'true', SAAS_BACKEND_DEPLOY_KEY: '' },
       { GITHUB_ACTIONS: 'true' },
-      { GITHUB_ACTIONS: 'true', VOCHAIN_SEQUENCER_DEPLOY_KEY: 'x' },
+      { GITHUB_ACTIONS: 'true', VOCDONI_SEQUENCER_DEPLOY_KEY: 'x' },
     ]
     for (const extraEnv of envs) {
       const res = run(['saas-backend', 'main'], extraEnv)
