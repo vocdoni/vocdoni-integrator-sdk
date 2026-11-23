@@ -257,12 +257,13 @@ describe('VoteButton', () => {
       expect(screen.getByTestId('vote')).not.toHaveAttribute('title')
     })
 
-    it('gives no waiting reason when the only question left has ended', () => {
-      // q-0 ended unvoted, q-1 voted: nothing will open again.
+    it('says the voter has voted when the only question left has ended', () => {
+      // q-0 ended unvoted, q-1 open and voted: nothing will open again, but hasVoted stays false.
       const election = makeProcess({ questions: [{ title: 'Q1', status: 'ENDED' }, { title: 'Q2' }] })
       setVoter({ election, voteStatus: { [election.questions[1].id]: 'confirmed' } })
       renderWithComponents(<VoteButton />, slots)
-      expect(screen.getByTestId('vote')).not.toHaveAttribute('title')
+      expect(screen.getByTestId('vote')).toBeDisabled()
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'You have already voted')
     })
   })
 })

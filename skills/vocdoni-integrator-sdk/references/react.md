@@ -169,7 +169,9 @@ const {
                  //   hasVoted = on chain (an anonymous question verified via /votes/verify reads true)
   hasVoted,      // boolean — true once EVERY question is on chain
   pendingVotes,  // Record<questionId, true> — signed txs stored in this tab, not on chain yet;
-                 //   re-sent on connect and by the next vote(); render those questions read-only
+                 //   re-sent on connect and by the next vote() while the question is open (process
+                 //   and question ONGOING), so it waits while paused/upcoming/ended; render those
+                 //   questions read-only
   isAbleToVote,  // boolean — connected && isInCensus && !hasVoted && some eligible, open (ONGOING)
                  //   question is not signed yet or pending a re-send
   vote,          // (encodedBallots: number[][]) => Promise<string> — per-question ballots
@@ -268,8 +270,8 @@ await auth1('123456')
 
 Casting is **phased** so a failure can never half-vote silently:
 
-1. **Pre-flight** — every question is validated up front (`upstreamId` present; `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
-2. **Resume check** — a fresh `elections.check()` (plus `verifyVotes` for an anonymous census) decides each question: on chain → skipped; pending → its stored tx is reused; `unconfirmed`/`signed` → left alone; otherwise signed below. If that check fails, `vote()` throws `Could not verify your voting status; try again` without signing or relaying anything.
+1. **Pre-flight** — every question is validated up front (`upstreamId` present; open (`ONGOING`) `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
+2. **Resume check** — a fresh `elections.check()` (plus `verifyVotes` for an anonymous census) decides each question: on chain → skipped; pending → its stored tx is reused (only while the question is open; otherwise it waits); `unconfirmed`/`signed` → left alone; otherwise signed below. If that check fails, `vote()` throws `Could not verify your voting status; try again` without signing or relaying anything.
 3. **Sign + build** — every open question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch` → `POST /processes/{id}/sign-batch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure. Each built tx is stored (see above) before the relay.
 4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. A job-reported failure, a missing outcome, a lost relay response or a job wait that times out is verified on chain before it is reported (a lost response or a timeout is polled for up to `voteOptions.reconcile`, default 48 × 2.5 s); a verification that itself fails reports the question `failed` with the error `could not confirm the vote on chain yet` — unknown, not rejected. If some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`; `hasVoted` turns true only when every question is on chain. Catch it and offer a retry — the next `vote()` call re-sends the stored txs.
 
