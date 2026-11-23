@@ -26,8 +26,15 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
   // broken (integrator-sdk#53). Process state first: it holds for every voter,
   // whatever their own session says.
   const reason = (): string | undefined => {
+    const voted = (id: string) => voteStatus?.[id] === 'confirmed' || voterQuestions?.some((q) => q.questionId === id && q.hasVoted)
+    const waiting = election.questions.some((q) => (q.status === 'PAUSED' || q.status === 'UPCOMING') && !voted(q.id))
     switch (status as QuestionStatus | null) {
       case 'ONGOING':
+        break
+      // Mixed statuses with none ONGOING, e.g. q-0 ENDED and q-1 PAUSED: the
+      // gap between two questions of a question-by-question vote (#111).
+      case 'PROCESS_UNKNOWN':
+        if (!waiting) return t('vote.disabled.not_open')
         break
       case 'UPCOMING': {
         const startDate = getElectionDate(election, 'startDate')
@@ -58,8 +65,6 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     // Question by question: what the voter has left is not open yet (it can
     // still open; an ENDED one never will). Only when nothing open is left:
     // an able voter disabled by the consumer gets no tooltip.
-    const voted = (id: string) => voteStatus?.[id] === 'confirmed' || voterQuestions?.some((q) => q.questionId === id && q.hasVoted)
-    const waiting = election.questions.some((q) => (q.status === 'PAUSED' || q.status === 'UPCOMING') && !voted(q.id))
     if (!isAbleToVote && waiting) {
       return election.questions.some((q) => voted(q.id))
         ? t('vote.disabled.waiting_question')

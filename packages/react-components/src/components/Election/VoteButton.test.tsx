@@ -221,16 +221,31 @@ describe('VoteButton', () => {
     })
 
     it('does not claim a recorded vote when the voter voted nothing', () => {
-      // q-0 ended unvoted, q-1 paused.
+      // q-0 ended unvoted, q-1 paused: the provider derives PROCESS_UNKNOWN for that mix.
       const election = makeProcess({
         questions: [
           { title: 'Q1', status: 'ENDED' },
           { title: 'Q2', status: 'PAUSED' },
         ],
       })
-      setVoter({ election })
+      setVoter({ election, status: 'PROCESS_UNKNOWN' })
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute('title', 'No question is open for voting right now.')
+    })
+
+    it('says the next question is not open yet between two questions (q-0 closed, q-1 not open)', () => {
+      const election = makeProcess({
+        questions: [
+          { title: 'Q1', status: 'ENDED' },
+          { title: 'Q2', status: 'PAUSED' },
+        ],
+      })
+      setVoter({ election, status: 'PROCESS_UNKNOWN', voteStatus: { [election.questions[0].id]: 'confirmed' } })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute(
+        'title',
+        'Your vote is recorded. The next question is not open yet.',
+      )
     })
 
     it('gives no waiting reason when an open question is left and only the consumer disables it', () => {

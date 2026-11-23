@@ -12,7 +12,8 @@ import { describeVoteError } from './vote-error'
  * The i18n key of the notice that replaces a question's fields, or undefined
  * when the voter can still answer it. Pass `open` (the question's and the
  * process's status) to also lock a question that is not open while the process
- * is: `vote()` only signs open questions, so an answer to it would be dropped.
+ * is (or is between questions, PROCESS_UNKNOWN): `vote()` only signs open
+ * questions, so an answer to it would be dropped.
  * Pass `voted` (the voter state's `hasVoted`) to lock a question cast in an
  * earlier session, which this session's `voteStatus` never reads as confirmed.
  */
@@ -25,7 +26,9 @@ export const lockedQuestionNotice = (
   const status = voteStatus?.[questionId]
   if (status === 'confirmed' || open?.voted) return 'vote.disabled.question_voted'
   // Before the pending check: a stored tx is only re-sent while its question is open.
-  if (open?.processStatus === 'ONGOING' && open.questionStatus !== 'ONGOING') return 'vote.disabled.question_not_open'
+  // PROCESS_UNKNOWN is a mixed process with none ONGOING (e.g. between two questions).
+  const live = open?.processStatus === 'ONGOING' || open?.processStatus === 'PROCESS_UNKNOWN'
+  if (live && open?.questionStatus !== 'ONGOING') return 'vote.disabled.question_not_open'
   if (pendingVotes?.[questionId]) return 'vote.pending_resend'
   if (status === 'unconfirmed') return 'vote.disabled.unconfirmed'
   if (status === 'signed') return 'vote.disabled.signed'

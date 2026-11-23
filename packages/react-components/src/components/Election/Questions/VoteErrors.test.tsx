@@ -9,12 +9,13 @@ const state = vi.hoisted(() => ({
   pendingVotes: {} as Record<string, true>,
   voteStatus: {} as Record<string, string>,
   voterQuestions: [] as Array<{ questionId: string; hasVoted: boolean }>,
+  status: 'ONGOING',
 }))
 vi.mock('@vocdoni/react-providers', () => ({
   useElection: () => ({
     election: state.election,
     vote: state.vote,
-    status: 'ONGOING',
+    status: state.status,
     hasVoted: false,
     isAbleToVote: true,
     voteIds: {},
@@ -231,6 +232,24 @@ describe('a question-by-question vote (#111)', () => {
     submit(container, ['C'])
     await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], [0]]))
     state.voterQuestions = []
+  })
+
+  it('locks the next question between two questions (q-0 closed, q-1 not open: PROCESS_UNKNOWN)', () => {
+    state.election = makeProcess({
+      questions: [
+        { ...twoQuestions[0], status: 'ENDED' },
+        { ...twoQuestions[1], status: 'PAUSED' },
+      ],
+    })
+    state.status = 'PROCESS_UNKNOWN'
+    state.pendingVotes = {}
+    state.voteStatus = { [state.election.questions[0].id]: 'confirmed' }
+    state.voterQuestions = []
+    renderWithComponents(<ElectionQuestions />)
+    expect(screen.getByText('You have already voted this question.')).toBeInTheDocument()
+    expect(screen.getByText('This question is not open for voting right now.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('C')).toBeNull()
+    state.status = 'ONGOING'
   })
 
   it('explains a NoOpenQuestionError without the provider wording', async () => {
