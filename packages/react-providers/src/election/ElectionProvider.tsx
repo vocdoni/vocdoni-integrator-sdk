@@ -950,7 +950,8 @@ export function ElectionProvider({
         const waiting = election.questions.filter((q) => stateOf(q) === 'open' || stateOf(q) === 'pending')
         if (waiting.length > 0) {
           throw new NoOpenQuestionError(
-            waiting.map((q) => ({ questionId: q.id, status: status === 'ONGOING' ? q.status : status! })),
+            // A live question reads ONGOING on the wire before the start date.
+            waiting.map((q) => ({ questionId: q.id, status: q.status === 'ONGOING' ? 'UPCOMING' : q.status })),
           )
         }
         throw new UnconfirmedVoteError(

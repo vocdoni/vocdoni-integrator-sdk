@@ -609,4 +609,18 @@ describe('ElectionProvider — questions that are not open', () => {
     expect(signCalls.count).toBe(0)
     expect(batches).toHaveLength(0)
   })
+
+  it("reports each waiting question's own status when the process status is mixed", async () => {
+    // q-0 closed after its turn, q-1 waits for its own: the process reads PROCESS_UNKNOWN.
+    useTwoQuestions(false, ['ENDED', 'PAUSED'])
+    mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: true }), q('q-1', UPSTREAM_B)])
+    mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+
+    const err = await result.current.vote([[0], [1]]).catch((e) => e)
+    expect(err).toBeInstanceOf(NoOpenQuestionError)
+    expect(err.questions).toEqual([{ questionId: 'q-1', status: 'PAUSED' }])
+  })
 })

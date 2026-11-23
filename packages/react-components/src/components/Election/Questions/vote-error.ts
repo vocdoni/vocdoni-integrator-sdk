@@ -50,6 +50,8 @@ const distinctReasons = (failed: FailedQuestion[], t: VoteErrorTranslate): strin
  * envelope's `error` and the only account of why the vote did not count.
  */
 export const describeVoteError = (error: unknown, t: VoteErrorTranslate): string => {
+  // By name, like PartialVoteError: no question the voter has left is open.
+  if (error instanceof Error && error.name === 'NoOpenQuestionError') return t('errors.vote_no_open_question')
   if (isPartialVoteError(error)) {
     const cast = error.succeeded?.length ?? 0
     const failed = error.failed ?? []

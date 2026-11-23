@@ -178,6 +178,43 @@ describe('a failed vote is reported to the voter', () => {
   })
 })
 
+describe('a question-by-question vote (#111)', () => {
+  it('locks a paused question and votes only the open one', async () => {
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: [twoQuestions[0], { ...twoQuestions[1], status: 'PAUSED' }] })
+    state.confirmResult = true
+    state.pendingVotes = {}
+    state.voteStatus = {}
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    expect(screen.getByText('This question is not open for voting right now.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('C')).toBeNull()
+    // Only the open question needs an answer: the paused one does not block the submit.
+    submit(container, ['A'])
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[0], []]))
+  })
+
+  it('locks a question already voted once the next one opens', () => {
+    state.election = makeProcess({ questions: twoQuestions })
+    state.pendingVotes = {}
+    state.voteStatus = { [state.election.questions[0].id]: 'confirmed' }
+    renderWithComponents(<ElectionQuestions />)
+    expect(screen.getByText('You have already voted this question.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('A')).toBeNull()
+    expect(screen.getByLabelText('C')).toBeInTheDocument()
+  })
+
+  it('explains a NoOpenQuestionError without the provider wording', async () => {
+    const error = new Error('No question open for voting: q-0 (PAUSED)')
+    error.name = 'NoOpenQuestionError'
+    state.vote = vi.fn().mockRejectedValue(error)
+    const { container } = render()
+    submit(container)
+    expect(await screen.findByText(/not open for voting right now\. Try again/)).toBeInTheDocument()
+    expect(screen.queryByText(/q-0 \(PAUSED\)/)).toBeNull()
+  })
+})
+
 describe('a question whose vote is already signed', () => {
   it('renders "being sent again" instead of the fields of a pending question, and votes the rest', async () => {
     state.vote = vi.fn().mockResolvedValue('vote-id')

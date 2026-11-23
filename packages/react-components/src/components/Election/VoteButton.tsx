@@ -54,6 +54,8 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     const statuses = Object.values(voteStatus ?? {})
     if (statuses.includes('unconfirmed')) return t('vote.disabled.unconfirmed')
     if (statuses.includes('signed')) return t('vote.disabled.signed')
+    // Question by question: what the voter has left is not open yet.
+    if (election.questions.some((q) => q.status !== 'ONGOING')) return t('vote.disabled.waiting_question')
     return undefined
   }
 

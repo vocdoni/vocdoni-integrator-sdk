@@ -29,7 +29,7 @@ export const ElectionQuestionsForm = ({ onInvalid, ...rest }: ElectionQuestionsF
 }
 
 const QuestionsFormContents = ({ onInvalid }: { onInvalid?: (errors: unknown) => void }) => {
-  const { election, hasVoted, isAbleToVote, pendingVotes, voteStatus } = useElection()
+  const { election, status, hasVoted, isAbleToVote, pendingVotes, voteStatus } = useElection()
   const { QuestionsEmpty, QuestionsError } = useComponents()
   const t = useReactComponentsLocalize()
   const { fmethods, vote } = useQuestionsForm()
@@ -52,9 +52,12 @@ const QuestionsFormContents = ({ onInvalid }: { onInvalid?: (errors: unknown) =>
     <form onSubmit={fmethods.handleSubmit(vote, onInvalid)} id={`election-questions-${election!.id}`}>
       <Voted />
       {questions.map((question, index) => {
-        // A question whose vote is already signed is read-only: its stored tx
-        // is being re-sent, or nothing in this tab can send it.
-        const notice = lockedQuestionNotice(question.id, pendingVotes, voteStatus)
+        // A question already voted, signed (its stored tx is being re-sent, or
+        // nothing in this tab can send it) or not open is read-only.
+        const notice = lockedQuestionNotice(question.id, pendingVotes, voteStatus, {
+          questionStatus: question.status,
+          processStatus: status,
+        })
         return notice ? (
           <QuestionsError key={index} error={t(notice)} variant='field' data-question-id={question.id} />
         ) : (

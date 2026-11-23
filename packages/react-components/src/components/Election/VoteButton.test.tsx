@@ -196,5 +196,16 @@ describe('VoteButton', () => {
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute('title', 'You have already voted')
     })
+
+    it('says the next question is not open yet in a question-by-question vote (#111)', () => {
+      // q-0 voted and still open, q-1 paused: the process reads ONGOING but nothing is left to vote now.
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2', status: 'PAUSED' }] })
+      setVoter({ election, isAbleToVote: false, voteStatus: { [election.questions[0].id]: 'confirmed' } })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute(
+        'title',
+        'Your vote is recorded. The next question is not open yet.',
+      )
+    })
   })
 })
