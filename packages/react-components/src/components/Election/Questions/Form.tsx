@@ -68,20 +68,6 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       return false
     }
 
-    // A question with no derivable ballot type has no encoding, so no ballot including it
-    // can be built. The default field (UnsupportedQuestion) already fails validation, so
-    // this only fires for a custom slot that never mounted it. Refuse before asking the
-    // voter to confirm a vote that cannot be cast, not after.
-    const unsupported = election.questions.flatMap((question, index) =>
-      tryInferQuestionBallotType(question) === undefined ? [index] : []
-    )
-    if (unsupported.length) {
-      for (const index of unsupported) {
-        fmethods.setError(index.toString(), { type: 'unsupported', message: t('errors.question_unsupported') })
-      }
-      return false
-    }
-
     // A locked question renders no fields; the provider ignores its ballot
     // (a pending one re-sends its stored tx, the others are never signed).
     const locked = election.questions.flatMap((question, index) =>
@@ -93,6 +79,21 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
         ? [index]
         : []
     )
+
+    // A question with no derivable ballot type has no encoding, so no ballot including it
+    // can be built. The default field (UnsupportedQuestion) already fails validation, so
+    // this only fires for a custom slot that never mounted it. Refuse before asking the
+    // voter to confirm a vote that cannot be cast, not after. Locked questions are
+    // skipped: they mount no field to show the error, and their ballot is ignored.
+    const unsupported = election.questions.flatMap((question, index) =>
+      tryInferQuestionBallotType(question) === undefined && !locked.includes(index) ? [index] : []
+    )
+    if (unsupported.length) {
+      for (const index of unsupported) {
+        fmethods.setError(index.toString(), { type: 'unsupported', message: t('errors.question_unsupported') })
+      }
+      return false
+    }
 
     if (!(await confirm(<QuestionsConfirmation election={election} answers={values} skip={locked} />))) {
       return false

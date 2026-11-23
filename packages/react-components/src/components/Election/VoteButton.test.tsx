@@ -233,6 +233,15 @@ describe('VoteButton', () => {
       expect(screen.getByTestId('vote')).toHaveAttribute('title', 'No question is open for voting right now.')
     })
 
+    it('gives no waiting reason when an open question is left and only the consumer disables it', () => {
+      // q-0 open and unvoted, q-1 paused: the voter can vote q-0, the button is off for the consumer's reason.
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2', status: 'PAUSED' }] })
+      setVoter({ election, isAbleToVote: true })
+      renderWithComponents(<VoteButton disabled />, slots)
+      expect(screen.getByTestId('vote')).toBeDisabled()
+      expect(screen.getByTestId('vote')).not.toHaveAttribute('title')
+    })
+
     it('gives no waiting reason when the only question left has ended', () => {
       // q-0 ended unvoted, q-1 voted: nothing will open again.
       const election = makeProcess({ questions: [{ title: 'Q1', status: 'ENDED' }, { title: 'Q2' }] })

@@ -152,6 +152,21 @@ describe('ElectionQuestions (Fields + Form)', () => {
     expect(state.confirm).not.toHaveBeenCalled()
     expect(state.vote).not.toHaveBeenCalled()
   })
+
+  it('does not block the open question when the uninferable one is locked (not open)', async () => {
+    const votable = makeProcess({ questions: [{ title: 'Votable', choices: [{ title: 'Yes', value: 0 }] }] })
+    const pausedLegacy = { ...legacyQuestion, status: 'PAUSED' as QuestionStatus }
+    state.election = { ...legacyProjectedProcess, questions: [votable.questions[0], pausedLegacy] }
+    state.status = 'ONGOING'
+    state.isAbleToVote = true
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    fireEvent.click(screen.getByLabelText('Yes'))
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[0], []]))
+    expect(state.confirm).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('QuestionsConfirmation', () => {

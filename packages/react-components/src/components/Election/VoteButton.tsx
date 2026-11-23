@@ -56,10 +56,11 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     if (statuses.includes('unconfirmed')) return t('vote.disabled.unconfirmed')
     if (statuses.includes('signed')) return t('vote.disabled.signed')
     // Question by question: what the voter has left is not open yet (it can
-    // still open; an ENDED one never will).
+    // still open; an ENDED one never will). Only when nothing open is left:
+    // an able voter disabled by the consumer gets no tooltip.
     const voted = (id: string) => voteStatus?.[id] === 'confirmed' || voterQuestions?.some((q) => q.questionId === id && q.hasVoted)
     const waiting = election.questions.some((q) => (q.status === 'PAUSED' || q.status === 'UPCOMING') && !voted(q.id))
-    if (waiting) {
+    if (!isAbleToVote && waiting) {
       return election.questions.some((q) => voted(q.id))
         ? t('vote.disabled.waiting_question')
         : t('vote.disabled.waiting_question_none')
