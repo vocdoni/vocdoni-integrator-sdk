@@ -965,7 +965,7 @@ export function ElectionProvider({
         throw new Error(COULD_NOT_VERIFY, { cause: err })
       }
       if (vs.unverified) throw new Error(COULD_NOT_VERIFY)
-      applyVoterState(vs)
+      if (!staleCast()) applyVoterState(vs)
 
       const stateOf = (question: Question) => vs.states[question.id]
       if (election.questions.every((q) => stateOf(q) === 'confirmed')) {
@@ -1040,7 +1040,7 @@ export function ElectionProvider({
                 `The CSP did not sign question ${i} ("${question.id}"): ${result?.error ?? result?.code ?? 'no result'}`,
               ),
             })
-            setVoteStatus((st) => ({ ...st, [question.id]: 'failed' }))
+            if (!staleCast()) setVoteStatus((st) => ({ ...st, [question.id]: 'failed' }))
             return
           }
           const txPayload = buildVoteTransaction({
@@ -1061,7 +1061,7 @@ export function ElectionProvider({
             savePendingVote(question.upstreamId!, { owner: session.owner, nullifier, txPayload, savedAt: Date.now() })
           }
           fresh.push({ question, i, txPayload, nullifier })
-          setVoteStatus((st) => ({ ...st, [question.id]: 'submitting' }))
+          if (!staleCast()) setVoteStatus((st) => ({ ...st, [question.id]: 'submitting' }))
         })
       }
 
