@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeProcess, renderWithComponents } from '../../../test-utils'
 
 const state = vi.hoisted(() => ({
@@ -47,6 +47,12 @@ const partialVoteError = (
   error.failed = failed
   return error
 }
+
+// A failing test must not leak its process or voter state into the next one.
+beforeEach(() => {
+  state.status = 'ONGOING'
+  state.voterQuestions = []
+})
 
 function render(questions = oneQuestion) {
   state.election = makeProcess({ questions })
@@ -231,7 +237,6 @@ describe('a question-by-question vote (#111)', () => {
     expect(screen.queryByLabelText('A')).toBeNull()
     submit(container, ['C'])
     await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], [0]]))
-    state.voterQuestions = []
   })
 
   it('locks the next question between two questions (q-0 closed, q-1 not open: PROCESS_UNKNOWN)', () => {
@@ -249,7 +254,6 @@ describe('a question-by-question vote (#111)', () => {
     expect(screen.getByText('You have already voted this question.')).toBeInTheDocument()
     expect(screen.getByText('This question is not open for voting right now.')).toBeInTheDocument()
     expect(screen.queryByLabelText('C')).toBeNull()
-    state.status = 'ONGOING'
   })
 
   it('explains a NoOpenQuestionError without the provider wording', async () => {
@@ -260,6 +264,43 @@ describe('a question-by-question vote (#111)', () => {
     submit(container)
     expect(await screen.findByText(/not open for voting right now\. Try again/)).toBeInTheDocument()
     expect(screen.queryByText(/q-0 \(PAUSED\)/)).toBeNull()
+  })
+
+  it.each([
+    [
+      'one question that will not open',
+      [{ questionId: 'q-0', status: 'PAUSED' }],
+      'This question is not open for voting right now. Try again once it opens.',
+    ],
+    [
+      'questions that will not open',
+      [
+        { questionId: 'q-0', status: 'PAUSED' },
+        { questionId: 'q-1', status: 'UPCOMING' },
+      ],
+      'These questions are not open for voting right now. Try again once they open.',
+    ],
+    [
+      'one ended question',
+      [{ questionId: 'q-0', status: 'ENDED' }],
+      'Voting is closed for this question.',
+    ],
+    [
+      'ended questions',
+      [
+        { questionId: 'q-0', status: 'ENDED' },
+        { questionId: 'q-1', status: 'RESULTS' },
+      ],
+      'Voting is closed for these questions.',
+    ],
+  ])('words a NoOpenQuestionError for %s', async (_case, questions, text) => {
+    const error = new Error('No question open for voting') as Error & { questions: unknown }
+    error.name = 'NoOpenQuestionError'
+    error.questions = questions
+    state.vote = vi.fn().mockRejectedValue(error)
+    const { container } = render(twoQuestions)
+    submit(container, ['A', 'C'])
+    expect(await screen.findByText(text)).toBeInTheDocument()
   })
 })
 
