@@ -112,6 +112,7 @@ services:
       VOCDONI_SECRET: supersecret
       VOCDONI_WEBURL: http://localhost:3000
       VOCDONI_VOCDONIAPI: http://vocone:9090/v2
+      # Its address is funded at genesis by VOCONED_FUNDEDACCOUNTS above; change both together.
       VOCDONI_PRIVATEKEY: b7f1b2e6ecbd52e5f2a3b0f0c1d2e3f4a5b6c7d8e9fa0b1c2d3e4f5a6b7c8d9e
       VOCDONI_FULLTRANSPARENTMODE: 'false'
       # Dummy values: cmd/service/main.go requires both non-empty at startup

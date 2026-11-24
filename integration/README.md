@@ -54,6 +54,10 @@ before calling `up`.
 €100,000). Each run spends €330 of it and nothing refunds it, so a reused stack
 lasts about 300 runs.
 
+The backend account is funded at genesis (`VOCONED_FUNDEDACCOUNTS`), which
+voconed applies only when it creates the chain. A `vocone_run` volume from an
+older stack keeps its old chain and settings, so run `down` once to start fresh.
+
 ## Pinning upstream commits
 
 Comment on a pull request to run the suite against `vocdoni-sequencer` and/or
