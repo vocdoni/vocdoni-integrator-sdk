@@ -996,6 +996,76 @@ describe('ElectionProvider — voter state around a vote()', () => {
     expect(result.current.voteStatus['q-0']).not.toBe('submitting')
   })
 
+  it.each([
+    ['A voted q-0', ['q-0']],
+    ['A voted every question', ['q-0', 'q-1']],
+  ])('does not write voter A\'s vote() starting state into voter B\'s session (%s)', async (_name, votedByA) => {
+    useTwoQuestions(false, ['ONGOING', 'ONGOING'])
+    let voter: 'A' | 'B' = 'A'
+    let armed = false
+    let holding = false
+    let release: () => void = () => {}
+    const held = new Promise<void>((r) => (release = r))
+    mockSignAndRelay(() => jobOf(['completed'], ['6b'.repeat(32)]))
+    mockSignInfo(() => [])
+    server.use(
+      http.post('http://localhost/processes/:processId/check', async () => {
+        const body = {
+          belongsToProcess: true,
+          weight: MOCK_WEIGHT_HEX,
+          questions: [
+            q('q-0', UPSTREAM_A, { hasVoted: voter === 'A' && votedByA.includes('q-0') }),
+            q('q-1', UPSTREAM_B, { hasVoted: voter === 'A' && votedByA.includes('q-1') }),
+          ],
+        }
+        if (armed) {
+          armed = false
+          holding = true
+          await held
+        }
+        return HttpResponse.json(body)
+      }),
+    )
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider id={mockProcess.id} voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}>
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+
+    let voting: Promise<string> = Promise.resolve('')
+    await act(async () => {
+      armed = true
+      voting = result.current.vote([[0], [1]]).catch(() => '')
+      await waitFor(() => expect(holding).toBe(true))
+    })
+    // Voter B identifies while A's /check is still in flight.
+    voter = 'B'
+    await act(async () => {
+      await result.current.auth0({ memberNumber: '6' })
+    })
+    await act(async () => {
+      await result.current.auth1(['123456'])
+    })
+    await waitFor(() => expect(result.current.isInCensus).toBe(true))
+
+    release()
+    await act(async () => {
+      await voting
+    })
+    await act(() => sleep(100))
+
+    const values = Object.values(result.current.voteStatus)
+    expect(values).not.toContain('confirmed')
+    expect(values).not.toContain('signing')
+    expect(result.current.hasVoted).toBe(false)
+  })
+
   it('keeps the connect snapshot when vote() throws before it applies state', async () => {
     useTwoQuestions()
     let checks = 0

@@ -969,7 +969,7 @@ export function ElectionProvider({
 
       const stateOf = (question: Question) => vs.states[question.id]
       if (election.questions.every((q) => stateOf(q) === 'confirmed')) {
-        setHasVoted(true)
+        if (!staleCast()) setHasVoted(true)
         throw new Error('Every question of this process has already been voted')
       }
       const reused = pendingItems(vs)
@@ -1001,13 +1001,15 @@ export function ElectionProvider({
 
       // Only the questions this call handles: a skipped one (not open) would
       // otherwise sit at 'signing'/'submitting' with nothing to settle it.
-      setVoteStatus(
-        Object.fromEntries(
-          election.questions
-            .filter((q) => (stateOf(q) !== 'open' && stateOf(q) !== 'pending') || isOpen(q))
-            .map((q) => [q.id, initialStatus[stateOf(q)]]),
-        ),
-      )
+      if (!staleCast()) {
+        setVoteStatus(
+          Object.fromEntries(
+            election.questions
+              .filter((q) => (stateOf(q) !== 'open' && stateOf(q) !== 'pending') || isOpen(q))
+              .map((q) => [q.id, initialStatus[stateOf(q)]]),
+          ),
+        )
+      }
 
       // Consume the open questions' one-shot CSP signatures — all in ONE
       // sign-batch call — and build and store every transaction BEFORE
