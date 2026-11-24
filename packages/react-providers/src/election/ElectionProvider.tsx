@@ -548,6 +548,9 @@ export function ElectionProvider({
   // questions with a FRESH ephemeral signer and race the in-flight batch; a
   // StrictMode double effect would relay the stored txs twice.
   const castInFlightRef = useRef(false)
+  // Bumped when a vote() starts and when it settles: a connect-effect fetch
+  // that spans either one is older than the vote's result, so it must not apply.
+  const castGenRef = useRef(0)
   // The connect effect's identity. A re-run for a question opening or closing
   // keeps it, so an in-flight re-send still publishes what it confirmed.
   const connectKeyRef = useRef('')
@@ -853,12 +856,15 @@ export function ElectionProvider({
 
     let cancelled = false
     const stale = () => cancelled && connectKeyRef.current !== key
+    const castGen = castGenRef.current
     session
       .check()
       .then(async (checked) => {
         if (cancelled) return
         const vs = await resolveVoterState(client, election, checked, session.owner, session.authToken!)
         if (cancelled) return
+        // A snapshot that predates a vote() would overwrite its result: skip it, and its re-send.
+        if (castInFlightRef.current || castGenRef.current !== castGen) return
         applyVoterState(vs)
 
         const items = pendingItems(vs)
@@ -1081,11 +1087,13 @@ export function ElectionProvider({
         )
       }
       castInFlightRef.current = true
+      castGenRef.current++
       setVoting(true)
       try {
         return await castVotes(encodedBallots, memos)
       } finally {
         castInFlightRef.current = false
+        castGenRef.current++
         setVoting(false)
       }
     },

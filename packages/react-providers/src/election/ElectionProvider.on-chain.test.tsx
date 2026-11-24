@@ -687,3 +687,79 @@ describe('ElectionProvider — a question opens or closes while a stored tx is r
     expect(result.current.voterQuestions.find((v) => v.questionId === 'q-0')?.hasVoted).toBe(true)
   })
 })
+
+describe('ElectionProvider — a question opens while vote() is relaying', () => {
+  it('keeps the vote result when a voter-state snapshot taken before the relay landed arrives late', async () => {
+    const NULLIFIER = '6b'.repeat(32)
+    let statuses = ['ONGOING', 'PAUSED']
+    let relaying = false
+    let lateCheckDone = false
+    mockSignAndRelay(() => jobOf(['completed'], [NULLIFIER]))
+    mockSignInfo(() => [])
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          questions: [
+            { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+            { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
+          ],
+        }),
+      ),
+      http.post('http://localhost/processes/:processId/check', async () => {
+        if (!relaying) {
+          return HttpResponse.json({
+            belongsToProcess: true,
+            weight: MOCK_WEIGHT_HEX,
+            questions: [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)],
+          })
+        }
+        // The connect effect's check, sent during the relay: it answers late,
+        // with the snapshot from before the relay landed.
+        await new Promise((r) => setTimeout(r, 600))
+        lateCheckDone = true
+        return HttpResponse.json({
+          belongsToProcess: true,
+          weight: MOCK_WEIGHT_HEX,
+          questions: [q('q-0', UPSTREAM_A, { hasSigned: true }), q('q-1', UPSTREAM_B)],
+        })
+      }),
+      http.post('http://localhost/votes', async () => {
+        // q-1 opens while the relay is in flight, so the connect effect re-runs.
+        statuses = ['ONGOING', 'ONGOING']
+        relaying = true
+        await new Promise((r) => setTimeout(r, 300))
+        relaying = false
+        return HttpResponse.json({ jobId: 'job-0' }, { status: 202 })
+      }),
+    )
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider
+            id={mockProcess.id}
+            queryOptions={{ refetchInterval: 20 }}
+            voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+          >
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+
+    await act(async () => {
+      await result.current.vote([[0], [1]])
+    })
+    await waitFor(() => expect(lateCheckDone).toBe(true))
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+
+    expect(result.current.voteStatus['q-0']).toBe('confirmed')
+    expect(result.current.voteIds['q-0']).toBe(NULLIFIER)
+    expect(result.current.voterQuestions.find((v) => v.questionId === 'q-0')?.hasVoted).toBe(true)
+  })
+})
