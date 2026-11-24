@@ -548,16 +548,23 @@ export function ElectionProvider({
   // questions with a FRESH ephemeral signer and race the in-flight batch; a
   // StrictMode double effect would relay the stored txs twice.
   const castInFlightRef = useRef(false)
-  // Bumped when a vote() starts and when it settles: a connect-effect fetch
-  // that spans either one is older than the vote's result, so it must not apply.
-  const castGenRef = useRef(0)
+  // Questions this session's relay confirmed, for the session they were cast in.
+  // A voter-state snapshot fetched before the relay landed must not downgrade them.
+  const relayConfirmedRef = useRef<{ scope: string; ids: Set<string> }>({ scope: '', ids: new Set() })
+  // Set when the connect effect skipped its re-send because a relay was in flight.
+  // The relay's settle then re-runs the effect once, so those txs are re-sent.
+  const resyncRef = useRef(false)
+  const [resync, setResync] = useState(0)
   // The connect effect's identity. A re-run for a question opening or closing
   // keeps it, so an in-flight re-send still publishes what it confirmed.
   const connectKeyRef = useRef('')
 
   /** Publishes a fresh voter state: membership, per-question state, recovered vote ids. */
   const applyVoterState = useCallback((vs: VoterState) => {
-    const { checked, states, own, consumed } = vs
+    const { checked, own, consumed } = vs
+    // What this session's relay confirmed stays confirmed, whatever the snapshot says.
+    const states = { ...vs.states }
+    for (const id of relayConfirmedRef.current.ids) states[id] = 'confirmed'
     setIsInCensus(checked.belongsToProcess)
     setVoterQuestions(
       checked.questions.map((q) => (states[q.questionId] === 'confirmed' && !q.hasVoted ? { ...q, hasVoted: true } : q)),
@@ -808,6 +815,7 @@ export function ElectionProvider({
   const applyRelayResult = useCallback(
     (vs: VoterState, succeeded: Array<{ questionId: string; voteId: string }>): boolean => {
       const landed = new Set(succeeded.map((s) => s.questionId))
+      for (const id of landed) relayConfirmedRef.current.ids.add(id)
       if (succeeded.length > 0) setVoteIds((prev) => ({ ...prev, ...byQuestion(succeeded) }))
       setVoterQuestions((qs) => qs.map((q) => (landed.has(q.questionId) ? { ...q, hasVoted: true } : q)))
       const all =
@@ -843,6 +851,8 @@ export function ElectionProvider({
   useEffect(() => {
     const key = `${session.connected}|${session.authToken}|${session.owner}|${election?.id}|${status}`
     connectKeyRef.current = key
+    const scope = `${session.connected}|${session.authToken}|${session.owner}|${election?.id}`
+    if (relayConfirmedRef.current.scope !== scope) relayConfirmedRef.current = { scope, ids: new Set() }
     if (!session.connected || !election) {
       setIsInCensus(false)
       setVoterQuestions([])
@@ -856,20 +866,21 @@ export function ElectionProvider({
 
     let cancelled = false
     const stale = () => cancelled && connectKeyRef.current !== key
-    const castGen = castGenRef.current
     session
       .check()
       .then(async (checked) => {
         if (cancelled) return
         const vs = await resolveVoterState(client, election, checked, session.owner, session.authToken!)
         if (cancelled) return
-        // A snapshot that predates a vote() would overwrite its result: skip it, and its re-send.
-        if (castInFlightRef.current || castGenRef.current !== castGen) return
         applyVoterState(vs)
 
         const items = pendingItems(vs)
+        if (items.length === 0 || status !== 'ONGOING') return
         // Skipped when a vote() (or the other StrictMode run) already relays.
-        if (items.length === 0 || status !== 'ONGOING' || castInFlightRef.current) return
+        if (castInFlightRef.current) {
+          resyncRef.current = true
+          return
+        }
         castInFlightRef.current = true
         setVoting(true)
         setVoteStatus((prev) => ({ ...prev, ...Object.fromEntries(items.map((it) => [it.question.id, 'submitting'])) }))
@@ -880,6 +891,10 @@ export function ElectionProvider({
           // statuses are already `failed`; the entries stay for the next try
         } finally {
           castInFlightRef.current = false
+          if (resyncRef.current) {
+            resyncRef.current = false
+            setResync((n) => n + 1)
+          }
           setVoting(false)
         }
       })
@@ -890,7 +905,7 @@ export function ElectionProvider({
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.authToken, session.owner, election?.id, status, questionStatuses])
+  }, [session.authToken, session.owner, election?.id, status, questionStatuses, resync])
 
   const castVotes = useCallback(
     async (encodedBallots: number[][], memos?: (string | undefined)[]): Promise<string> => {
@@ -1087,13 +1102,15 @@ export function ElectionProvider({
         )
       }
       castInFlightRef.current = true
-      castGenRef.current++
       setVoting(true)
       try {
         return await castVotes(encodedBallots, memos)
       } finally {
         castInFlightRef.current = false
-        castGenRef.current++
+        if (resyncRef.current) {
+          resyncRef.current = false
+          setResync((n) => n + 1)
+        }
         setVoting(false)
       }
     },
