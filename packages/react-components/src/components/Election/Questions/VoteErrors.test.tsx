@@ -52,6 +52,7 @@ const partialVoteError = (
 beforeEach(() => {
   state.status = 'ONGOING'
   state.voterQuestions = []
+  state.confirmResult = true
 })
 
 function render(questions = oneQuestion) {
@@ -318,6 +319,19 @@ describe('a question whose vote is already signed', () => {
     submit(container, ['C'])
     // The pending question's ballot is a placeholder: the provider re-sends its stored tx.
     await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], [0]]))
+  })
+
+  it('re-sends straight away after a partial failure, with no confirmation to show', async () => {
+    // q-0 confirmed, q-1 pending: every question is locked, so there is nothing to confirm.
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: twoQuestions })
+    state.confirmResult = false // a confirmation would stop the submit
+    state.voteStatus = { 'q-0': 'confirmed' }
+    state.pendingVotes = { 'q-1': true }
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    fireEvent.submit(container.querySelector('form')!)
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], []]))
   })
 
   it.each([

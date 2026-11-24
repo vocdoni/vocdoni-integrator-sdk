@@ -28,7 +28,9 @@ export const lockedQuestionNotice = (
   // Before the pending check: a stored tx is only re-sent while its question is open.
   // PROCESS_UNKNOWN is a mixed process with none ONGOING (e.g. between two questions).
   const live = open?.processStatus === 'ONGOING' || open?.processStatus === 'PROCESS_UNKNOWN'
-  if (live && open?.questionStatus !== 'ONGOING') return 'vote.disabled.question_not_open'
+  // A raw wire READY is a live question; no status at all cannot be read as closed.
+  const questionStatus = open?.questionStatus === 'READY' ? 'ONGOING' : open?.questionStatus
+  if (live && questionStatus !== undefined && questionStatus !== 'ONGOING') return 'vote.disabled.question_not_open'
   if (pendingVotes?.[questionId]) return 'vote.pending_resend'
   if (status === 'unconfirmed') return 'vote.disabled.unconfirmed'
   if (status === 'signed') return 'vote.disabled.signed'
@@ -99,7 +101,9 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       return false
     }
 
-    if (!(await confirm(<QuestionsConfirmation election={election} answers={values} skip={locked} />))) {
+    // Every question locked (e.g. a pending re-send): nothing to summarize, so submit straight away.
+    const allLocked = locked.length === election.questions.length
+    if (!allLocked && !(await confirm(<QuestionsConfirmation election={election} answers={values} skip={locked} />))) {
       return false
     }
 

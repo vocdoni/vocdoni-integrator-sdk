@@ -17,7 +17,7 @@ vi.mock('../../../confirm/useConfirm', () => ({
 }))
 
 import { I18nextProvider } from 'react-i18next'
-import { QuestionsFormProvider, useQuestionsForm } from './Form'
+import { lockedQuestionNotice, QuestionsFormProvider, useQuestionsForm } from './Form'
 import { ComponentsProvider } from '../../context/ComponentsProvider'
 import { createTestI18n } from '../../../i18n/test-i18n'
 
@@ -158,5 +158,24 @@ describe('QuestionsFormProvider vote payload', () => {
       await result.current.vote({ '0': '1' })
       expect(state.vote).toHaveBeenCalledWith([[1]])
     })
+  })
+})
+
+describe('lockedQuestionNotice', () => {
+  it('locks an open process question whose status is not open', () => {
+    expect(lockedQuestionNotice('q-1', undefined, undefined, { questionStatus: 'PAUSED', processStatus: 'ONGOING' })).toBe(
+      'vote.disabled.question_not_open',
+    )
+  })
+
+  it('reads a raw wire READY as open', () => {
+    const open = { questionStatus: 'READY', processStatus: 'ONGOING' }
+    expect(lockedQuestionNotice('q-0', undefined, undefined, open)).toBeUndefined()
+    expect(lockedQuestionNotice('q-0', undefined, undefined, { ...open, processStatus: 'PROCESS_UNKNOWN' })).toBeUndefined()
+  })
+
+  it('does not lock by status when the question carries no status', () => {
+    expect(lockedQuestionNotice('q-0', undefined, undefined, { processStatus: 'ONGOING' })).toBeUndefined()
+    expect(lockedQuestionNotice('q-0', undefined, undefined, { processStatus: 'PROCESS_UNKNOWN' })).toBeUndefined()
   })
 })
