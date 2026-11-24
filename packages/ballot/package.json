@@ -1,7 +1,7 @@
 {
   "name": "@vocdoni/ballot",
   "version": "1.4.0",
-  "license": "GPL-3.0-or-later",
+  "license": "LGPL-3.0-or-later",
   "description": "Framework-agnostic Vocdoni ballot semantics: type inference, choice encoding, results decoding",
   "keywords": [
     "vocdoni",
@@ -18,7 +18,8 @@
   },
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "COPYING"
   ],
   "main": "src/index.ts",
   "scripts": {

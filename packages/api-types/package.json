@@ -1,7 +1,7 @@
 {
   "name": "@vocdoni/api-types",
   "version": "2.6.0",
-  "license": "GPL-3.0-or-later",
+  "license": "LGPL-3.0-or-later",
   "description": "Shared TypeScript types for the Vocdoni Integrator SDK",
   "keywords": [
     "vocdoni",
@@ -17,7 +17,8 @@
   },
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "COPYING"
   ],
   "main": "src/index.ts",
   "scripts": {

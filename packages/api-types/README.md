@@ -1,19 +1,21 @@
-<p align="center" width="100%">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://developer.vocdoni.io/img/vocdoni_logotype_full_blank.svg" />
-      <source media="(prefers-color-scheme: light)" srcset="https://developer.vocdoni.io/img/vocdoni_logotype_full_white.svg" />
-      <img alt="Vocdoni" src="https://developer.vocdoni.io/img/vocdoni_logotype_full_white.svg" />
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://app.vocdoni.io/assets/logo-classic-white.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://app.vocdoni.io/assets/logo-classic.svg" />
+    <img alt="Vocdoni" width="280" src="https://app.vocdoni.io/assets/logo-classic.svg" />
   </picture>
 </p>
-
-<p align="center" width="100%">
-    <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/commits/main/"><img src="https://img.shields.io/github/commit-activity/m/vocdoni/vocdoni-integrator-sdk" /></a>
-    <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/issues"><img src="https://img.shields.io/github/issues/vocdoni/vocdoni-integrator-sdk" /></a>
-    <a href="https://discord.gg/xFTh8Np2ga"><img src="https://img.shields.io/badge/discord-join%20chat-blue.svg" /></a>
-    <a href="https://twitter.com/vocdoni"><img src="https://img.shields.io/twitter/follow/vocdoni.svg?style=social&label=Follow" /></a>
+<h1 align="center">@vocdoni/api-types</h1>
+<p align="center">Shared TypeScript types for the Vocdoni Integrator SDK.</p>
+<p align="center">
+  <a href="https://www.npmjs.com/package/@vocdoni/api-types"><img alt="npm version" src="https://img.shields.io/npm/v/@vocdoni/api-types?label=npm" /></a>
+  <a href="https://www.npmjs.com/package/@vocdoni/api-types"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@vocdoni/api-types" /></a>
+  <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/actions/workflows/release.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/vocdoni/vocdoni-integrator-sdk/release.yml?branch=main&label=CI" /></a>
+  <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/badge/license-LGPL--3.0--or--later-blue" /></a>
 </p>
-
-# @vocdoni/api-types
+<p align="center">
+  <a href="https://vocdoni.io/developers">Docs</a> · <a href="https://github.com/vocdoni/vocdoni-integrator-sdk#packages">All packages</a> · <a href="https://chat.vocdoni.io">Discord</a>
+</p>
 
 Shared TypeScript types for the Vocdoni SaaS API. This package is **type-only**: it has no
 runtime code, just the interfaces and types that describe the shapes the SaaS API speaks —
@@ -26,13 +28,13 @@ responses and request bodies without pulling in any runtime dependency.
 
 ## Install
 
-~~~bash
+```bash
 pnpm add -D @vocdoni/api-types
-~~~
+```
 
 ## Usage
 
-~~~ts
+```ts
 import type { VotingProcessResponse } from '@vocdoni/api-types'
 
 function describe(process: VotingProcessResponse): string {
@@ -40,8 +42,8 @@ function describe(process: VotingProcessResponse): string {
   const title = process.title.default ?? Object.values(process.title)[0] ?? ''
   return `${title} — ${process.questions.length} question(s)`
 }
-~~~
+```
 
 ## License
 
-This package is licensed under the [GNU General Public License v3.0](../../LICENSE).
+This package is licensed under the [GNU Lesser General Public License v3.0 or later](https://github.com/vocdoni/vocdoni-integrator-sdk/blob/main/LICENSE).

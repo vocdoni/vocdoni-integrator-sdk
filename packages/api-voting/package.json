@@ -1,7 +1,7 @@
 {
   "name": "@vocdoni/api-voting",
   "version": "1.3.3",
-  "license": "GPL-3.0-or-later",
+  "license": "LGPL-3.0-or-later",
   "description": "Client-side voting for the Vocdoni SaaS API (CSP auth, vote envelope, encrypted ballots)",
   "keywords": [
     "vocdoni",
@@ -18,7 +18,8 @@
   },
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "COPYING"
   ],
   "main": "src/index.ts",
   "scripts": {
