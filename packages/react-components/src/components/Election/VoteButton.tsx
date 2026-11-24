@@ -27,7 +27,9 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
   // whatever their own session says.
   const reason = (): string | undefined => {
     const voted = (id: string) => voteStatus?.[id] === 'confirmed' || voterQuestions?.some((q) => q.questionId === id && q.hasVoted)
-    const waiting = election.questions.some((q) => (q.status === 'PAUSED' || q.status === 'UPCOMING') && !voted(q.id))
+    // Only the questions this voter can vote: one they are not eligible for never opens to them.
+    const votable = election.questions.filter((q) => voterQuestions?.some((vq) => vq.questionId === q.id && vq.canVote))
+    const waiting = votable.some((q) => (q.status === 'PAUSED' || q.status === 'UPCOMING') && !voted(q.id))
     switch (status as QuestionStatus | null) {
       case 'ONGOING':
         break
@@ -65,8 +67,9 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     // Question by question: nothing open is left for the voter. A paused or
     // upcoming one can still open; an ENDED one never will. Only when nothing
     // open is left: an able voter disabled by the consumer gets no tooltip.
-    if (!isAbleToVote) {
-      const votedSome = election.questions.some((q) => voted(q.id))
+    // No votable question at all: nothing here to explain, as before question-by-question votes.
+    if (!isAbleToVote && votable.length) {
+      const votedSome = votable.some((q) => voted(q.id))
       if (!votedSome) return t('vote.disabled.waiting_question_none')
       return waiting ? t('vote.disabled.waiting_question') : t('vote.disabled.voted')
     }

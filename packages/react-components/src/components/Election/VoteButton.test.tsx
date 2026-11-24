@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({
   connected: true,
   isInCensus: true,
   voteStatus: {} as Record<string, string>,
-  voterQuestions: [] as Array<{ questionId: string; hasVoted: boolean }>,
+  voterQuestions: [] as Array<{ questionId: string; canVote: boolean; hasVoted: boolean }>,
 }))
 vi.mock('@vocdoni/react-providers', () => ({ useElection: () => state }))
 
@@ -41,6 +41,11 @@ function setVoter(over: Partial<typeof state>) {
     },
     over,
   )
+}
+
+// The voter's per-question state, eligible for every question, `voted` ones cast.
+function canVoteAll(election: ReturnType<typeof makeProcess>, voted: string[] = []) {
+  return election.questions.map((q) => ({ questionId: q.id, canVote: true, hasVoted: voted.includes(q.id) }))
 }
 
 describe('VoteButton', () => {
@@ -202,7 +207,12 @@ describe('VoteButton', () => {
     it('says the next question is not open yet in a question-by-question vote (#111)', () => {
       // q-0 voted and still open, q-1 paused: the process reads ONGOING but nothing is left to vote now.
       const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2', status: 'PAUSED' }] })
-      setVoter({ election, isAbleToVote: false, voteStatus: { [election.questions[0].id]: 'confirmed' } })
+      setVoter({
+        election,
+        isAbleToVote: false,
+        voteStatus: { [election.questions[0].id]: 'confirmed' },
+        voterQuestions: canVoteAll(election),
+      })
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute(
         'title',
@@ -212,7 +222,7 @@ describe('VoteButton', () => {
 
     it('reads the vote recorded from the voter state too (voted in an earlier session)', () => {
       const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2', status: 'PAUSED' }] })
-      setVoter({ election, voterQuestions: [{ questionId: election.questions[0].id, hasVoted: true }] })
+      setVoter({ election, voterQuestions: canVoteAll(election, [election.questions[0].id]) })
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute(
         'title',
@@ -228,7 +238,7 @@ describe('VoteButton', () => {
           { title: 'Q2', status: 'PAUSED' },
         ],
       })
-      setVoter({ election, status: 'PROCESS_UNKNOWN' })
+      setVoter({ election, status: 'PROCESS_UNKNOWN', voterQuestions: canVoteAll(election) })
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute('title', 'No question is open for voting right now.')
     })
@@ -240,7 +250,12 @@ describe('VoteButton', () => {
           { title: 'Q2', status: 'PAUSED' },
         ],
       })
-      setVoter({ election, status: 'PROCESS_UNKNOWN', voteStatus: { [election.questions[0].id]: 'confirmed' } })
+      setVoter({
+        election,
+        status: 'PROCESS_UNKNOWN',
+        voteStatus: { [election.questions[0].id]: 'confirmed' },
+        voterQuestions: canVoteAll(election),
+      })
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute(
         'title',
@@ -260,9 +275,31 @@ describe('VoteButton', () => {
     it('says the voter has voted when the only question left has ended', () => {
       // q-0 ended unvoted, q-1 open and voted: nothing will open again, but hasVoted stays false.
       const election = makeProcess({ questions: [{ title: 'Q1', status: 'ENDED' }, { title: 'Q2' }] })
-      setVoter({ election, voteStatus: { [election.questions[1].id]: 'confirmed' } })
+      setVoter({ election, voteStatus: { [election.questions[1].id]: 'confirmed' }, voterQuestions: canVoteAll(election) })
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toBeDisabled()
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'You have already voted')
+    })
+
+    it('gives no reason when the voter can vote no question of a process that is ONGOING', () => {
+      // Every question is closed to this voter (not in its census): nothing is waiting for them.
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2', status: 'PAUSED' }] })
+      const voterQuestions = election.questions.map((q) => ({ questionId: q.id, canVote: false, hasVoted: false }))
+      setVoter({ election, voterQuestions })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toBeDisabled()
+      expect(screen.getByTestId('vote')).not.toHaveAttribute('title')
+    })
+
+    it('says the voter has voted when the question left for them is closed to the voter', () => {
+      // q-0 voted by the voter, q-1 paused and not in the voter's census: nothing waits for them.
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2', status: 'PAUSED' }] })
+      const voterQuestions = [
+        { questionId: election.questions[0].id, canVote: true, hasVoted: true },
+        { questionId: election.questions[1].id, canVote: false, hasVoted: false },
+      ]
+      setVoter({ election, voterQuestions })
+      renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute('title', 'You have already voted')
     })
   })
