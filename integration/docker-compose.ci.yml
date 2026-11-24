@@ -58,7 +58,9 @@ services:
       VOCONED_BLOCKPERIOD: 1
       VOCONED_BLOCKSIZE: 2000
       VOCONED_LOGLEVEL: info
-      VOCONED_ENABLEFAUCETWITHAMOUNT: 100000
+      # The saas-backend account (address of VOCDONI_PRIVATEKEY below) is funded at
+      # genesis; it funds every org it creates with faucet packages from that balance.
+      VOCONED_FUNDEDACCOUNTS: '0x7319196AdC5f396c7311A520a195E164496309eD:100000000'
       VOCONED_CHAINID: dev
       VOCONED_TXCOSTS: 2
       VOCONED_SETTXCOSTS: 'true'
@@ -110,6 +112,7 @@ services:
       VOCDONI_SECRET: supersecret
       VOCDONI_WEBURL: http://localhost:3000
       VOCDONI_VOCDONIAPI: http://vocone:9090/v2
+      # Its address is funded at genesis by VOCONED_FUNDEDACCOUNTS above; change both together.
       VOCDONI_PRIVATEKEY: b7f1b2e6ecbd52e5f2a3b0f0c1d2e3f4a5b6c7d8e9fa0b1c2d3e4f5a6b7c8d9e
       VOCDONI_FULLTRANSPARENTMODE: 'false'
       # Dummy values: cmd/service/main.go requires both non-empty at startup
