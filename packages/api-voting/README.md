@@ -1,19 +1,21 @@
-<p align="center" width="100%">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://developer.vocdoni.io/img/vocdoni_logotype_full_blank.svg" />
-      <source media="(prefers-color-scheme: light)" srcset="https://developer.vocdoni.io/img/vocdoni_logotype_full_white.svg" />
-      <img alt="Vocdoni" src="https://developer.vocdoni.io/img/vocdoni_logotype_full_white.svg" />
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://app.vocdoni.io/assets/logo-classic-white.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="https://app.vocdoni.io/assets/logo-classic.svg" />
+    <img alt="Vocdoni" width="280" src="https://app.vocdoni.io/assets/logo-classic.svg" />
   </picture>
 </p>
-
-<p align="center" width="100%">
-    <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/commits/main/"><img src="https://img.shields.io/github/commit-activity/m/vocdoni/vocdoni-integrator-sdk" /></a>
-    <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/issues"><img src="https://img.shields.io/github/issues/vocdoni/vocdoni-integrator-sdk" /></a>
-    <a href="https://discord.gg/xFTh8Np2ga"><img src="https://img.shields.io/badge/discord-join%20chat-blue.svg" /></a>
-    <a href="https://twitter.com/vocdoni"><img src="https://img.shields.io/twitter/follow/vocdoni.svg?style=social&label=Follow" /></a>
+<h1 align="center">@vocdoni/api-voting</h1>
+<p align="center">Client-side voting for the Vocdoni SaaS API (CSP auth, vote envelope, encrypted ballots).</p>
+<p align="center">
+  <a href="https://www.npmjs.com/package/@vocdoni/api-voting"><img alt="npm version" src="https://img.shields.io/npm/v/@vocdoni/api-voting?label=npm" /></a>
+  <a href="https://www.npmjs.com/package/@vocdoni/api-voting"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@vocdoni/api-voting" /></a>
+  <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/actions/workflows/release.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/vocdoni/vocdoni-integrator-sdk/release.yml?branch=main&label=CI" /></a>
+  <a href="https://github.com/vocdoni/vocdoni-integrator-sdk/blob/main/LICENSE"><img alt="license" src="https://img.shields.io/badge/license-LGPL--3.0--or--later-blue" /></a>
 </p>
-
-# @vocdoni/api-voting
+<p align="center">
+  <a href="https://vocdoni.io/developers">Docs</a> · <a href="https://github.com/vocdoni/vocdoni-integrator-sdk#packages">All packages</a> · <a href="https://chat.vocdoni.io">Discord</a>
+</p>
 
 The client-side voting primitives for the Vocdoni SaaS API. This package owns the
 cryptography and transaction building that turn a voter's choices into a signed Vochain
@@ -31,19 +33,20 @@ It provides:
   helpers used under the hood.
 
 Authentication and the CSP signature (and census weight) are obtained beforehand from the
-process CSP auth/sign flow — typically through [`@vocdoni/api-client`](../api-client). This
-package picks up from there and produces the vote.
+process CSP auth/sign flow — typically through
+[`@vocdoni/api-client`](https://github.com/vocdoni/vocdoni-integrator-sdk/tree/main/packages/api-client).
+This package picks up from there and produces the vote.
 
 ## Install
 
 This package builds and signs the vote, but it does **not** talk to the network — it stays
-free of any HTTP client so its bundle never leaks into read-only
-consumers. The actual relay is performed by [`@vocdoni/api-client`](../api-client), which you
-inject. Install both:
+free of any HTTP client so its bundle never leaks into read-only consumers. The actual relay is
+performed by [`@vocdoni/api-client`](https://github.com/vocdoni/vocdoni-integrator-sdk/tree/main/packages/api-client),
+which you inject. Install both:
 
-~~~bash
+```bash
 pnpm add @vocdoni/api-voting @vocdoni/api-client
-~~~
+```
 
 ## Usage
 
@@ -52,7 +55,7 @@ don't have to know which endpoint it uses. The `VoteApiClient` interface is sati
 structurally by the full `VocdoniApiClient`, so you pass the client you already have, and
 api-voting never imports api-client:
 
-~~~ts
+```ts
 import { VocdoniApiClient } from '@vocdoni/api-client'
 import { VotingClient, EphemeralSigner } from '@vocdoni/api-voting'
 
@@ -71,8 +74,10 @@ const jobId = await voting.vote({
 // Poll GET /jobs/{jobId} to obtain the vote nullifier once the job completes.
 const job = await client.jobs.waitFor(jobId)
 const nullifier = job.result?.voteID
-~~~
+```
 
 ## License
 
-This package is licensed under the [GNU General Public License v3.0](../../LICENSE).
+This package is licensed under the [GNU Lesser General Public License v3.0 or later](https://github.com/vocdoni/vocdoni-integrator-sdk/blob/main/LICENSE).
+
+Note: this package depends on [@vocdoni/proto](https://www.npmjs.com/package/@vocdoni/proto), which is published under GPL-3.0-or-later. Applications that bundle it are bound by the GPL terms of that dependency.

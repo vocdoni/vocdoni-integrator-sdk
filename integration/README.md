@@ -12,6 +12,14 @@ The command builds the workspace packages first, then runs vitest with
 `integration/vitest.config.ts`. No MSW mocking is loaded — requests hit the
 real API.
 
+## Contents
+
+- [Why one suite](#why-one-suite)
+- [Pinning upstream commits](#pinning-upstream-commits)
+- [What it covers](#what-it-covers)
+- [Pay-per-process billing (`payg.itest.ts`)](#pay-per-process-billing-paygitestts)
+- [Configuration](#configuration)
+
 ## Why one suite
 
 Everything that needs a real backend is asserted inside the lifecycle, which
