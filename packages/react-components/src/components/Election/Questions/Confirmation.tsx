@@ -39,6 +39,8 @@ export const QuestionsConfirmation = ({ answers, election, skip }: QuestionsConf
       {
         question: resolveTitle(question.title),
         answers: selectedValues.length ? selectedValues.map(titleForValue) : [''],
+        index,
+        questionId: question.id,
       },
     ]
   })

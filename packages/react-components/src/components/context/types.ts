@@ -312,6 +312,9 @@ export type QuestionRankChoiceSlotProps = BaseProps<HTMLLabelElement> & {
 export type QuestionsConfirmationAnswerItem = {
   question: string
   answers: string[]
+  /** Position in `election.questions`: skipped questions leave gaps in `answersView`. */
+  index: number
+  questionId: string
 }
 
 export type QuestionsConfirmationSlotProps = BaseProps<HTMLDivElement> & {

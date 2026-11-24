@@ -180,7 +180,9 @@ describe('QuestionsConfirmation', () => {
         },
       },
     })
-    expect(captured.answersView).toEqual([{ question: legacyQuestion.title.default, answers: [''] }])
+    expect(captured.answersView).toEqual([
+      { question: legacyQuestion.title.default, answers: [''], index: 0, questionId: legacyQuestion.id },
+    ])
   })
 })
 
