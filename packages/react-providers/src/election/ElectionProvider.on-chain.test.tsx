@@ -857,6 +857,75 @@ describe('ElectionProvider — voter state around a vote()', () => {
     await resendsStoredTxOpenedMidVote(100)
   })
 
+  it('does not write voter A\'s settled vote into voter B\'s session', async () => {
+    const NULLIFIER = '6b'.repeat(32)
+    let statuses = ['ONGOING', 'PAUSED']
+    let release: () => void = () => {}
+    const held = new Promise<void>((r) => (release = r))
+    let holding = false
+    mockSignAndRelay(() => jobOf(['completed'], [NULLIFIER]))
+    mockSignInfo(() => [])
+    mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)])
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          questions: [
+            { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+            { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
+          ],
+        }),
+      ),
+      http.post('http://localhost/votes', async () => {
+        holding = true
+        await held
+        return HttpResponse.json({ jobId: 'job-0' }, { status: 202 })
+      }),
+    )
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider
+            id={mockProcess.id}
+            queryOptions={{ refetchInterval: 20 }}
+            voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+          >
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+
+    let voting: Promise<string> = Promise.resolve('')
+    await act(async () => {
+      voting = result.current.vote([[0], [1]])
+      await waitFor(() => expect(holding).toBe(true))
+    })
+    // Voter B identifies while A's relay is still open.
+    await act(async () => {
+      await result.current.auth0({ memberNumber: '6' })
+    })
+    await act(async () => {
+      await result.current.auth1(['123456'])
+    })
+    await waitFor(() => expect(result.current.isInCensus).toBe(true))
+
+    release()
+    await act(async () => {
+      await voting
+    })
+    // q-1 opens: B's connect effect re-runs and applies a fresh snapshot.
+    statuses = ['ONGOING', 'ONGOING']
+    await act(() => sleep(150))
+
+    expect(result.current.voteStatus['q-0']).not.toBe('confirmed')
+    expect(result.current.voterQuestions.find((v) => v.questionId === 'q-0')?.hasVoted).toBe(false)
+    expect(result.current.hasVoted).toBe(false)
+  })
+
   it('keeps the connect snapshot when vote() throws before it applies state', async () => {
     useTwoQuestions()
     let checks = 0

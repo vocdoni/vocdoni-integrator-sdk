@@ -911,6 +911,9 @@ export function ElectionProvider({
     async (encodedBallots: number[][], memos?: (string | undefined)[]): Promise<string> => {
       if (!election) throw new Error('Election not loaded')
       if (!session.connected) throw new Error('Voter is not authenticated for this election')
+      // The session this cast belongs to: once it changes, the result is not written.
+      const scope = `${session.connected}|${session.authToken}|${session.owner}|${election.id}`
+      const staleCast = () => relayConfirmedRef.current.scope !== scope
       if (!chainId) {
         throw new Error('Missing chainId — the process read did not provide one; cannot cast a vote')
       }
@@ -1067,23 +1070,23 @@ export function ElectionProvider({
       const items = [...reused, ...fresh].sort((a, b) => a.i - b.i)
       if (items.length === 0) throw signFailures[0].error
 
-      const { succeeded, failed: relayFailed } = await relay(items)
+      const { succeeded, failed: relayFailed } = await relay(items, staleCast)
       // Questions the CSP refused start out failed: they were never relayed.
       const failed = [...signFailures, ...relayFailed]
-      applyRelayResult(vs, succeeded)
+      if (!staleCast()) applyRelayResult(vs, succeeded)
 
       if (failed.length > 0) {
         // `voteId` is null-or-a-real-nullifier; '' would break that for every
         // consumer that treats it as "the vote id we have".
         const firstVoteId = succeeded.find((s) => !!s.voteId)?.voteId
-        if (firstVoteId) setVoteId((prev) => prev ?? firstVoteId)
+        if (firstVoteId && !staleCast()) setVoteId((prev) => prev ?? firstVoteId)
         throw new PartialVoteError(succeeded, failed)
       }
 
       // The first cast question's vote id (on a resumed call, the first of the
       // questions cast by THIS call).
       const resultVoteId = succeeded[0]?.voteId ?? ''
-      if (resultVoteId) setVoteId(resultVoteId)
+      if (resultVoteId && !staleCast()) setVoteId(resultVoteId)
       return resultVoteId
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
