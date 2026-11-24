@@ -302,5 +302,35 @@ describe('VoteButton', () => {
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute('title', 'You have already voted')
     })
+
+    it('says the voter has voted between two questions when they voted the one they can vote', () => {
+      // q-0 ENDED and voted by the voter, q-1 PAUSED and not in the voter's census: PROCESS_UNKNOWN.
+      const election = makeProcess({
+        questions: [
+          { title: 'Q1', status: 'ENDED' },
+          { title: 'Q2', status: 'PAUSED' },
+        ],
+      })
+      const voterQuestions = [
+        { questionId: election.questions[0].id, canVote: true, hasVoted: true },
+        { questionId: election.questions[1].id, canVote: false, hasVoted: false },
+      ]
+      setVoter({ election, status: 'PROCESS_UNKNOWN', voterQuestions })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'You have already voted')
+    })
+
+    it('says voting is not open between two questions when the voter can vote neither and voted nothing', () => {
+      const election = makeProcess({
+        questions: [
+          { title: 'Q1', status: 'ENDED' },
+          { title: 'Q2', status: 'PAUSED' },
+        ],
+      })
+      const voterQuestions = election.questions.map((q) => ({ questionId: q.id, canVote: false, hasVoted: false }))
+      setVoter({ election, status: 'PROCESS_UNKNOWN', voterQuestions })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'Voting is not open')
+    })
   })
 })

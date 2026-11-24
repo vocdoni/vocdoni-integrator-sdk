@@ -50,9 +50,13 @@ const partialVoteError = (
 
 // A failing test must not leak its process or voter state into the next one.
 beforeEach(() => {
-  state.status = 'ONGOING'
-  state.voterQuestions = []
+  state.election = null
+  state.vote = vi.fn()
   state.confirmResult = true
+  state.pendingVotes = {}
+  state.voteStatus = {}
+  state.voterQuestions = []
+  state.status = 'ONGOING'
 })
 
 function render(questions = oneQuestion) {
@@ -293,6 +297,19 @@ describe('a question-by-question vote (#111)', () => {
         { questionId: 'q-1', status: 'RESULTS' },
       ],
       'Voting is closed for these questions.',
+    ],
+    [
+      'one canceled question',
+      [{ questionId: 'q-0', status: 'CANCELED' }],
+      'Voting is closed for this question.',
+    ],
+    [
+      'a closed and a paused question',
+      [
+        { questionId: 'q-0', status: 'ENDED' },
+        { questionId: 'q-1', status: 'PAUSED' },
+      ],
+      'These questions are not open for voting right now. Try again once they open.',
     ],
   ])('words a NoOpenQuestionError for %s', async (_case, questions, text) => {
     const error = new Error('No question open for voting') as Error & { questions: unknown }

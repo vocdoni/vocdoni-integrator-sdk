@@ -30,13 +30,14 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     // Only the questions this voter can vote: one they are not eligible for never opens to them.
     const votable = election.questions.filter((q) => voterQuestions?.some((vq) => vq.questionId === q.id && vq.canVote))
     const waiting = votable.some((q) => (q.status === 'PAUSED' || q.status === 'UPCOMING') && !voted(q.id))
+    const votedSome = votable.some((q) => voted(q.id))
     switch (status as QuestionStatus | null) {
       case 'ONGOING':
         break
       // Mixed statuses with none ONGOING, e.g. q-0 ENDED and q-1 PAUSED: the
       // gap between two questions of a question-by-question vote (#111).
       case 'PROCESS_UNKNOWN':
-        if (!waiting) return t('vote.disabled.not_open')
+        if (!waiting && !votedSome) return t('vote.disabled.not_open')
         break
       case 'UPCOMING': {
         const startDate = getElectionDate(election, 'startDate')
@@ -64,12 +65,10 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     const statuses = Object.values(voteStatus ?? {})
     if (statuses.includes('unconfirmed')) return t('vote.disabled.unconfirmed')
     if (statuses.includes('signed')) return t('vote.disabled.signed')
-    // Question by question: nothing open is left for the voter. A paused or
-    // upcoming one can still open; an ENDED one never will. Only when nothing
-    // open is left: an able voter disabled by the consumer gets no tooltip.
-    // No votable question at all: nothing here to explain, as before question-by-question votes.
+    // Question by question, for the questions this voter can vote: a paused or upcoming
+    // one can still open, an ENDED one never will. An able voter the consumer disabled
+    // gets none; none either when no question is votable for this voter.
     if (!isAbleToVote && votable.length) {
-      const votedSome = votable.some((q) => voted(q.id))
       if (!votedSome) return t('vote.disabled.waiting_question_none')
       return waiting ? t('vote.disabled.waiting_question') : t('vote.disabled.voted')
     }
