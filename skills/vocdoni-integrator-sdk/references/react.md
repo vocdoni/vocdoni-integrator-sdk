@@ -225,7 +225,9 @@ where the payload is a fresh `{ certCode, codeVerifier }` on every login). So:
 - a relay that fails or never answers leaves the question `failed` and in
   `pendingVotes`; the next `vote()` — or the next connect in the same tab —
   re-sends the same bytes (no new CSP signature; idempotent on chain) once the
-  process and that question are both `ONGOING`, and waits while either is not;
+  process and that question are both `ONGOING`, and waits while either is not.
+  A question or process status change during a `vote()` also re-sends, once it settles,
+  the stored tx of a question that just failed;
 - a question signed but not on chain with nothing stored reads `unconfirmed`
   (plain census) or `signed` (anonymous), cannot be voted again, and makes
   `vote()` throw `UnconfirmedVoteError` (`questions: {questionId, status}[]`)
