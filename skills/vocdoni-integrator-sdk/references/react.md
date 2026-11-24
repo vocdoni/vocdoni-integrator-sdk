@@ -224,7 +224,8 @@ where the payload is a fresh `{ certCode, codeVerifier }` on every login). So:
 
 - a relay that fails or never answers leaves the question `failed` and in
   `pendingVotes`; the next `vote()` — or the next connect in the same tab —
-  re-sends the same bytes (no new CSP signature; idempotent on chain);
+  re-sends the same bytes (no new CSP signature; idempotent on chain) once the
+  process and that question are both `ONGOING`, and waits while either is not;
 - a question signed but not on chain with nothing stored reads `unconfirmed`
   (plain census) or `signed` (anonymous), cannot be voted again, and makes
   `vote()` throw `UnconfirmedVoteError` (`questions: {questionId, status}[]`)
@@ -382,7 +383,7 @@ Key election components (all from `@vocdoni/react-components`):
 | `<ElectionSchedule />` | Start/end dates (end is `endedAt ?? endDate`, so an early-ended vote shows when it really stopped; a custom slot gets only `text`, so compute it with `resolveEndDate(election)`, re-exported from `@vocdoni/react-components`) |
 | `<ElectionStatusBadge />` | Status chip (ONGOING, PAUSED, ENDED…) |
 | `<ElectionQuestions />` | Full question + choices form (calls `vote()` on submit); renders a failed cast as a form-level `QuestionsError` |
-| `<VoteButton />` | Submit button; auto-disabled when `!isAbleToVote`, when `status !== 'ONGOING'`, or while a vote is in flight. Passes the slot a `tooltip` naming why it is disabled ("Voting opens on Sep 29, 2026, 9:00 AM", "Voting not open yet" without a start date, "Voting is paused", "Voting has ended", "Voting was canceled", "You have already voted", "Identify first to vote", "You are not eligible to vote in this process", and — when a question is `unconfirmed` or `signed` — `vote.disabled.unconfirmed` / `vote.disabled.signed`; in a question-by-question vote where the voter has no open question left and the remaining ones are paused or upcoming (process `ONGOING`, or `PROCESS_UNKNOWN` between two questions), `vote.disabled.waiting_question` once the voter has voted a question, `vote.disabled.waiting_question_none` otherwise) — the default slot renders it as the button's `title`, which is a minimal reference only — a disabled button takes no keyboard focus and touch devices never reveal `title`, so a production slot should render the reason as visible helper text tied to the button with `aria-describedby`. A consumer-passed `disabled` carries no tooltip. Strings live under `vote.disabled.*` in the `react-components` i18n namespace; `vote.disabled.upcoming_date_format` is the date-fns pattern of the dated one. |
+| `<VoteButton />` | Submit button; auto-disabled when `!isAbleToVote`, when `status !== 'ONGOING'`, or while a vote is in flight. Passes the slot a `tooltip` naming why it is disabled ("Voting opens on Sep 29, 2026, 9:00 AM", "Voting not open yet" without a start date, "Voting is paused", "Voting has ended", "Voting was canceled", "You have already voted", "Identify first to vote", "You are not eligible to vote in this process", and — when a question is `unconfirmed` or `signed` — `vote.disabled.unconfirmed` / `vote.disabled.signed`; in a question-by-question vote where the voter has no open question left and the remaining ones the voter can vote (`canVote`) are paused or upcoming (process `ONGOING`, or `PROCESS_UNKNOWN` between two questions), `vote.disabled.waiting_question` once the voter has voted a question, `vote.disabled.waiting_question_none` otherwise) — the default slot renders it as the button's `title`, which is a minimal reference only — a disabled button takes no keyboard focus and touch devices never reveal `title`, so a production slot should render the reason as visible helper text tied to the button with `aria-describedby`. A consumer-passed `disabled` carries no tooltip. Strings live under `vote.disabled.*` in the `react-components` i18n namespace; `vote.disabled.upcoming_date_format` is the date-fns pattern of the dated one. |
 | `<VoteWeight />` | Voter's census weight |
 | `<ElectionResults />` | Results histogram; respects `secretUntilTheEnd`; renders the abstain row only when it is meaningful |
 | `<Voted />` | The voter's vote ids — one line per voted question, each linked to the explorer |
@@ -493,8 +494,11 @@ failure reads `errors.vote_failed` ("Your vote could not be cast: …"), a
 `PartialVoteError` reads `errors.vote_partial` (how many questions were recorded, the
 distinct reasons, and that submitting again retries the rest), a failure with no
 message reads `errors.vote_failed_unknown`, and an unknown outcome (`could not confirm`)
-reads `errors.vote_unconfirmed`, and a `NoOpenQuestionError` reads
-`errors.vote_no_open_question`. `<ElectionQuestions />` replaces the fields of a
+reads `errors.vote_unconfirmed`, and a `NoOpenQuestionError` reads by the questions it
+lists (`questions: {questionId, status}[]`): `errors.vote_no_open_question` for one question
+not open yet, `errors.vote_no_open_questions` for several, and `errors.vote_closed_question` /
+`errors.vote_closed_questions` when every listed one has ended or been canceled, since those never
+open again. `<ElectionQuestions />` replaces the fields of a
 question already voted (`voteStatus` `confirmed`, or `voterQuestions` `hasVoted` for a vote cast in an earlier session) with `vote.disabled.question_voted`,
 — while the process is `ONGOING`, or `PROCESS_UNKNOWN` between two questions (one `ENDED`, the next `PAUSED`) — of a question that is not open itself (question by
 question: paused, upcoming, ended; even one in `pendingVotes`, whose stored tx waits
@@ -503,8 +507,13 @@ until it reopens) with `vote.disabled.question_not_open`, of an open one in
 matching `vote.disabled.*` text, through the `QuestionsError` slot
 (`variant='field'`, `data-question-id`); those questions get a placeholder ballot, need
 no answer to submit, and are left out of the confirmation (`QuestionsConfirmation`'s
-`skip` prop, the indexes it omits from `answersView`). `lockedQuestionNotice(id,
-pendingVotes, voteStatus, { questionStatus, processStatus, voted }?)` returns that key.
+`skip` prop, the indexes it omits from `answersView`). When every question is locked
+(e.g. a partial failure whose one open question is pending a re-send) there is nothing to
+confirm, and submitting re-sends straight away. Each `answersView` item carries `index`
+(its position in `election.questions`) and `questionId`, so a custom slot pairs it with its
+question even across a gap. `lockedQuestionNotice(id, pendingVotes, voteStatus,
+{ questionStatus, processStatus, voted }?)` returns that key: a raw `READY` question status
+counts as `ONGOING`, and an absent one does not lock by status.
 
 Consequently `useQuestionsForm().vote(values)` resolves `false` on a failed cast rather
 than rejecting — same as when the voter cancels the confirmation, and the same contract
