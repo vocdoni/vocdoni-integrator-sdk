@@ -44,12 +44,31 @@ const distinctReasons = (failed: FailedQuestion[], t: VoteErrorTranslate): strin
   return [...seen]
 }
 
+/** Statuses a question never leaves for an open one again. */
+const CLOSED_STATUSES: string[] = ['ENDED', 'RESULTS', 'CANCELED']
+
+/**
+ * The sentence for a `NoOpenQuestionError`, from the questions it lists. Closed
+ * ones will never open, so they read as closed; the rest read as not open yet.
+ */
+const noOpenQuestionMessage = (questions: Array<{ status: string }>, t: VoteErrorTranslate): string => {
+  const plural = questions.length > 1
+  const closed = questions.length > 0 && questions.every((q) => CLOSED_STATUSES.includes(q.status))
+  if (closed) return t(plural ? 'errors.vote_closed_questions' : 'errors.vote_closed_question')
+  return t(plural ? 'errors.vote_no_open_questions' : 'errors.vote_no_open_question')
+}
+
 /**
  * Turns a thrown `vote()` failure into the sentence the voter reads: a
  * localized lead plus the chain's own reason, relayed by the backend as each
  * envelope's `error` and the only account of why the vote did not count.
  */
 export const describeVoteError = (error: unknown, t: VoteErrorTranslate): string => {
+  // By name, like PartialVoteError: no question the voter has left is open.
+  if (error instanceof Error && error.name === 'NoOpenQuestionError') {
+    const { questions = [] } = error as Error & { questions?: Array<{ status: string }> }
+    return noOpenQuestionMessage(questions, t)
+  }
   if (isPartialVoteError(error)) {
     const cast = error.succeeded?.length ?? 0
     const failed = error.failed ?? []

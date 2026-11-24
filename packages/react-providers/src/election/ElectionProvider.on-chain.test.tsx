@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { MOCK_CSP_SIGNATURE, MOCK_WEIGHT_HEX, mockProcess } from '../../../../mocks/handlers'
 import { server } from '../../../../mocks/server'
 import { TestProvider } from '../test-utils'
-import { ElectionProvider, PartialVoteError, UnconfirmedVoteError, useElection } from './ElectionProvider'
+import { ElectionProvider, NoOpenQuestionError, PartialVoteError, UnconfirmedVoteError, useElection } from './ElectionProvider'
 import { listPendingVotes, savePendingVote } from './pending-votes'
 
 // Verified vote status: a question counts as voted only on on-chain evidence,
@@ -18,8 +18,8 @@ const OWNER = '8167d5dc4919186f999eb3dd105c40ebf7f29ff46ba329a0232a7fbcdabd1549'
 
 type Q = { questionId: string; upstreamId: string; canVote: boolean; hasVoted: boolean; hasSigned?: boolean }
 
-/** Two-question process, plain or anonymous census. */
-function useTwoQuestions(anonymous = false) {
+/** Two-question process, plain or anonymous census; `statuses` overrides each question's wire status. */
+function useTwoQuestions(anonymous = false, statuses: [string, string] = ['READY', 'READY']) {
   server.use(
     http.get('http://localhost/processes/:id', ({ params }) =>
       HttpResponse.json({
@@ -27,8 +27,8 @@ function useTwoQuestions(anonymous = false) {
         id: params.id as string,
         census: { ...mockProcess.census, anonymous },
         questions: [
-          { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A },
-          { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B },
+          { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+          { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
         ],
       }),
     ),
@@ -567,5 +567,530 @@ describe('ElectionProvider — verified vote status', () => {
     expect(batches[1]).toHaveLength(2)
     expect(batches[1][1]).toBe(storedTx)
     expect(result.current.hasVoted).toBe(true)
+  })
+})
+
+// #111: the CSP refuses a whole batch if any question in it is not open.
+describe('ElectionProvider — questions that are not open', () => {
+  for (const anonymous of [false, true]) {
+    it(`signs and relays only the open question (${anonymous ? 'anonymous' : 'plain'} census)`, async () => {
+      useTwoQuestions(anonymous, ['READY', 'PAUSED'])
+      mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)])
+      const { signed, batches } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+      const { result } = renderHook(useVoter, { wrapper })
+      await connect(result)
+      await waitFor(() => expect(result.current.isAbleToVote).toBe(true))
+
+      await act(async () => {
+        await result.current.vote([[0], [1]])
+      })
+      if (!anonymous) expect(signed.map((b) => b.upstreamId)).toEqual([UPSTREAM_A])
+      expect(batches).toEqual([[expect.any(String)]])
+      expect(result.current.hasVoted).toBe(false)
+      // The skipped question is not left at 'signing'.
+      expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed' })
+    })
+  }
+
+  it('throws NoOpenQuestionError and isAbleToVote is false when no unvoted question is open', async () => {
+    useTwoQuestions(false, ['PAUSED', 'PAUSED'])
+    mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)])
+    const { batches, signCalls } = mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(result.current.isAbleToVote).toBe(false)
+
+    const err = await result.current.vote([[0], [1]]).catch((e) => e)
+    expect(err).toBeInstanceOf(NoOpenQuestionError)
+    expect(err.questions).toEqual([
+      { questionId: 'q-0', status: 'PAUSED' },
+      { questionId: 'q-1', status: 'PAUSED' },
+    ])
+    expect(signCalls.count).toBe(0)
+    expect(batches).toHaveLength(0)
+  })
+
+  it("reports each waiting question's own status when the process status is mixed", async () => {
+    // q-0 closed after its turn, q-1 waits for its own: the process reads PROCESS_UNKNOWN.
+    useTwoQuestions(false, ['ENDED', 'PAUSED'])
+    mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: true }), q('q-1', UPSTREAM_B)])
+    mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+
+    const err = await result.current.vote([[0], [1]]).catch((e) => e)
+    expect(err).toBeInstanceOf(NoOpenQuestionError)
+    expect(err.questions).toEqual([{ questionId: 'q-1', status: 'PAUSED' }])
+  })
+})
+
+describe('ElectionProvider — a question opens or closes while a stored tx is re-sent', () => {
+  it('still publishes what the in-flight re-send confirmed', async () => {
+    const NULLIFIER = '5a'.repeat(32)
+    let statuses = ['ONGOING', 'PAUSED']
+    let landed = false
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          questions: [
+            { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+            { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
+          ],
+        }),
+      ),
+      http.post('http://localhost/votes', async () => {
+        // The organizer pauses q-0 and opens q-1 while the relay is in flight.
+        statuses = ['PAUSED', 'ONGOING']
+        await new Promise((r) => setTimeout(r, 300))
+        landed = true
+        return HttpResponse.json({ jobId: 'job-0' }, { status: 202 })
+      }),
+      http.get('http://localhost/jobs/:jobId', () =>
+        HttpResponse.json({
+          jobId: 'job-0',
+          status: 'completed',
+          type: 'relay_votes',
+          result: { votes: [{ processId: 'p', nullifier: NULLIFIER, status: 'completed', voteID: NULLIFIER }] },
+        }),
+      ),
+    )
+    mockCheck(() => [q('q-0', UPSTREAM_A, { hasSigned: true, hasVoted: landed }), q('q-1', UPSTREAM_B)])
+    mockSignInfo(() => [{ questionId: 'q-0', nullifier: NULLIFIER }])
+    savePendingVote(UPSTREAM_A, { owner: OWNER, nullifier: '0x' + NULLIFIER, txPayload: 'cafebabe', savedAt: 1 })
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider
+            id={mockProcess.id}
+            queryOptions={{ refetchInterval: 20 }}
+            voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+          >
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+    await waitFor(() => expect(result.current.election?.questions[0].status).toBe('PAUSED'))
+    await waitFor(() => expect(landed).toBe(true))
+    await waitFor(() => expect(result.current.voting).toBe(false))
+
+    expect(result.current.pendingVotes).toEqual({})
+    expect(result.current.voteStatus['q-0']).toBe('confirmed')
+    expect(result.current.voteIds['q-0']).toBe(NULLIFIER)
+    expect(result.current.voterQuestions.find((v) => v.questionId === 'q-0')?.hasVoted).toBe(true)
+  })
+})
+
+describe('ElectionProvider — a question opens while vote() is relaying', () => {
+  it('keeps the vote result when a voter-state snapshot taken before the relay landed arrives late', async () => {
+    const NULLIFIER = '6b'.repeat(32)
+    let statuses = ['ONGOING', 'PAUSED']
+    let relaying = false
+    let lateCheckDone = false
+    mockSignAndRelay(() => jobOf(['completed'], [NULLIFIER]))
+    mockSignInfo(() => [])
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          questions: [
+            { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+            { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
+          ],
+        }),
+      ),
+      http.post('http://localhost/processes/:processId/check', async () => {
+        if (!relaying) {
+          return HttpResponse.json({
+            belongsToProcess: true,
+            weight: MOCK_WEIGHT_HEX,
+            questions: [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)],
+          })
+        }
+        // The connect effect's check, sent during the relay: it answers late,
+        // with the snapshot from before the relay landed.
+        await new Promise((r) => setTimeout(r, 600))
+        lateCheckDone = true
+        return HttpResponse.json({
+          belongsToProcess: true,
+          weight: MOCK_WEIGHT_HEX,
+          questions: [q('q-0', UPSTREAM_A, { hasSigned: true }), q('q-1', UPSTREAM_B)],
+        })
+      }),
+      http.post('http://localhost/votes', async () => {
+        // q-1 opens while the relay is in flight, so the connect effect re-runs.
+        statuses = ['ONGOING', 'ONGOING']
+        relaying = true
+        await new Promise((r) => setTimeout(r, 300))
+        relaying = false
+        return HttpResponse.json({ jobId: 'job-0' }, { status: 202 })
+      }),
+    )
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider
+            id={mockProcess.id}
+            queryOptions={{ refetchInterval: 20 }}
+            voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+          >
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+
+    await act(async () => {
+      await result.current.vote([[0], [1]])
+    })
+    await waitFor(() => expect(lateCheckDone).toBe(true))
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+
+    expect(result.current.voteStatus['q-0']).toBe('confirmed')
+    expect(result.current.voteIds['q-0']).toBe(NULLIFIER)
+    expect(result.current.voterQuestions.find((v) => v.questionId === 'q-0')?.hasVoted).toBe(true)
+  })
+})
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * q-0 opens and is relayed by vote(); q-1 opens mid-relay and has a stored tx from
+ * an earlier session. The connect effect's /check answers `checkDelayMs` after it
+ * was sent, with the pre-relay snapshot, so it may land during or after the relay.
+ */
+async function resendsStoredTxOpenedMidVote(checkDelayMs: number) {
+  const NULLIFIER_0 = '5a'.repeat(32)
+  const NULLIFIER_1 = '6b'.repeat(32)
+  let statuses = ['ONGOING', 'PAUSED']
+  let relaying = false
+  const relayed: string[][] = []
+  mockSignAndRelay(() => ({}))
+  mockSignInfo(() => [{ questionId: 'q-1', nullifier: NULLIFIER_1 }])
+  savePendingVote(UPSTREAM_B, { owner: OWNER, nullifier: '0x' + NULLIFIER_1, txPayload: 'cafebabe', savedAt: 1 })
+  server.use(
+    http.get('http://localhost/processes/:id', ({ params }) =>
+      HttpResponse.json({
+        ...mockProcess,
+        id: params.id as string,
+        questions: [
+          { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+          { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
+        ],
+      }),
+    ),
+    http.post('http://localhost/processes/:processId/check', async () => {
+      if (relaying) await sleep(checkDelayMs)
+      return HttpResponse.json({
+        belongsToProcess: true,
+        weight: MOCK_WEIGHT_HEX,
+        questions: [q('q-0', UPSTREAM_A, { hasSigned: relaying }), q('q-1', UPSTREAM_B, { hasSigned: true })],
+      })
+    }),
+    http.post('http://localhost/votes', async ({ request }) => {
+      const body = (await request.json()) as { votes: Array<{ txPayload: string }> }
+      relayed.push(body.votes.map((v) => v.txPayload))
+      if (relayed.length === 1) {
+        statuses = ['ONGOING', 'ONGOING']
+        relaying = true
+        await sleep(300)
+        relaying = false
+      }
+      return HttpResponse.json({ jobId: `job-${relayed.length - 1}` }, { status: 202 })
+    }),
+    http.get('http://localhost/jobs/:jobId', ({ params }) => {
+      const nullifier = params.jobId === 'job-0' ? NULLIFIER_0 : NULLIFIER_1
+      return HttpResponse.json({
+        jobId: params.jobId,
+        type: 'relay_votes',
+        status: 'completed',
+        result: { votes: [{ processId: 'p', nullifier, status: 'completed', voteID: nullifier }] },
+      })
+    }),
+  )
+
+  const { result } = renderHook(useVoter, {
+    wrapper: ({ children }) => (
+      <TestProvider>
+        <ElectionProvider
+          id={mockProcess.id}
+          queryOptions={{ refetchInterval: 20 }}
+          voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+        >
+          {children}
+        </ElectionProvider>
+      </TestProvider>
+    ),
+  })
+  await connect(result)
+  await act(async () => {
+    await result.current.vote([[0], [1]])
+  })
+
+  // The stored tx of q-1 is posted once it is open, with no new signature.
+  await waitFor(() => expect(relayed).toHaveLength(2))
+  await waitFor(() => expect(result.current.voting).toBe(false))
+  expect(relayed[1]).toEqual(['cafebabe'])
+  await waitFor(() => expect(result.current.pendingVotes).toEqual({}))
+  expect(result.current.voteStatus['q-0']).toBe('confirmed')
+  expect(result.current.voteStatus['q-1']).toBe('confirmed')
+}
+
+describe('ElectionProvider — voter state around a vote()', () => {
+  it('re-sends a stored tx of a question that opens mid-vote, when the check lands after vote() settles', async () => {
+    await resendsStoredTxOpenedMidVote(600)
+  })
+
+  it('re-sends a stored tx of a question that opens mid-vote, when the check lands while the relay is in flight', async () => {
+    await resendsStoredTxOpenedMidVote(100)
+  })
+
+  it('does not write voter A\'s settled vote into voter B\'s session', async () => {
+    const NULLIFIER = '6b'.repeat(32)
+    let statuses = ['ONGOING', 'PAUSED']
+    let release: () => void = () => {}
+    const held = new Promise<void>((r) => (release = r))
+    let holding = false
+    mockSignAndRelay(() => jobOf(['completed'], [NULLIFIER]))
+    mockSignInfo(() => [])
+    mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)])
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          questions: [
+            { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+            { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
+          ],
+        }),
+      ),
+      http.post('http://localhost/votes', async () => {
+        holding = true
+        await held
+        return HttpResponse.json({ jobId: 'job-0' }, { status: 202 })
+      }),
+    )
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider
+            id={mockProcess.id}
+            queryOptions={{ refetchInterval: 20 }}
+            voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+          >
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+
+    let voting: Promise<string> = Promise.resolve('')
+    await act(async () => {
+      voting = result.current.vote([[0], [1]])
+      await waitFor(() => expect(holding).toBe(true))
+    })
+    // Voter B identifies while A's relay is still open.
+    await act(async () => {
+      await result.current.auth0({ memberNumber: '6' })
+    })
+    await act(async () => {
+      await result.current.auth1(['123456'])
+    })
+    await waitFor(() => expect(result.current.isInCensus).toBe(true))
+
+    release()
+    await act(async () => {
+      await voting
+    })
+    // q-1 opens: B's connect effect re-runs and applies a fresh snapshot.
+    statuses = ['ONGOING', 'ONGOING']
+    await act(() => sleep(150))
+
+    expect(result.current.voteStatus['q-0']).not.toBe('confirmed')
+    expect(result.current.voterQuestions.find((v) => v.questionId === 'q-0')?.hasVoted).toBe(false)
+    expect(result.current.hasVoted).toBe(false)
+  })
+
+  it('does not leave voter B a \'submitting\' status from voter A\'s vote() signing', async () => {
+    const NULLIFIER = '6b'.repeat(32)
+    let statuses = ['ONGOING', 'PAUSED']
+    let release: () => void = () => {}
+    const held = new Promise<void>((r) => (release = r))
+    let holding = false
+    mockSignAndRelay(() => jobOf(['completed'], [NULLIFIER]))
+    mockSignInfo(() => [])
+    mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)])
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          questions: [
+            { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: statuses[0] },
+            { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: statuses[1] },
+          ],
+        }),
+      ),
+      http.post('http://localhost/processes/:processId/sign-batch', async ({ request }) => {
+        const body = (await request.json()) as { ballots: Array<{ upstreamId: string }> }
+        holding = true
+        await held
+        return HttpResponse.json({
+          signatures: body.ballots.map((b) => ({ upstreamId: b.upstreamId, signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX })),
+        })
+      }),
+    )
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider
+            id={mockProcess.id}
+            queryOptions={{ refetchInterval: 20 }}
+            voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+          >
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+
+    let voting: Promise<string> = Promise.resolve('')
+    await act(async () => {
+      voting = result.current.vote([[0], [1]])
+      await waitFor(() => expect(holding).toBe(true))
+    })
+    // Voter B identifies while A's relay is still open.
+    await act(async () => {
+      await result.current.auth0({ memberNumber: '6' })
+    })
+    await act(async () => {
+      await result.current.auth1(['123456'])
+    })
+    await waitFor(() => expect(result.current.isInCensus).toBe(true))
+
+    release()
+    await act(async () => {
+      await voting
+    })
+    // q-1 opens: B's connect effect re-runs and applies a fresh snapshot.
+    statuses = ['ONGOING', 'ONGOING']
+    await act(() => sleep(150))
+
+    expect(result.current.voteStatus['q-0']).not.toBe('submitting')
+  })
+
+  it.each([
+    ['A voted q-0', ['q-0']],
+    ['A voted every question', ['q-0', 'q-1']],
+  ])('does not write voter A\'s vote() starting state into voter B\'s session (%s)', async (_name, votedByA) => {
+    useTwoQuestions(false, ['ONGOING', 'ONGOING'])
+    let voter: 'A' | 'B' = 'A'
+    let armed = false
+    let holding = false
+    let release: () => void = () => {}
+    const held = new Promise<void>((r) => (release = r))
+    mockSignAndRelay(() => jobOf(['completed'], ['6b'.repeat(32)]))
+    mockSignInfo(() => [])
+    server.use(
+      http.post('http://localhost/processes/:processId/check', async () => {
+        const body = {
+          belongsToProcess: true,
+          weight: MOCK_WEIGHT_HEX,
+          questions: [
+            q('q-0', UPSTREAM_A, { hasVoted: voter === 'A' && votedByA.includes('q-0') }),
+            q('q-1', UPSTREAM_B, { hasVoted: voter === 'A' && votedByA.includes('q-1') }),
+          ],
+        }
+        if (armed) {
+          armed = false
+          holding = true
+          await held
+        }
+        return HttpResponse.json(body)
+      }),
+    )
+
+    const { result } = renderHook(useVoter, {
+      wrapper: ({ children }) => (
+        <TestProvider>
+          <ElectionProvider id={mockProcess.id} voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}>
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      ),
+    })
+    await connect(result)
+
+    let voting: Promise<string> = Promise.resolve('')
+    await act(async () => {
+      armed = true
+      voting = result.current.vote([[0], [1]]).catch(() => '')
+      await waitFor(() => expect(holding).toBe(true))
+    })
+    // Voter B identifies while A's /check is still in flight.
+    voter = 'B'
+    await act(async () => {
+      await result.current.auth0({ memberNumber: '6' })
+    })
+    await act(async () => {
+      await result.current.auth1(['123456'])
+    })
+    await waitFor(() => expect(result.current.isInCensus).toBe(true))
+
+    release()
+    await act(async () => {
+      await voting
+    })
+    await act(() => sleep(100))
+
+    const values = Object.values(result.current.voteStatus)
+    expect(values).not.toContain('confirmed')
+    expect(values).not.toContain('signing')
+    expect(result.current.hasVoted).toBe(false)
+  })
+
+  it('keeps the connect snapshot when vote() throws before it applies state', async () => {
+    useTwoQuestions()
+    let checks = 0
+    server.use(
+      http.post('http://localhost/processes/:processId/check', async () => {
+        // The connect check is still pending while the integrator calls vote().
+        if (++checks === 1) await sleep(300)
+        return HttpResponse.json({ belongsToProcess: true, weight: MOCK_WEIGHT_HEX, questions: [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B)] })
+      }),
+    )
+    mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await waitFor(() => expect(result.current.election).not.toBeNull())
+    await act(async () => {
+      await result.current.auth0({ memberNumber: '5' })
+    })
+    await act(async () => {
+      await result.current.auth1(['123456'])
+    })
+    // A wrong ballot count throws before any state is applied.
+    const err = await result.current.vote([[0]]).catch((e) => e)
+    expect(err).toBeInstanceOf(Error)
+
+    await waitFor(() => expect(result.current.isInCensus).toBe(true))
+    expect(result.current.voterQuestions).toHaveLength(2)
   })
 })

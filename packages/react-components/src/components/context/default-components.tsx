@@ -306,8 +306,8 @@ export const defaultComponents: ComponentsDefinition = {
     <div {...props}>
       <h3>Confirm</h3>
       <p>{getTitle(election.title)}</p>
-      {answersView.map((item, idx) => (
-        <div key={idx}>
+      {answersView.map((item) => (
+        <div key={item.questionId}>
           <strong>{item.question}</strong>
           <div>{item.answers.join(', ')}</div>
         </div>

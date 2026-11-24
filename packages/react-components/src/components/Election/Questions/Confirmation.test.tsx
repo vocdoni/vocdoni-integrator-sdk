@@ -17,9 +17,13 @@ const slots = {
   },
 }
 
-function renderConfirmation(election: ReturnType<typeof makeProcess>, answers: Record<string, unknown>) {
+function renderConfirmation(
+  election: ReturnType<typeof makeProcess>,
+  answers: Record<string, unknown>,
+  skip?: number[],
+) {
   captured = undefined
-  renderWithComponents(<QuestionsConfirmation election={election} answers={answers} />, slots)
+  renderWithComponents(<QuestionsConfirmation election={election} answers={answers} skip={skip} />, slots)
   return captured.answersView
 }
 
@@ -61,5 +65,25 @@ describe('QuestionsConfirmation answersView', () => {
       { '0': ['0', '9'] },
     )
     expect(view[0].answers).toEqual(['A', 'Abstain'])
+  })
+
+  it('leaves out the skipped (locked) questions', () => {
+    const q0 = { title: 'Q1', choices: [{ title: 'A', value: 0 }, { title: 'B', value: 1 }] }
+    const q1 = { title: 'Q2', choices: [{ title: 'C', value: 0 }, { title: 'D', value: 1 }] }
+    const election = makeProcess({ questions: [q0, q1] })
+    const view = renderConfirmation(election, { '0': '', '1': '1' }, [0])
+    // The gap is visible: the item keeps its position in the election, not its place in the list.
+    expect(view).toEqual([{ question: 'Q2', answers: ['D'], index: 1, questionId: election.questions[1].id }])
+  })
+
+  it('pairs each item with its question by index and id', () => {
+    const q0 = { title: 'Q1', choices: [{ title: 'A', value: 0 }, { title: 'B', value: 1 }] }
+    const q1 = { title: 'Q2', choices: [{ title: 'C', value: 0 }, { title: 'D', value: 1 }] }
+    const election = makeProcess({ questions: [q0, q1] })
+    const view = renderConfirmation(election, { '0': '0', '1': '1' })
+    expect(view.map((item: { index: number; questionId: string }) => [item.index, item.questionId])).toEqual([
+      [0, election.questions[0].id],
+      [1, election.questions[1].id],
+    ])
   })
 })

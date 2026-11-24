@@ -10,15 +10,28 @@ import { describeVoteError } from './vote-error'
 
 /**
  * The i18n key of the notice that replaces a question's fields, or undefined
- * when the voter can still answer it.
+ * when the voter can still answer it. Pass `open` (the question's and the
+ * process's status) to also lock a question that is not open while the process
+ * is (or is between questions, PROCESS_UNKNOWN): `vote()` only signs open
+ * questions, so an answer to it would be dropped.
+ * Pass `voted` (the voter state's `hasVoted`) to lock a question cast in an
+ * earlier session, which this session's `voteStatus` never reads as confirmed.
  */
 export const lockedQuestionNotice = (
   questionId: string,
   pendingVotes: Record<string, true> | undefined,
   voteStatus: Record<string, string> | undefined,
+  open?: { questionStatus?: string; processStatus?: string | null; voted?: boolean },
 ): string | undefined => {
-  if (pendingVotes?.[questionId]) return 'vote.pending_resend'
   const status = voteStatus?.[questionId]
+  if (status === 'confirmed' || open?.voted) return 'vote.disabled.question_voted'
+  // Before the pending check: a stored tx is only re-sent while its question is open.
+  // PROCESS_UNKNOWN is a mixed process with none ONGOING (e.g. between two questions).
+  const live = open?.processStatus === 'ONGOING' || open?.processStatus === 'PROCESS_UNKNOWN'
+  // A raw wire READY is a live question; no status at all cannot be read as closed.
+  const questionStatus = open?.questionStatus === 'READY' ? 'ONGOING' : open?.questionStatus
+  if (live && questionStatus !== undefined && questionStatus !== 'ONGOING') return 'vote.disabled.question_not_open'
+  if (pendingVotes?.[questionId]) return 'vote.pending_resend'
   if (status === 'unconfirmed') return 'vote.disabled.unconfirmed'
   if (status === 'signed') return 'vote.disabled.signed'
   return undefined
@@ -52,7 +65,7 @@ export const QuestionsFormProvider = (props: PropsWithChildren<QuestionsFormProv
 const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFormProviderProps>) => {
   const fmethods = useForm()
   const { confirm } = useConfirm()
-  const { election, vote: baseVote, pendingVotes, voteStatus } = useElection()
+  const { election, status, vote: baseVote, pendingVotes, voteStatus, voterQuestions } = useElection()
   const t = useReactComponentsLocalize()
 
   const vote = async (values: FieldValues) => {
@@ -61,12 +74,25 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       return false
     }
 
+    // A locked question renders no fields; the provider ignores its ballot
+    // (a pending one re-sends its stored tx, the others are never signed).
+    const locked = election.questions.flatMap((question, index) =>
+      lockedQuestionNotice(question.id, pendingVotes, voteStatus, {
+        questionStatus: question.status,
+        processStatus: status,
+        voted: voterQuestions?.some((q) => q.questionId === question.id && q.hasVoted),
+      })
+        ? [index]
+        : []
+    )
+
     // A question with no derivable ballot type has no encoding, so no ballot including it
     // can be built. The default field (UnsupportedQuestion) already fails validation, so
     // this only fires for a custom slot that never mounted it. Refuse before asking the
-    // voter to confirm a vote that cannot be cast, not after.
+    // voter to confirm a vote that cannot be cast, not after. Locked questions are
+    // skipped: they mount no field to show the error, and their ballot is ignored.
     const unsupported = election.questions.flatMap((question, index) =>
-      tryInferQuestionBallotType(question) === undefined ? [index] : []
+      tryInferQuestionBallotType(question) === undefined && !locked.includes(index) ? [index] : []
     )
     if (unsupported.length) {
       for (const index of unsupported) {
@@ -75,7 +101,9 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
       return false
     }
 
-    if (!(await confirm(<QuestionsConfirmation election={election} answers={values} />))) {
+    // Every question locked (e.g. a pending re-send): nothing to summarize, so submit straight away.
+    const allLocked = locked.length === election.questions.length
+    if (!allLocked && !(await confirm(<QuestionsConfirmation election={election} answers={values} skip={locked} />))) {
       return false
     }
 
@@ -99,9 +127,7 @@ const QuestionsFormProviderInner = ({ children }: PropsWithChildren<QuestionsFor
     // handleSubmit as an unhandled promise on a vote that was never going to count.
     const encodedBallots: number[][] = []
     for (const [index, question] of election.questions.entries()) {
-      // A locked question renders no fields; the provider ignores its ballot
-      // (a pending one re-sends its stored tx, the others are never signed).
-      if (lockedQuestionNotice(question.id, pendingVotes, voteStatus)) {
+      if (locked.includes(index)) {
         encodedBallots.push([])
         continue
       }

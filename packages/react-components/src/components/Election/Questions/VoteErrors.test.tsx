@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeProcess, renderWithComponents } from '../../../test-utils'
 
 const state = vi.hoisted(() => ({
@@ -8,17 +8,20 @@ const state = vi.hoisted(() => ({
   confirmResult: true,
   pendingVotes: {} as Record<string, true>,
   voteStatus: {} as Record<string, string>,
+  voterQuestions: [] as Array<{ questionId: string; hasVoted: boolean }>,
+  status: 'ONGOING',
 }))
 vi.mock('@vocdoni/react-providers', () => ({
   useElection: () => ({
     election: state.election,
     vote: state.vote,
-    status: 'ONGOING',
+    status: state.status,
     hasVoted: false,
     isAbleToVote: true,
     voteIds: {},
     pendingVotes: state.pendingVotes,
     voteStatus: state.voteStatus,
+    voterQuestions: state.voterQuestions,
   }),
 }))
 vi.mock('../../../confirm/useConfirm', () => ({
@@ -45,11 +48,23 @@ const partialVoteError = (
   return error
 }
 
+// A failing test must not leak its process or voter state into the next one.
+beforeEach(() => {
+  state.election = null
+  state.vote = vi.fn()
+  state.confirmResult = true
+  state.pendingVotes = {}
+  state.voteStatus = {}
+  state.voterQuestions = []
+  state.status = 'ONGOING'
+})
+
 function render(questions = oneQuestion) {
   state.election = makeProcess({ questions })
   state.confirmResult = true
   state.pendingVotes = {}
   state.voteStatus = {}
+  state.voterQuestions = []
   return renderWithComponents(<ElectionQuestions />)
 }
 
@@ -178,6 +193,135 @@ describe('a failed vote is reported to the voter', () => {
   })
 })
 
+describe('a question-by-question vote (#111)', () => {
+  it('locks a paused question and votes only the open one', async () => {
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: [twoQuestions[0], { ...twoQuestions[1], status: 'PAUSED' }] })
+    state.confirmResult = true
+    state.pendingVotes = {}
+    state.voteStatus = {}
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    expect(screen.getByText('This question is not open for voting right now.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('C')).toBeNull()
+    // Only the open question needs an answer: the paused one does not block the submit.
+    submit(container, ['A'])
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[0], []]))
+  })
+
+  it('says a pending question that is not open waits, not that it is being re-sent', () => {
+    state.election = makeProcess({ questions: [twoQuestions[0], { ...twoQuestions[1], status: 'PAUSED' }] })
+    state.pendingVotes = { 'q-1': true }
+    state.voteStatus = {}
+    state.voterQuestions = []
+    renderWithComponents(<ElectionQuestions />)
+
+    expect(screen.getByText('This question is not open for voting right now.')).toBeInTheDocument()
+    expect(screen.queryByText('Your vote for this question is being sent again.')).toBeNull()
+  })
+
+  it('locks a question already voted once the next one opens', () => {
+    state.election = makeProcess({ questions: twoQuestions })
+    state.pendingVotes = {}
+    state.voteStatus = { [state.election.questions[0].id]: 'confirmed' }
+    renderWithComponents(<ElectionQuestions />)
+    expect(screen.getByText('You have already voted this question.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('A')).toBeNull()
+    expect(screen.getByLabelText('C')).toBeInTheDocument()
+  })
+
+  it('locks a question voted in an earlier session (voter state, not voteStatus)', async () => {
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: twoQuestions })
+    state.confirmResult = true
+    state.pendingVotes = {}
+    state.voteStatus = {}
+    state.voterQuestions = [{ questionId: state.election.questions[0].id, hasVoted: true }]
+    const { container } = renderWithComponents(<ElectionQuestions />)
+    expect(screen.getByText('You have already voted this question.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('A')).toBeNull()
+    submit(container, ['C'])
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], [0]]))
+  })
+
+  it('locks the next question between two questions (q-0 closed, q-1 not open: PROCESS_UNKNOWN)', () => {
+    state.election = makeProcess({
+      questions: [
+        { ...twoQuestions[0], status: 'ENDED' },
+        { ...twoQuestions[1], status: 'PAUSED' },
+      ],
+    })
+    state.status = 'PROCESS_UNKNOWN'
+    state.pendingVotes = {}
+    state.voteStatus = { [state.election.questions[0].id]: 'confirmed' }
+    state.voterQuestions = []
+    renderWithComponents(<ElectionQuestions />)
+    expect(screen.getByText('You have already voted this question.')).toBeInTheDocument()
+    expect(screen.getByText('This question is not open for voting right now.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('C')).toBeNull()
+  })
+
+  it('explains a NoOpenQuestionError without the provider wording', async () => {
+    const error = new Error('No question open for voting: q-0 (PAUSED)')
+    error.name = 'NoOpenQuestionError'
+    state.vote = vi.fn().mockRejectedValue(error)
+    const { container } = render()
+    submit(container)
+    expect(await screen.findByText(/not open for voting right now\. Try again/)).toBeInTheDocument()
+    expect(screen.queryByText(/q-0 \(PAUSED\)/)).toBeNull()
+  })
+
+  it.each([
+    [
+      'one question that will not open',
+      [{ questionId: 'q-0', status: 'PAUSED' }],
+      'This question is not open for voting right now. Try again once it opens.',
+    ],
+    [
+      'questions that will not open',
+      [
+        { questionId: 'q-0', status: 'PAUSED' },
+        { questionId: 'q-1', status: 'UPCOMING' },
+      ],
+      'These questions are not open for voting right now. Try again once they open.',
+    ],
+    [
+      'one ended question',
+      [{ questionId: 'q-0', status: 'ENDED' }],
+      'Voting is closed for this question.',
+    ],
+    [
+      'ended questions',
+      [
+        { questionId: 'q-0', status: 'ENDED' },
+        { questionId: 'q-1', status: 'RESULTS' },
+      ],
+      'Voting is closed for these questions.',
+    ],
+    [
+      'one canceled question',
+      [{ questionId: 'q-0', status: 'CANCELED' }],
+      'Voting is closed for this question.',
+    ],
+    [
+      'a closed and a paused question',
+      [
+        { questionId: 'q-0', status: 'ENDED' },
+        { questionId: 'q-1', status: 'PAUSED' },
+      ],
+      'These questions are not open for voting right now. Try again once they open.',
+    ],
+  ])('words a NoOpenQuestionError for %s', async (_case, questions, text) => {
+    const error = new Error('No question open for voting') as Error & { questions: unknown }
+    error.name = 'NoOpenQuestionError'
+    error.questions = questions
+    state.vote = vi.fn().mockRejectedValue(error)
+    const { container } = render(twoQuestions)
+    submit(container, ['A', 'C'])
+    expect(await screen.findByText(text)).toBeInTheDocument()
+  })
+})
+
 describe('a question whose vote is already signed', () => {
   it('renders "being sent again" instead of the fields of a pending question, and votes the rest', async () => {
     state.vote = vi.fn().mockResolvedValue('vote-id')
@@ -192,6 +336,19 @@ describe('a question whose vote is already signed', () => {
     submit(container, ['C'])
     // The pending question's ballot is a placeholder: the provider re-sends its stored tx.
     await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], [0]]))
+  })
+
+  it('re-sends straight away after a partial failure, with no confirmation to show', async () => {
+    // q-0 confirmed, q-1 pending: every question is locked, so there is nothing to confirm.
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: twoQuestions })
+    state.confirmResult = false // a confirmation would stop the submit
+    state.voteStatus = { 'q-0': 'confirmed' }
+    state.pendingVotes = { 'q-1': true }
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    fireEvent.submit(container.querySelector('form')!)
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], []]))
   })
 
   it.each([

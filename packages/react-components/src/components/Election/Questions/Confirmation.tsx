@@ -9,14 +9,17 @@ import { resolveTitle } from '../../../election/normalized'
 export type QuestionsConfirmationProps = {
   answers: FieldValues
   election: VotingProcessResponse
+  /** Indexes of the questions left out of the summary: locked ones the vote does not cast. */
+  skip?: number[]
 }
 
-export const QuestionsConfirmation = ({ answers, election }: QuestionsConfirmationProps) => {
+export const QuestionsConfirmation = ({ answers, election, skip }: QuestionsConfirmationProps) => {
   const { QuestionsConfirmation: Slot } = useComponents()
   const { proceed, cancel } = useConfirm()
   const t = useReactComponentsLocalize()
 
-  const answersView = election.questions.map((question, index) => {
+  const answersView = election.questions.flatMap((question, index) => {
+    if (skip?.includes(index)) return []
     const raw = answers[index.toString()]
     // Non-throwing: the form refuses to submit an uninferable question before confirming,
     // but this dialog must not be the thing that crashes if it is ever reached anyway.
@@ -32,10 +35,14 @@ export const QuestionsConfirmation = ({ answers, election }: QuestionsConfirmati
       ? raw !== undefined && raw !== '' ? [Number(raw)] : []
       : Array.isArray(raw) ? raw.map((value) => Number(value)) : []
 
-    return {
-      question: resolveTitle(question.title),
-      answers: selectedValues.length ? selectedValues.map(titleForValue) : [''],
-    }
+    return [
+      {
+        question: resolveTitle(question.title),
+        answers: selectedValues.length ? selectedValues.map(titleForValue) : [''],
+        index,
+        questionId: question.id,
+      },
+    ]
   })
 
   return (

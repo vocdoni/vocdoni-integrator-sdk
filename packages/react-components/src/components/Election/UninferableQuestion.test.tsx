@@ -42,6 +42,9 @@ import { ElectionResults } from './Results'
 const legacyQuestion = legacyProjectedProcess.questions[0]
 const choiceTitles = ['Teular el garatge', 'Teular la casa sencera', 'Pagar la hipoteca']
 const UNSUPPORTED = /ballot type isn't supported/
+// The same question while it is open: the process can only be ONGOING if a question is.
+const liveLegacyQuestion = { ...legacyQuestion, status: 'ONGOING' as QuestionStatus }
+const liveLegacyProcess = { ...legacyProjectedProcess, questions: [liveLegacyQuestion] }
 
 // Results as the SaaS API serves them for the same process (inline on the question).
 const legacyResults = (): VotingProcessResultsResponse =>
@@ -108,6 +111,7 @@ describe('ElectionQuestions (Fields + Form)', () => {
   })
 
   it('stays read-only even where the process would otherwise accept votes', () => {
+    state.election = liveLegacyProcess
     state.status = 'ONGOING'
     state.isAbleToVote = true
     renderWithComponents(<ElectionQuestions />)
@@ -118,6 +122,7 @@ describe('ElectionQuestions (Fields + Form)', () => {
   })
 
   it('refuses to submit a ballot for it: no confirmation, no vote', async () => {
+    state.election = liveLegacyProcess
     state.status = 'ONGOING'
     state.isAbleToVote = true
     const onInvalid = vi.fn()
@@ -135,7 +140,7 @@ describe('ElectionQuestions (Fields + Form)', () => {
 
   it('refuses the whole ballot when only one of several questions is uninferable', async () => {
     const votable = makeProcess({ questions: [{ title: 'Votable', choices: [{ title: 'Yes', value: 0 }] }] })
-    state.election = { ...legacyProjectedProcess, questions: [votable.questions[0], legacyQuestion] }
+    state.election = { ...legacyProjectedProcess, questions: [votable.questions[0], liveLegacyQuestion] }
     state.status = 'ONGOING'
     state.isAbleToVote = true
     const { container } = renderWithComponents(<ElectionQuestions />)
@@ -146,6 +151,21 @@ describe('ElectionQuestions (Fields + Form)', () => {
     await waitFor(() => expect(container.querySelector('[aria-invalid="true"], [data-invalid]')).not.toBeNull())
     expect(state.confirm).not.toHaveBeenCalled()
     expect(state.vote).not.toHaveBeenCalled()
+  })
+
+  it('does not block the open question when the uninferable one is locked (not open)', async () => {
+    const votable = makeProcess({ questions: [{ title: 'Votable', choices: [{ title: 'Yes', value: 0 }] }] })
+    const pausedLegacy = { ...legacyQuestion, status: 'PAUSED' as QuestionStatus }
+    state.election = { ...legacyProjectedProcess, questions: [votable.questions[0], pausedLegacy] }
+    state.status = 'ONGOING'
+    state.isAbleToVote = true
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    fireEvent.click(screen.getByLabelText('Yes'))
+    fireEvent.submit(container.querySelector('form')!)
+
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[0], []]))
+    expect(state.confirm).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -160,7 +180,9 @@ describe('QuestionsConfirmation', () => {
         },
       },
     })
-    expect(captured.answersView).toEqual([{ question: legacyQuestion.title.default, answers: [''] }])
+    expect(captured.answersView).toEqual([
+      { question: legacyQuestion.title.default, answers: [''], index: 0, questionId: legacyQuestion.id },
+    ])
   })
 })
 
@@ -186,7 +208,7 @@ describe('ElectionResults', () => {
     const votable = makeProcess({
       questions: [{ title: 'Votable', choices: [{ title: 'Yes', value: 0 }, { title: 'No', value: 1 }] }],
     })
-    state.election = { ...legacyProjectedProcess, questions: [votable.questions[0], legacyQuestion] }
+    state.election = { ...legacyProjectedProcess, questions: [votable.questions[0], liveLegacyQuestion] }
     state.results = {
       ...legacyResults(),
       questions: [
