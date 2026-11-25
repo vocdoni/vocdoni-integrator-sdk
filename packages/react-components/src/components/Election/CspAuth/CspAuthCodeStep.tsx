@@ -40,8 +40,8 @@ export const CspAuthCodeStep = () => {
   }, [setPendingNotice])
 
   // Drive the countdown display from the session's resendAvailableAt timestamp.
-  // The countdown is only set by a 40103 server response or a future server-provided coolDownTime
-  // (saas-backend#894). It is never started locally on step-0 or resend success.
+  // Set by the server on step-0 or resend success (coolDownTime), or on a 40103 refusal.
+  // Never started locally.
   useEffect(() => {
     const computeLeft = () => Math.max(0, Math.ceil(((resendAvailableAt ?? 0) - Date.now()) / 1000))
     setResendSecondsLeft(computeLeft())
@@ -107,11 +107,9 @@ export const CspAuthCodeStep = () => {
     try {
       const result = await resend.mutateAsync(contact)
       if (flow !== getFlowGeneration()) return
-      // saas-backend#894: when the resend response includes coolDownTime, start a proactive countdown.
-      // Until then result is void; the conditional below is a no-op today.
-      const proactiveCoolDownMs = (result as unknown as { coolDownTime?: number })?.coolDownTime
-      if (proactiveCoolDownMs) {
-        setResendAvailableAt(Date.now() + proactiveCoolDownMs)
+      // Server returns coolDownTime (ms) when a resend cooldown is in effect.
+      if (result.coolDownTime) {
+        setResendAvailableAt(Date.now() + result.coolDownTime)
       } else {
         // Clear any previous server-driven cooldown that has already expired.
         setResendAvailableAt(undefined)

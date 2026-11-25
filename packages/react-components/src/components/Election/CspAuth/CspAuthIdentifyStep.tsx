@@ -85,10 +85,9 @@ export const CspAuthIdentifyStep = ({ terms, requireTerms }: { terms?: ReactNode
       setContact({ email: request.email, phone: request.phone })
       // Without 2FA the provider is already connected, so there is no next step.
       if (is2Factor) {
-        // saas-backend#894: when the step-0 response includes coolDownTime, start a proactive resend countdown.
-        // Until then result is void; this is a no-op today.
-        const proactiveCoolDownMs = (result as unknown as { coolDownTime?: number })?.coolDownTime
-        if (proactiveCoolDownMs) setResendAvailableAt(Date.now() + proactiveCoolDownMs)
+        // Server returns coolDownTime (ms) when a resend cooldown is in effect; start the countdown now
+        // so the resend button is proactively disabled when the voter first sees the code step.
+        if (result.coolDownTime) setResendAvailableAt(Date.now() + result.coolDownTime)
         setPendingNotice('csp.code_sent')
         setCurrentStep(1)
       }

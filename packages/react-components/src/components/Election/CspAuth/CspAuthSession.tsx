@@ -51,9 +51,8 @@ export type CspAuthSessionValue = {
   /** Back to step 0 with no stored contact, and no error. */
   resetFlow: () => void
   /**
-   * Unix timestamp (ms) when the resend button becomes available again. Set by a 40103 response
-   * (server-provided cooldown) or when a step-0 / resend success response includes `coolDownTime`
-   * (saas-backend#894). Cleared on reset.
+   * Unix timestamp (ms) when the resend button becomes available again. Set from the server's
+   * `coolDownTime` field on step-0 and resend success responses, and on a 40103 refusal. Cleared on reset.
    */
   resendAvailableAt: number | undefined
   setResendAvailableAt: (ts: number | undefined) => void

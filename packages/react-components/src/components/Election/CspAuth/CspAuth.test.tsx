@@ -4,6 +4,8 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { type Context, type ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+// Fake only setInterval/clearInterval/Date so waitFor (uses setTimeout) keeps real timing.
+// Tests that need a server-driven countdown use a local beforeEach/afterEach instead.
 import { createTestI18n } from '../../../i18n/test-i18n'
 import { renderWithComponents } from '../../../test-utils'
 import { ComponentsProvider } from '../../context/ComponentsProvider'
@@ -94,12 +96,7 @@ const fieldNames = () =>
 
 const openIdentify = () => fireEvent.click(screen.getByRole('button', { name: 'Identify' }))
 
-// Fake only setInterval/clearInterval/Date so waitFor (uses setTimeout) keeps real timing.
-// The resend button has no local cooldown after step 0; fake timers are used only for the
-// 40103 server-driven countdown tests that need to advance (or not) the fake clock.
 describe('CspAuth', () => {
-  beforeEach(() => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] }))
-  afterEach(() => vi.useRealTimers())
 
   it('renders nothing until the election loads', () => {
     const { container } = renderCsp(<CspAuth />, makeScope({ election: null }))
@@ -239,26 +236,49 @@ describe('CspAuth', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Code resent successfully')
   })
 
-  it('shows a countdown notice and disables the resend button on a 40103 cooldown', async () => {
-    const coolDownMs = 30000
-    const scope = makeScope({ election: twoFa() })
-    scope.resend.mockRejectedValueOnce(
-      new VocdoniApiError(429, { code: 40103, data: { coolDownTime: coolDownMs } }, 'cooldown', 40103),
-    )
-    renderCsp(<CspAuth />, scope)
-    openIdentify()
-    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
-    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
-    await screen.findByLabelText('Enter the verification code')
+  describe('server-driven cooldown (fake timers)', () => {
+    beforeEach(() => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] }))
+    afterEach(() => vi.useRealTimers())
 
-    // Trigger a 40103 from the resend; no step-0 cooldown to advance past.
-    fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
+    it('shows a countdown notice and disables the resend button on a 40103 cooldown', async () => {
+      const coolDownMs = 30000
+      const scope = makeScope({ election: twoFa() })
+      scope.resend.mockRejectedValueOnce(
+        new VocdoniApiError(429, { code: 40103, data: { coolDownTime: coolDownMs } }, 'cooldown', 40103),
+      )
+      renderCsp(<CspAuth />, scope)
+      openIdentify()
+      fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+      fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+      await screen.findByLabelText('Enter the verification code')
 
-    // The countdown notice appears with the server-provided time (30 s), not an error alert.
-    expect(await screen.findByRole('status')).toHaveTextContent('You can request it again in 30s')
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Resend code' })).toBeDisabled()
+      fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
+
+      // The countdown notice appears with the server-provided time (30 s), not an error alert.
+      expect(await screen.findByRole('status')).toHaveTextContent('You can request it again in 30s')
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Resend code' })).toBeDisabled()
+    })
+
+    it('starts the resend countdown proactively from the coolDownTime in the step-0 response', async () => {
+      const scope = makeScope({ election: twoFa() })
+      // Backend returns coolDownTime on step-0 success; resend button is disabled immediately.
+      scope.auth0.mockResolvedValueOnce({ coolDownTime: 45000 })
+      renderCsp(<CspAuth />, scope)
+      openIdentify()
+      fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+      fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+      await screen.findByLabelText('Enter the verification code')
+
+      // The resend button is disabled for the server's cooldown duration.
+      expect(screen.getByRole('button', { name: 'Resend code' })).toBeDisabled()
+
+      // After the cooldown expires the button re-enables.
+      act(() => vi.advanceTimersByTime(46000))
+      expect(screen.getByRole('button', { name: 'Resend code' })).not.toBeDisabled()
+    })
   })
 
   it('shows the translated resend detail with its apostrophes, under an escaping i18next', async () => {

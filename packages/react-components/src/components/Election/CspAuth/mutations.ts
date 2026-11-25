@@ -17,19 +17,22 @@ const useCspAuthErrorTranslator = (step: CspAuthErrorStep) => {
   return (error: unknown) => translateCspAuthError(error, t, { step, hasPassword })
 }
 
+/** The shape auth0 and resend return on success. */
+export type CspAuthStepResult = { coolDownTime?: number }
+
 // Step 0: identify the participant. For auth-only censuses the provider is connected right after.
 export const useCspAuth0 = () => {
   const { auth0 } = useElectionAuth()
   const session = useOptionalCspAuthSession()
   const translateError = useCspAuthErrorTranslator('identify')
 
-  return useMutation<void, Error, AuthRequest>({
+  return useMutation<CspAuthStepResult, Error, AuthRequest>({
     mutationKey: [...cspAuthMutationKey(session), 0],
     // Never retried, whatever the app's defaults: a retried identify or code burns the voter's attempt budget.
     retry: false,
     mutationFn: async (participant) => {
       try {
-        await auth0(participant)
+        return (await auth0(participant)) ?? {}
       } catch (error) {
         throw translateError(error)
       }
@@ -61,12 +64,12 @@ export const useCspResend = () => {
   const session = useOptionalCspAuthSession()
   const translateError = useCspAuthErrorTranslator('resend')
 
-  return useMutation<void, Error, { email?: string; phone?: string }>({
+  return useMutation<CspAuthStepResult, Error, { email?: string; phone?: string }>({
     mutationKey: [...cspAuthMutationKey(session), 'resend'],
     retry: false,
     mutationFn: async (contact) => {
       try {
-        await resend(contact)
+        return (await resend(contact)) ?? {}
       } catch (error) {
         throw translateError(error)
       }
