@@ -113,12 +113,13 @@
       "too_many_attempts_minutes_other": "Too many attempts. Please try again in {{count}} minutes.",
       "too_many_attempts_hours_one": "Too many attempts. Please try again in {{count}} hour.",
       "too_many_attempts_hours_other": "Too many attempts. Please try again in {{count}} hours.",
-      "requests_on_cooldown": "Too many requests. Please wait a moment before trying again.",
+      "requests_on_cooldown": "Too many requests. Please wait before trying again.",
       "zero_voting_weight": "You don't have enough voting power to access the election.",
-      "resend_limit": "You can't request more codes for this attempt. Start over to get a new one.",
-      "code_rejected": "The code is not valid or has expired. Check it, or start over to get a new one.",
-      "resend_expired": "This code has expired. Start over to get a new one.",
-      "missing_data": "Fill in every field."
+      "resend_limit": "Resend limit reached. The code you received is still valid — enter it to continue.",
+      "code_rejected": "Incorrect or expired code. Try again, or start over to resend it.",
+      "resend_expired": "This code has expired. Start over to request a new one.",
+      "missing_data": "Fill in every field.",
+      "identify_unavailable": "We couldn't verify you right now. Please try again."
     },
     "step1": {
       "subtitle": "Enter the verification code",
@@ -127,6 +128,7 @@
       "resend_success": "Code resent successfully",
       "resend_failed": "Failed to resend code",
       "resend_failed_detail": "Failed to resend code: {{- detail }}",
+      "resend_cooldown": "You can request it again in {{count}}s",
       "start_over": "Start over",
       "footer": "If you experience any issues, contact your organization.",
       "validation": {

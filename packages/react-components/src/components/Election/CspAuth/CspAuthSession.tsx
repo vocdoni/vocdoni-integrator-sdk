@@ -50,6 +50,13 @@ export type CspAuthSessionValue = {
   providerClear: () => void
   /** Back to step 0 with no stored contact, and no error. */
   resetFlow: () => void
+  /**
+   * Unix timestamp (ms) when the resend button becomes available again. Set by a 40103 response
+   * (server-provided cooldown) or when a step-0 / resend success response includes `coolDownTime`
+   * (saas-backend#894). Cleared on reset.
+   */
+  resendAvailableAt: number | undefined
+  setResendAvailableAt: (ts: number | undefined) => void
 }
 
 const CspAuthSessionContext = createContext<CspAuthSessionValue | undefined>(undefined)
@@ -66,6 +73,7 @@ export const CspAuthSession = ({ children }: { children: ReactNode }) => {
   const [contact, setContact] = useState<CspAuthContact>({})
   const [pendingNotice, setPendingNotice] = useState<string>()
   const [error, setError] = useState<string>()
+  const [resendAvailableAt, setResendAvailableAt] = useState<number | undefined>(undefined)
   const flowGeneration = useRef(0)
   const processId = election?.id
   const sessionId = useId()
@@ -77,6 +85,7 @@ export const CspAuthSession = ({ children }: { children: ReactNode }) => {
     setContact((prev) => (prev.email || prev.phone ? {} : prev))
     setPendingNotice(undefined)
     setError(undefined)
+    setResendAvailableAt(undefined)
   }, [])
 
   const getFlowGeneration = useCallback(() => flowGeneration.current, [])
@@ -115,8 +124,10 @@ export const CspAuthSession = ({ children }: { children: ReactNode }) => {
       sessionId,
       providerClear: clear,
       resetFlow,
+      resendAvailableAt,
+      setResendAvailableAt,
     }),
-    [currentStep, contact, pendingNotice, error, census, processId, sessionId, clear, getFlowGeneration, resetFlow]
+    [currentStep, contact, pendingNotice, error, census, processId, sessionId, clear, getFlowGeneration, resetFlow, resendAvailableAt]
   )
 
   return <CspAuthSessionContext.Provider value={value}>{children}</CspAuthSessionContext.Provider>

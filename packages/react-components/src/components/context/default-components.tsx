@@ -415,6 +415,7 @@ export const defaultComponents: ComponentsDefinition = {
     resendLabel,
     onResend,
     resending,
+    resendDisabled,
     startOverLabel,
     onStartOver,
     actionsDisabled,
@@ -445,7 +446,7 @@ export const defaultComponents: ComponentsDefinition = {
         <button
           type='button'
           onClick={onResend}
-          disabled={actionsDisabled || resending}
+          disabled={actionsDisabled || resending || resendDisabled}
           aria-busy={resending || undefined}
         >
           {resendLabel}

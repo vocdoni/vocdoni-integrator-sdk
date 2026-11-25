@@ -1,0 +1,59 @@
+{
+  "csp": {
+    "identify": "Identificarse",
+    "logout": "Cerrar sesión",
+    "modal_title": "Autenticación",
+    "close": "Cerrar",
+    "authenticate": "Autenticar",
+    "receive_code": "Recibir código",
+    "code_info": "Recibirás un código único en el medio seleccionado para verificar tu identidad y completar la autenticación",
+    "code_sent": "Código de verificación enviado",
+    "contact_match_help": "Debe coincidir con el registrado en el sistema",
+    "auth_failed": "Autenticación fallida",
+    "password_unavailable": "La contraseña no se puede verificar ahora mismo. Recarga la página e inténtalo de nuevo.",
+    "fields": {
+      "memberNumber": "Número de miembro",
+      "name": "Nombre",
+      "surname": "Apellido",
+      "nationalId": "DNI",
+      "birthDate": "Fecha de nacimiento",
+      "password": "Contraseña",
+      "email": "Correo electrónico",
+      "phone": "Teléfono",
+      "email_or_phone": "Correo o teléfono",
+      "contact": "Contacto"
+    },
+    "errors": {
+      "participant_not_found": "El votante no está en el censo o las credenciales proporcionadas son incorrectas.",
+      "credentials_or_password_incorrect": "No hemos podido verificar tu identidad. Comprueba tus credenciales y contraseña e inténtalo de nuevo.",
+      "too_many_attempts": "Demasiados intentos. Inténtalo más tarde.",
+      "too_many_attempts_minutes_one": "Demasiados intentos. Inténtalo de nuevo en {{count}} minuto.",
+      "too_many_attempts_minutes_other": "Demasiados intentos. Inténtalo de nuevo en {{count}} minutos.",
+      "too_many_attempts_hours_one": "Demasiados intentos. Inténtalo de nuevo en {{count}} hora.",
+      "too_many_attempts_hours_other": "Demasiados intentos. Inténtalo de nuevo en {{count}} horas.",
+      "requests_on_cooldown": "Demasiadas solicitudes. Espera antes de volver a intentarlo.",
+      "zero_voting_weight": "No tienes suficiente poder de voto para acceder a la votación.",
+      "resend_limit": "Límite de reenvíos alcanzado. El código que recibiste sigue siendo válido — introdúcelo para continuar.",
+      "code_rejected": "Código incorrecto o caducado. Inténtalo de nuevo o empieza de nuevo para reenviarlo.",
+      "resend_expired": "Este código ha caducado. Empieza de nuevo para solicitar uno nuevo.",
+      "missing_data": "Rellena todos los campos.",
+      "identify_unavailable": "No hemos podido verificarte ahora mismo. Inténtalo de nuevo."
+    },
+    "step1": {
+      "subtitle": "Introduce el código de verificación",
+      "helper": "Hemos enviado un código a tu número de teléfono o correo electrónico. Si lo recibiste por correo, comprueba la carpeta de spam.",
+      "resend": "Reenviar código",
+      "resend_success": "Código reenviado correctamente",
+      "resend_failed": "Error al reenviar el código",
+      "resend_failed_detail": "Error al reenviar el código: {{- detail }}",
+      "resend_cooldown": "Puedes solicitarlo de nuevo en {{count}}s",
+      "start_over": "Volver a empezar",
+      "footer": "Si tienes algún problema, contacta con tu organización.",
+      "validation": {
+        "required": "El código es obligatorio",
+        "length": "El código debe tener 6 dígitos"
+      }
+    },
+    "terms_required": "Debes aceptar los términos para continuar."
+  }
+}
