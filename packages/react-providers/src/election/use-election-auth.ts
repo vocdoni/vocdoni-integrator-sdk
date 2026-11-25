@@ -178,7 +178,7 @@ export function useVoterSession(
       const res = await client.elections.authStep0(id, participant)
       if (!res.authToken) throw new Error('Process auth step 0 did not return a token')
       const owner = res.voterRef ?? (await ownerHash(participant))
-      if (currentId.current !== id) return
+      if (currentId.current !== id) return {}
       // A new identification replaces the session: drop the previous voter's
       // token first, so no render (and no ElectionProvider check or re-send)
       // sees the new owner paired with the old voter's token. The session stays
