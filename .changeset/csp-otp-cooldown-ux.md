@@ -1,4 +1,6 @@
 ---
+"@vocdoni/api-types": minor
+"@vocdoni/react-providers": minor
 "@vocdoni/react-components": minor
 ---
 
