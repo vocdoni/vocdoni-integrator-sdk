@@ -16,6 +16,7 @@ import { describeVoteError } from './vote-error'
  * questions, so an answer to it would be dropped.
  * Pass `voted` (the voter state's `hasVoted`) to lock a question cast in an
  * earlier session, which this session's `voteStatus` never reads as confirmed.
+ * An `ineligible` status locks the question for good: the voter is not in its subset.
  */
 export const lockedQuestionNotice = (
   questionId: string,
@@ -25,6 +26,7 @@ export const lockedQuestionNotice = (
 ): string | undefined => {
   const status = voteStatus?.[questionId]
   if (status === 'confirmed' || open?.voted) return 'vote.disabled.question_voted'
+  if (status === 'ineligible') return 'vote.disabled.question_ineligible'
   // Before the pending check: a stored tx is only re-sent while its question is open.
   // PROCESS_UNKNOWN is a mixed process with none ONGOING (e.g. between two questions).
   const live = open?.processStatus === 'ONGOING' || open?.processStatus === 'PROCESS_UNKNOWN'
