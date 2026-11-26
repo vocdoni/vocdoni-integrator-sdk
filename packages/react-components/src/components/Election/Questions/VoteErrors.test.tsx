@@ -60,6 +60,7 @@ beforeEach(() => {
   state.election = null
   state.vote = vi.fn()
   state.confirmResult = true
+  state.confirmed = null
   state.pendingVotes = {}
   state.voteStatus = {}
   state.voterQuestions = []
@@ -403,7 +404,6 @@ describe('a question the voter is not eligible for (ineligible)', () => {
     state.confirmResult = true
     state.pendingVotes = {}
     state.voteStatus = { 'q-1': 'ineligible' }
-    state.confirmed = null
     const { container } = renderWithComponents(<ElectionQuestions />)
 
     submit(container, ['A'])
