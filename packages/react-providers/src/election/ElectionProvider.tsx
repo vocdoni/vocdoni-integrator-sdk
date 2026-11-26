@@ -150,10 +150,10 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * eligible for are signed or re-sent; the rest are skipped. When none is left,
    * throws {@link NoOpenQuestionError}, or {@link NoEligibleQuestionError} if only
    * ineligible ones remain, without signing. A question is confirmed only on
-   * on-chain evidence (the relay job, the
-   * check's `hasVoted`, or `POST /votes/verify` for an anonymous census). If some
-   * votes land and others fail, throws {@link PartialVoteError} naming both sets;
-   * if nothing is left to sign or re-send, throws {@link UnconfirmedVoteError}.
+   * on-chain evidence (the relay job, the check's `hasVoted`, or
+   * `POST /votes/verify` for an anonymous census). If some votes land and others
+   * fail, throws {@link PartialVoteError} naming both sets; if nothing is left to
+   * sign or re-send, throws {@link UnconfirmedVoteError}.
    */
   vote(encodedBallots: number[][], memos?: (string | undefined)[]): Promise<string>
   /**
@@ -942,6 +942,8 @@ export function ElectionProvider({
       // The session this cast belongs to: once it changes, the result is not written.
       const scope = `${session.connected}|${session.authToken}|${session.owner}|${election.id}`
       const staleCast = () => relayConfirmedRef.current.scope !== scope
+      // The statuses the form was shown, before this call's check rewrites them.
+      const shown = voteStatus
       if (!chainId) {
         throw new Error('Missing chainId — the process read did not provide one; cannot cast a vote')
       }
@@ -969,10 +971,6 @@ export function ElectionProvider({
 
       // Pre-flight EVERY question before anything is consumed or relayed, so a
       // problem at question k can never leave questions 0..k-1 cast on chain.
-      // Secret questions must never go out in cleartext: the keykeepers publish
-      // the encryption keys asynchronously after publish, so keys may
-      // legitimately be absent for a while — refuse rather than cast an
-      // unencrypted ballot.
       for (const [i, question] of election.questions.entries()) {
         if (!question.upstreamId) {
           throw new Error(`Question ${i} has no upstreamId; process may not be published yet`)
@@ -989,7 +987,8 @@ export function ElectionProvider({
       }
       if (vs.unverified) throw new Error(COULD_NOT_VERIFY)
       // Secret questions must never go out in cleartext, and only the ones this
-      // call signs need their keys: an ineligible or closed one cannot block.
+      // call signs need their keys. Keys may legitimately be absent for a while
+      // (the keykeepers publish them asynchronously): refuse, never cast unencrypted.
       for (const [i, question] of election.questions.entries()) {
         if (
           vs.states[question.id] === 'open' &&
@@ -1037,6 +1036,13 @@ export function ElectionProvider({
         throw new Error(
           `Cannot cast ${reused.length + open.length} votes in one call — the batch relay caps at ${MAX_VOTE_BATCH}`,
         )
+      }
+
+      // The form locks an ineligible question and sends it an empty ballot. If the
+      // fresh check now reads it eligible, signing that ballot would spend the CSP
+      // signature on a non-answer: refuse before anything is signed.
+      if (open.some(({ question, i }) => shown[question.id] === 'ineligible' && encodedBallots[i]?.length === 0)) {
+        throw new Error('Your eligibility changed since the ballot was shown. Review your answers and vote again.')
       }
 
       // Only the questions this call handles: a skipped one (not open) would
@@ -1132,7 +1138,7 @@ export function ElectionProvider({
       return resultVoteId
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [election, session, chainId, client, status, relay, applyVoterState, applyRelayResult],
+    [election, session, chainId, client, status, relay, applyVoterState, applyRelayResult, voteStatus],
   )
 
   // Public vote(): the cast wrapped in the in-flight flag, so UIs can show a
