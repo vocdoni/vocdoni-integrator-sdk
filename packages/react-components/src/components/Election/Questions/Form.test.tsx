@@ -178,4 +178,22 @@ describe('lockedQuestionNotice', () => {
     expect(lockedQuestionNotice('q-0', undefined, undefined, { processStatus: 'ONGOING' })).toBeUndefined()
     expect(lockedQuestionNotice('q-0', undefined, undefined, { processStatus: 'PROCESS_UNKNOWN' })).toBeUndefined()
   })
+
+  it('locks a question the voter is not eligible for', () => {
+    expect(lockedQuestionNotice('q-1', undefined, { 'q-1': 'ineligible' })).toBe('vote.disabled.question_ineligible')
+  })
+
+  it('keeps a voted question voted over ineligible', () => {
+    expect(lockedQuestionNotice('q-1', undefined, { 'q-1': 'confirmed' }, { voted: true })).toBe(
+      'vote.disabled.question_voted',
+    )
+    expect(lockedQuestionNotice('q-1', undefined, { 'q-1': 'ineligible' }, { voted: true })).toBe(
+      'vote.disabled.question_voted',
+    )
+  })
+
+  it('keeps an ineligible question ineligible over not open', () => {
+    const paused = { questionStatus: 'PAUSED', processStatus: 'ONGOING' }
+    expect(lockedQuestionNotice('q-1', undefined, { 'q-1': 'ineligible' }, paused)).toBe('vote.disabled.question_ineligible')
+  })
 })

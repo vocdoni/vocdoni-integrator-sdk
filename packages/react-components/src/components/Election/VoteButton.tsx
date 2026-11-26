@@ -65,6 +65,10 @@ export const VoteButton = (props: ComponentPropsWithoutRef<'button'> & Record<st
     const statuses = Object.values(voteStatus ?? {})
     if (statuses.includes('unconfirmed')) return t('vote.disabled.unconfirmed')
     if (statuses.includes('signed')) return t('vote.disabled.signed')
+    // Not eligible for any question: every one reads ineligible (a stored tx still waiting does not).
+    if (election.questions.length > 0 && election.questions.every((q) => voteStatus?.[q.id] === 'ineligible')) {
+      return t('vote.disabled.ineligible')
+    }
     // Question by question, for the questions this voter can vote: a paused or upcoming
     // one can still open, an ENDED one never will. An able voter the consumer disabled
     // gets none; none either when no question is votable for this voter.

@@ -52,8 +52,8 @@ const QuestionsFormContents = ({ onInvalid }: { onInvalid?: (errors: unknown) =>
     <form onSubmit={fmethods.handleSubmit(vote, onInvalid)} id={`election-questions-${election!.id}`}>
       <Voted />
       {questions.map((question, index) => {
-        // A question already voted, signed (its stored tx is being re-sent, or
-        // nothing in this tab can send it) or not open is read-only.
+        // A question already voted, ineligible, signed (its stored tx is being
+        // re-sent, or nothing in this tab can send it) or not open is read-only.
         const notice = lockedQuestionNotice(question.id, pendingVotes, voteStatus, {
           questionStatus: question.status,
           processStatus: status,

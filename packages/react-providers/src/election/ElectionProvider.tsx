@@ -26,9 +26,11 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  computeProcessStatus,
   explorerUrl as explorerBaseUrl,
   JobFailedError,
   normalizeVotingProcess,
+  resolveEndDate,
   VocdoniApiError,
   type VocdoniApiClient,
 } from '@vocdoni/api-client'
@@ -67,6 +69,7 @@ export const electionQueryKeys = {
  * - `signed`: the CSP authorized the vote of an anonymous census, and this tab
  *   cannot confirm it on chain (no stored nullifier).
  * Neither can be voted again.
+ * - `ineligible`: `canVote` false, so never signed. Set on connect.
  */
 export type QuestionVoteStatus =
   | 'signing'
@@ -76,6 +79,7 @@ export type QuestionVoteStatus =
   | 'failed'
   | 'unconfirmed'
   | 'signed'
+  | 'ineligible'
 
 /** Hard cap of `POST /votes` — the backend rejects larger batches. */
 const MAX_VOTE_BATCH = 100
@@ -112,11 +116,16 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * Per-question voter state (`canVote`/`hasVoted`/`hasSigned`) from the CSP
    * check. `hasVoted` means on chain: an anonymous-census question confirmed
    * through `POST /votes/verify` reads `hasVoted: true` here even though the
-   * backend reports `false`. Empty until the voter is connected and the
-   * membership check resolves.
+   * backend reports `false`. A `canVote: false` question is `ineligible` in
+   * {@link voteStatus} while the process runs. Empty until the voter is
+   * connected and the membership check resolves.
    */
   voterQuestions: ProcessQuestionStatus[]
-  /** true when every question of the process is on chain. */
+  /**
+   * true once every question is on chain or ineligible, and at least one is on chain.
+   * After the process ends the check no longer tells an ineligible question from an
+   * unvoted one, so a session opened after the end reads false for such a voter.
+   */
   hasVoted: boolean
   /**
    * Questions whose signed tx is stored in this tab but not on chain yet,
@@ -141,14 +150,15 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * relayed, then the whole batch is relayed in ONE call (`POST /votes`) that
    * the backend accepts or rejects as a unit. Questions already on chain are
    * skipped. Questions in {@link pendingVotes} re-send their stored tx — their
-   * entry in `encodedBallots` is ignored. Only questions whose status is
-   * `ONGOING` are signed or re-sent; the rest are left for a later call, and
-   * when none of the voter's remaining questions is open the call throws
-   * {@link NoOpenQuestionError} without signing. A question is confirmed only on
-   * on-chain evidence (the relay job, the check's `hasVoted`, or
-   * `POST /votes/verify` for an anonymous census). If some votes land and
-   * others fail, throws {@link PartialVoteError} naming both sets; if nothing
-   * is left to sign or re-send, throws {@link UnconfirmedVoteError}.
+   * entry in `encodedBallots` is ignored. Only `ONGOING` questions the voter is
+   * eligible for are signed or re-sent; the rest are skipped. When none is left,
+   * throws {@link NoOpenQuestionError}, or {@link NoEligibleQuestionError} when
+   * nothing is on chain and only ineligible ones remain, without signing. Eligibility that changed since the
+   * form was shown throws {@link EligibilityChangedError}, before signing. A question is
+   * confirmed only on on-chain evidence (the relay job, the check's `hasVoted`, or
+   * `POST /votes/verify` for an anonymous census). If some votes land and others
+   * fail, throws {@link PartialVoteError} naming both sets; if nothing is left to
+   * sign or re-send, throws {@link UnconfirmedVoteError}.
    */
   vote(encodedBallots: number[][], memos?: (string | undefined)[]): Promise<string>
   /**
@@ -161,8 +171,8 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * Per-question progress of the current (or last) `vote()` call, keyed by
    * question id: `signing` → `submitting` → `confirming` → `confirmed` or
    * `failed`. Questions the call skipped because they were already voted
-   * appear as `confirmed`; `unconfirmed`/`signed` questions appear as such
-   * from connect on. A `failed` question whose error is `could not confirm
+   * appear as `confirmed`; `unconfirmed`/`signed`/`ineligible` questions appear
+   * as such from connect on. A `failed` question whose error is `could not confirm
    * the vote on chain yet` is unknown, not rejected. Cleared by
    * {@link clearVoter} and on disconnect.
    */
@@ -317,6 +327,36 @@ export class NoOpenQuestionError extends Error {
   }
 }
 
+/**
+ * Thrown by `vote()` when no question is on chain and every question left is
+ * `ineligible`: nothing was signed or relayed, and a retry does not help.
+ * With a question on chain, the voter is done and the already-voted error applies.
+ */
+export class NoEligibleQuestionError extends Error {
+  constructor(readonly questions: Array<{ questionId: string }>) {
+    super(`No question eligible for this voter: ${questions.map((q) => q.questionId).join(', ')}`)
+    this.name = 'NoEligibleQuestionError'
+  }
+}
+
+/**
+ * Thrown by `vote()` when a question's eligibility changed since the form was
+ * shown: one now eligible but passed `[]`, or one now ineligible but passed a
+ * ballot. Nothing was signed; vote again with the fresh state.
+ */
+export class EligibilityChangedError extends Error {
+  constructor(readonly questions: Array<{ questionId: string }>) {
+    super('Your eligibility changed since the ballot was shown. Review your answers and vote again.')
+    this.name = 'EligibilityChangedError'
+  }
+}
+
+/**
+ * The backend zeroes every `canVote` on its own clock, so a device clock behind
+ * it reads a process as still running for a few minutes after its end date.
+ */
+const END_DATE_SKEW_MS = 5 * 60_000
+
 const COULD_NOT_VERIFY = 'Could not verify your voting status; try again'
 /** Error message of a question whose outcome is unknown (the verification failed). */
 const COULD_NOT_CONFIRM = 'could not confirm the vote on chain yet'
@@ -335,7 +375,19 @@ const sameHex = (a?: string, b?: string) => !!a && !!b && strip0x(a).toLowerCase
 type Question = VotingProcessResponse['questions'][number]
 
 /** A question's state from a fresh check (see {@link resolveVoterState}). */
-type QuestionState = 'confirmed' | 'pending' | 'unconfirmed' | 'signed' | 'open'
+type QuestionState = 'confirmed' | 'pending' | 'unconfirmed' | 'signed' | 'ineligible' | 'open'
+
+/** The voter is done: some question is on chain, and every other one is on chain or ineligible. */
+const isVoterDone = (states: Array<QuestionState | undefined>) =>
+  states.includes('confirmed') && states.every((st) => st === 'confirmed' || st === 'ineligible')
+
+/**
+ * A question's state for {@link isVoterDone}. Once the process ends the check zeroes
+ * every `canVote`, so an ineligible question reads `open` again: one shown ineligible
+ * that still reads `canVote: false` stays ineligible, not unvoted.
+ */
+const doneState = (state: QuestionState | undefined, canVote: boolean | undefined, shown: boolean) =>
+  state === 'open' && shown && canVote === false ? 'ineligible' : state
 
 interface VoterState {
   checked: ProcessCheckResponse
@@ -363,6 +415,7 @@ interface RelayItem {
  * - an own entry with its tx → pending (re-send it);
  * - signed, nothing of ours stored → `unconfirmed` (plain census: the backend
  *   checked the chain) or `signed` (anonymous: it cannot);
+ * - not signed, `canVote` false while the process runs → ineligible (never signed);
  * - not signed → open.
  * An entry is the voter's own only when its owner is this session's, the CSP
  * signed the question, and (plain census) its nullifier is the one sign-info
@@ -379,6 +432,14 @@ async function resolveVoterState(
   const anonymous = !!election.census?.anonymous
   const byId = new Map(checked.questions.map((q) => [q.questionId, q]))
   let unverified = false
+  // The backend zeroes `canVote` on every question once the process is over, so
+  // a `canVote: false` only means "not eligible" while it runs.
+  const processStatus = computeProcessStatus(election.questions, { startDate: election.startDate })
+  const endDate = resolveEndDate(election)
+  const running =
+    !['ENDED', 'RESULTS', 'CANCELED'].includes(processStatus) &&
+    (!endDate || endDate.getTime() > Date.now() + END_DATE_SKEW_MS)
+  const someEligible = checked.questions.some((q) => q.canVote === true)
 
   // An anonymous census reports no nullifier by design (the CSP blind signs
   // and never learns the address), so sign-info is only worth a request for a
@@ -430,6 +491,9 @@ async function resolveVoterState(
       states[question.id] = 'pending'
     } else if (q?.hasSigned) {
       states[question.id] = anonymous ? 'signed' : 'unconfirmed'
+    } else if (checked.belongsToProcess && q?.canVote === false && (someEligible || running)) {
+      // Not in the eligibility subset: the CSP would refuse the whole batch.
+      states[question.id] = 'ineligible'
     } else {
       states[question.id] = 'open'
     }
@@ -455,6 +519,7 @@ const initialStatus: Record<QuestionState, QuestionVoteStatus> = {
   pending: 'submitting',
   unconfirmed: 'unconfirmed',
   signed: 'signed',
+  ineligible: 'ineligible',
   open: 'signing',
 }
 
@@ -528,7 +593,7 @@ export function ElectionProvider({
 
   const status = useProcessStatus(election)
   // The CSP authorises a batch as a unit and refuses it whole if any question
-  // in it is not open, so only open questions are ever signed or relayed.
+  // in it is not open or not eligible, so only those are ever signed or relayed.
   // `status` folds in the start date: live questions before it read UPCOMING.
   const isOpen = (question: Question) => status === 'ONGOING' && question.status === 'ONGOING'
   // Re-runs the stored-tx re-send when a question opens or closes mid-process.
@@ -558,6 +623,12 @@ export function ElectionProvider({
   // The connect effect's identity. A re-run for a question opening or closing
   // keeps it, so an in-flight re-send still publishes what it confirmed.
   const connectKeyRef = useRef('')
+  // Questions shown `ineligible` to this voter. Kept when a later check stops
+  // reading them ineligible: the guard in castVotes needs what the form was shown.
+  const shownIneligibleRef = useRef<Set<string>>(new Set())
+  // The session scope whose voter state was applied last. Until one is, the
+  // form has shown nothing for it, so castVotes has no eligibility to compare.
+  const stateScopeRef = useRef('')
 
   /** Publishes a fresh voter state: membership, per-question state, recovered vote ids. */
   const applyVoterState = useCallback((vs: VoterState) => {
@@ -565,11 +636,18 @@ export function ElectionProvider({
     // What this session's relay confirmed stays confirmed, whatever the snapshot says.
     const states = { ...vs.states }
     for (const id of relayConfirmedRef.current.ids) states[id] = 'confirmed'
+    for (const [id, st] of Object.entries(states)) if (st === 'ineligible') shownIneligibleRef.current.add(id)
     setIsInCensus(checked.belongsToProcess)
     setVoterQuestions(
       checked.questions.map((q) => (states[q.questionId] === 'confirmed' && !q.hasVoted ? { ...q, hasVoted: true } : q)),
     )
-    setHasVoted(checked.questions.length > 0 && checked.questions.every((q) => states[q.questionId] === 'confirmed'))
+    setHasVoted(
+      isVoterDone(
+        checked.questions.map((q) =>
+          doneState(states[q.questionId], q.canVote, shownIneligibleRef.current.has(q.questionId)),
+        ),
+      ),
+    )
     setPendingVotes(
       Object.fromEntries(
         Object.entries(states)
@@ -580,8 +658,8 @@ export function ElectionProvider({
     setVoteStatus((prev) => {
       const next = { ...prev }
       for (const [id, st] of Object.entries(states)) {
-        if (st === 'unconfirmed' || st === 'signed') next[id] = st
-        else if (next[id] === 'unconfirmed' || next[id] === 'signed') delete next[id]
+        if (st === 'unconfirmed' || st === 'signed' || st === 'ineligible') next[id] = st
+        else if (next[id] === 'unconfirmed' || next[id] === 'signed' || next[id] === 'ineligible') delete next[id]
       }
       return next
     })
@@ -810,7 +888,7 @@ export function ElectionProvider({
 
   /**
    * Publishes what a relay confirmed. `hasVoted` turns true only when every
-   * question is on chain. Returns whether it did.
+   * question is on chain or ineligible, and one is on chain. Returns whether it did.
    */
   const applyRelayResult = useCallback(
     (vs: VoterState, succeeded: Array<{ questionId: string; voteId: string }>): boolean => {
@@ -818,11 +896,16 @@ export function ElectionProvider({
       for (const id of landed) relayConfirmedRef.current.ids.add(id)
       if (succeeded.length > 0) setVoteIds((prev) => ({ ...prev, ...byQuestion(succeeded) }))
       setVoterQuestions((qs) => qs.map((q) => (landed.has(q.questionId) ? { ...q, hasVoted: true } : q)))
-      const all =
-        vs.checked.questions.length > 0 &&
-        vs.checked.questions.every((q) => vs.states[q.questionId] === 'confirmed' || landed.has(q.questionId))
-      if (all) setHasVoted(true)
-      return all
+      // Judged on the check this cast took before the relay, the one it signed against.
+      const done = isVoterDone(
+        vs.checked.questions.map((q) =>
+          landed.has(q.questionId)
+            ? 'confirmed'
+            : doneState(vs.states[q.questionId], q.canVote, shownIneligibleRef.current.has(q.questionId)),
+        ),
+      )
+      if (done) setHasVoted(true)
+      return done
     },
     [],
   )
@@ -861,6 +944,8 @@ export function ElectionProvider({
       setVoteIds({})
       setVoteStatus({})
       setPendingVotes({})
+      shownIneligibleRef.current.clear()
+      stateScopeRef.current = ''
       return
     }
 
@@ -873,6 +958,7 @@ export function ElectionProvider({
         const vs = await resolveVoterState(client, election, checked, session.owner, session.authToken!)
         if (cancelled) return
         applyVoterState(vs)
+        stateScopeRef.current = scope
 
         const items = pendingItems(vs)
         if (items.length === 0 || status !== 'ONGOING') return
@@ -941,18 +1027,9 @@ export function ElectionProvider({
 
       // Pre-flight EVERY question before anything is consumed or relayed, so a
       // problem at question k can never leave questions 0..k-1 cast on chain.
-      // Secret questions must never go out in cleartext: the keykeepers publish
-      // the encryption keys asynchronously after publish, so keys may
-      // legitimately be absent for a while — refuse rather than cast an
-      // unencrypted ballot.
       for (const [i, question] of election.questions.entries()) {
         if (!question.upstreamId) {
           throw new Error(`Question ${i} has no upstreamId; process may not be published yet`)
-        }
-        if (isOpen(question) && question.secretUntilTheEnd && !question.encryptionKeys?.length) {
-          throw new Error(
-            `Question ${i} ("${question.id}") is secret but its encryption keys are not published yet; retry once the keykeepers publish them`,
-          )
         }
       }
 
@@ -965,10 +1042,39 @@ export function ElectionProvider({
         throw new Error(COULD_NOT_VERIFY, { cause: err })
       }
       if (vs.unverified) throw new Error(COULD_NOT_VERIFY)
-      if (!staleCast()) applyVoterState(vs)
+      // What the form was shown before this call applies the fresh state.
+      const shownBefore = new Set(shownIneligibleRef.current)
+      const seenBefore = stateScopeRef.current === scope
+      if (!staleCast()) {
+        applyVoterState(vs)
+        stateScopeRef.current = scope
+      }
+
+      // Secret questions must never go out in cleartext, and only the ones this
+      // call signs need their keys. Keys may legitimately be absent for a while
+      // (the keykeepers publish them asynchronously): refuse, never cast unencrypted.
+      for (const [i, question] of election.questions.entries()) {
+        if (
+          vs.states[question.id] === 'open' &&
+          isOpen(question) &&
+          question.secretUntilTheEnd &&
+          !question.encryptionKeys?.length
+        ) {
+          throw new Error(
+            `Question ${i} ("${question.id}") is secret but its encryption keys are not published yet; retry once the keykeepers publish them`,
+          )
+        }
+      }
 
       const stateOf = (question: Question) => vs.states[question.id]
-      if (election.questions.every((q) => stateOf(q) === 'confirmed')) {
+      const doneStates = election.questions.map((q) =>
+        doneState(
+          stateOf(q),
+          vs.checked.questions.find((c) => c.questionId === q.id)?.canVote,
+          shownIneligibleRef.current.has(q.id),
+        ),
+      )
+      if (isVoterDone(doneStates)) {
         if (!staleCast()) setHasVoted(true)
         throw new Error('Every question of this process has already been voted')
       }
@@ -984,12 +1090,15 @@ export function ElectionProvider({
             waiting.map((q) => ({ questionId: q.id, status: q.status === 'ONGOING' ? 'UPCOMING' : q.status })),
           )
         }
-        throw new UnconfirmedVoteError(
-          election.questions.flatMap((q) => {
-            const st = stateOf(q)
-            return st === 'unconfirmed' || st === 'signed' ? [{ questionId: q.id, status: st }] : []
-          }),
-        )
+        const unconfirmed = election.questions.flatMap((q) => {
+          const st = stateOf(q)
+          return st === 'unconfirmed' || st === 'signed' ? [{ questionId: q.id, status: st }] : []
+        })
+        const ineligible = election.questions.filter((q) => stateOf(q) === 'ineligible')
+        if (unconfirmed.length === 0 && ineligible.length > 0) {
+          throw new NoEligibleQuestionError(ineligible.map((q) => ({ questionId: q.id })))
+        }
+        throw new UnconfirmedVoteError(unconfirmed)
       }
       // Fail before consuming any CSP signature: the batch endpoint hard-caps
       // at 100 envelopes and would reject the whole relay.
@@ -997,6 +1106,28 @@ export function ElectionProvider({
         throw new Error(
           `Cannot cast ${reused.length + open.length} votes in one call — the batch relay caps at ${MAX_VOTE_BATCH}`,
         )
+      }
+
+      // The form locks an ineligible question and sends it an empty ballot. If the
+      // fresh check now says the voter can vote it, signing that ballot would spend
+      // the CSP signature on a non-answer: refuse before anything is signed.
+      const turned = open.filter(
+        ({ question, i }) =>
+          shownIneligibleRef.current.has(question.id) &&
+          encodedBallots[i]?.length === 0 &&
+          vs.checked.questions.some((q) => q.questionId === question.id && q.canVote === true),
+      )
+      // The reverse: shown eligible, now ineligible, and answered. Its answer
+      // would be dropped after the form listed it, so refuse it too. Not before
+      // a state was applied: a placeholder for a question not yet checked is fine.
+      const lost = election.questions.filter(
+        (question, i) =>
+          seenBefore && stateOf(question) === 'ineligible' && !shownBefore.has(question.id) && !!encodedBallots[i]?.length,
+      )
+      if (turned.length + lost.length > 0) {
+        for (const { question } of turned) shownIneligibleRef.current.delete(question.id)
+        const changed = [...turned.map(({ question }) => question), ...lost]
+        throw new EligibilityChangedError(changed.map((question) => ({ questionId: question.id })))
       }
 
       // Only the questions this call handles: a skipped one (not open) would
@@ -1132,6 +1263,8 @@ export function ElectionProvider({
     setIsInCensus(false)
     setVoterQuestions([])
     setPendingVotes({})
+    shownIneligibleRef.current.clear()
+    stateScopeRef.current = ''
     session.clear()
   }, [session])
 

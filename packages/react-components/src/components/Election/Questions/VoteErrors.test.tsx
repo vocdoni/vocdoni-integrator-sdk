@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeProcess, renderWithComponents } from '../../../test-utils'
 
@@ -6,6 +7,7 @@ const state = vi.hoisted(() => ({
   election: null as ReturnType<typeof makeProcess> | null,
   vote: vi.fn(),
   confirmResult: true,
+  confirmed: null as ReactElement | null,
   pendingVotes: {} as Record<string, true>,
   voteStatus: {} as Record<string, string>,
   voterQuestions: [] as Array<{ questionId: string; hasVoted: boolean }>,
@@ -25,7 +27,12 @@ vi.mock('@vocdoni/react-providers', () => ({
   }),
 }))
 vi.mock('../../../confirm/useConfirm', () => ({
-  useConfirm: () => ({ confirm: () => Promise.resolve(state.confirmResult) }),
+  useConfirm: () => ({
+    confirm: (node: ReactElement) => {
+      state.confirmed = node
+      return Promise.resolve(state.confirmResult)
+    },
+  }),
 }))
 
 import { ElectionQuestions } from './Questions'
@@ -53,6 +60,7 @@ beforeEach(() => {
   state.election = null
   state.vote = vi.fn()
   state.confirmResult = true
+  state.confirmed = null
   state.pendingVotes = {}
   state.voteStatus = {}
   state.voterQuestions = []
@@ -371,5 +379,79 @@ describe('a question whose vote is already signed', () => {
     submit(container)
     expect(await screen.findByText(/could not be confirmed yet/)).toBeInTheDocument()
     expect(screen.queryByText(/could not confirm the vote on chain yet/)).toBeNull()
+  })
+})
+
+describe('a question the voter is not eligible for (ineligible)', () => {
+  it('renders the notice and no fields for it, and votes only the rest', async () => {
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: twoQuestions })
+    state.confirmResult = true
+    state.pendingVotes = {}
+    state.voteStatus = { 'q-1': 'ineligible' }
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    expect(screen.getByText('You are not eligible to vote on this question.')).toBeInTheDocument()
+    expect(screen.queryByLabelText('C')).toBeNull()
+    // Only the eligible question needs an answer: the ineligible one does not block the submit.
+    submit(container, ['A'])
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[0], []]))
+  })
+
+  it('leaves the ineligible question out of the confirmation', async () => {
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: twoQuestions })
+    state.confirmResult = true
+    state.pendingVotes = {}
+    state.voteStatus = { 'q-1': 'ineligible' }
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    submit(container, ['A'])
+    await waitFor(() => expect(state.confirmed).not.toBeNull())
+    const { container: dialog } = renderWithComponents(state.confirmed!)
+    expect(dialog).toHaveTextContent('Q1')
+    expect(dialog).not.toHaveTextContent('Q2')
+  })
+
+  it('submits straight away when the others are confirmed and the rest ineligible', async () => {
+    // q-0 confirmed, q-1 ineligible: every question is locked, so there is nothing to confirm.
+    state.vote = vi.fn().mockResolvedValue('vote-id')
+    state.election = makeProcess({ questions: twoQuestions })
+    state.confirmResult = false // a confirmation would stop the submit
+    state.pendingVotes = {}
+    state.voteStatus = { 'q-0': 'confirmed', 'q-1': 'ineligible' }
+    const { container } = renderWithComponents(<ElectionQuestions />)
+
+    fireEvent.submit(container.querySelector('form')!)
+    await waitFor(() => expect(state.vote).toHaveBeenCalledWith([[], []]))
+  })
+
+  it.each([
+    ['one question', [{ questionId: 'q-1' }], 'You are not eligible to vote on this question.'],
+    [
+      'several questions',
+      [{ questionId: 'q-0' }, { questionId: 'q-1' }],
+      'You are not eligible to vote on the questions left.',
+    ],
+  ])('words a NoEligibleQuestionError for %s', async (_case, questions, text) => {
+    const error = new Error('no question left to vote on') as Error & { questions: unknown }
+    error.name = 'NoEligibleQuestionError'
+    error.questions = questions
+    state.vote = vi.fn().mockRejectedValue(error)
+    const { container } = render(twoQuestions)
+    submit(container, ['A', 'C'])
+    expect(await screen.findByText(text)).toBeInTheDocument()
+  })
+
+  it('words an EligibilityChangedError', async () => {
+    // The message differs from the translation: the mapping must be by name.
+    const error = new Error('boom')
+    error.name = 'EligibilityChangedError'
+    state.vote = vi.fn().mockRejectedValue(error)
+    const { container } = render(twoQuestions)
+    submit(container, ['A', 'C'])
+    expect(
+      await screen.findByText('Your eligibility changed since the ballot was shown. Review your answers and vote again.'),
+    ).toBeInTheDocument()
   })
 })

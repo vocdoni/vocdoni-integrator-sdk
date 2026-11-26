@@ -69,6 +69,13 @@ export const describeVoteError = (error: unknown, t: VoteErrorTranslate): string
     const { questions = [] } = error as Error & { questions?: Array<{ status: string }> }
     return noOpenQuestionMessage(questions, t)
   }
+  // By name too: the voter has no question left that they can vote on.
+  if (error instanceof Error && error.name === 'NoEligibleQuestionError') {
+    const { questions = [] } = error as Error & { questions?: Array<{ questionId: string }> }
+    return t(questions.length > 1 ? 'errors.vote_ineligible_questions' : 'errors.vote_ineligible_question')
+  }
+  // By name too: an ineligible question turned eligible since the ballot was shown.
+  if (error instanceof Error && error.name === 'EligibilityChangedError') return t('errors.vote_eligibility_changed')
   if (isPartialVoteError(error)) {
     const cast = error.succeeded?.length ?? 0
     const failed = error.failed ?? []
