@@ -26,8 +26,9 @@ const OWNER = '8167d5dc4919186f999eb3dd105c40ebf7f29ff46ba329a0232a7fbcdabd1549'
 type Q = { questionId: string; upstreamId: string; canVote: boolean; hasVoted: boolean; hasSigned?: boolean }
 
 /**
- * Two-question process, plain or anonymous census; `statuses` overrides each question's wire status.
- * `endDate` defaults to the mock's (2024, past): a `canVote: false` only reads as ineligible while the process runs.
+ * Two-question process, plain or anonymous census; `statuses` overrides each
+ * question's wire status. `endDate` defaults to the mock's past date: a
+ * `canVote: false` reads ineligible only while the process runs.
  */
 function useTwoQuestions(anonymous = false, statuses: [string, string] = ['READY', 'READY'], endDate = mockProcess.endDate) {
   server.use(
@@ -70,21 +71,31 @@ const q = (questionId: string, upstreamId: string, over: Partial<Q> = {}): Q => 
 
 /**
  * Records the batch-signed ballots and the relayed batches, and counts CSP
- * consumptions (plain sign-batch or the anonymous flow's round 1). The relay
- * job answers `job(batch)`.
+ * consumptions (plain sign-batch or the anonymous flow's round 1). `requested`
+ * holds the upstream id of every question the CSP was asked to sign, in either
+ * flow. The relay job answers `job(batch)`.
  */
 function mockSignAndRelay(job: (txs: string[]) => object | 'pending' = () => ({})) {
   const signed: Array<{ upstreamId: string; address: string }> = []
+  const requested: string[] = []
   const batches: string[][] = []
   const signCalls = { count: 0 }
   server.use(
     // Counted, then falls through to the default (real blind signer) handler.
-    http.post('http://localhost/processes/:processId/blind-point', () => {
+    http.post('http://localhost/processes/:processId/blind-point', async ({ request }) => {
       signCalls.count++
+      const body = (await request.clone().json()) as { electionIds: string[] }
+      requested.push(...body.electionIds)
+    }),
+    // Round 2 of the anonymous flow: records what it blind-signs, then falls through.
+    http.post('http://localhost/processes/:processId/blind-sign', async ({ request }) => {
+      const body = (await request.clone().json()) as { ballots: Array<{ upstreamId: string }> }
+      requested.push(...body.ballots.map((b) => b.upstreamId))
     }),
     http.post('http://localhost/processes/:processId/sign-batch', async ({ request }) => {
       signCalls.count++
       const body = (await request.json()) as { ballots: Array<{ upstreamId: string; address: string }> }
+      requested.push(...body.ballots.map((b) => b.upstreamId))
       signed.push(...body.ballots)
       return HttpResponse.json({
         signatures: body.ballots.map((b) => ({ upstreamId: b.upstreamId, signature: MOCK_CSP_SIGNATURE, weight: MOCK_WEIGHT_HEX })),
@@ -102,7 +113,7 @@ function mockSignAndRelay(job: (txs: string[]) => object | 'pending' = () => ({}
       return HttpResponse.json({ jobId: params.jobId, type: 'relay_votes', ...res })
     }),
   )
-  return { signed, batches, signCalls }
+  return { signed, requested, batches, signCalls }
 }
 
 /**
@@ -660,7 +671,7 @@ describe('ElectionProvider — questions the voter is not eligible for', () => {
     it(`skips the ineligible question and relays only the eligible one (${anonymous ? 'anonymous' : 'plain'} census)`, async () => {
       useTwoQuestions(anonymous, ['READY', 'READY'], FUTURE_END)
       mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B, { canVote: false })])
-      const { signed, batches, signCalls } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+      const { requested, batches, signCalls } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
 
       const { result } = renderHook(useVoter, { wrapper })
       await connect(result)
@@ -671,7 +682,9 @@ describe('ElectionProvider — questions the voter is not eligible for', () => {
         await result.current.vote([[0], [1]])
       })
       expect(signCalls.count).toBe(1)
-      if (!anonymous) expect(signed.map((b) => b.upstreamId)).toEqual([UPSTREAM_A])
+      // Only question A was ever sent to the CSP, in either flow (the anonymous
+      // flow asks twice, once per round, for the same question).
+      expect([...new Set(requested)]).toEqual([UPSTREAM_A])
       expect(batches).toEqual([[expect.any(String)]])
       expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'ineligible' })
     })
@@ -851,6 +864,24 @@ describe('ElectionProvider — questions the voter is not eligible for', () => {
     expect(err).toBeInstanceOf(NoOpenQuestionError)
     expect(signCalls.count).toBe(0)
     expect(batches).toHaveLength(0)
+  })
+
+  it('a process past its end date with questions still live: canVote false reads open and is signed, as on main', async () => {
+    // Default endDate is in the past, the questions are live on the wire: not "running" per the guard.
+    useTwoQuestions(false, ['READY', 'READY'])
+    mockCheck(() => [q('q-0', UPSTREAM_A, { canVote: false }), q('q-1', UPSTREAM_B, { canVote: false })])
+    const { signed, batches } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(result.current.voteStatus).toEqual({})
+
+    await act(async () => {
+      await result.current.vote([[0], [1]])
+    })
+    expect(signed.map((b) => b.upstreamId)).toEqual([UPSTREAM_A, UPSTREAM_B])
+    expect(batches).toEqual([[expect.any(String), expect.any(String)]])
+    expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'confirmed' })
   })
 
   it('a voter outside the census reads no ineligible state', async () => {

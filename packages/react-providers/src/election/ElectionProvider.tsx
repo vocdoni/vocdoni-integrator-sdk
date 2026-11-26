@@ -69,8 +69,7 @@ export const electionQueryKeys = {
  * - `signed`: the CSP authorized the vote of an anonymous census, and this tab
  *   cannot confirm it on chain (no stored nullifier).
  * Neither can be voted again.
- * - `ineligible`: not in the question's eligibility subset (`canVote` false);
- *   never signed, so it is skipped by `vote()`. Set on connect.
+ * - `ineligible`: `canVote` false, so never signed. Set on connect.
  */
 export type QuestionVoteStatus =
   | 'signing'
@@ -117,9 +116,9 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * Per-question voter state (`canVote`/`hasVoted`/`hasSigned`) from the CSP
    * check. `hasVoted` means on chain: an anonymous-census question confirmed
    * through `POST /votes/verify` reads `hasVoted: true` here even though the
-   * backend reports `false`. While the process runs, a question with `canVote:
-   * false` is `ineligible` in {@link voteStatus} and never signed. Empty until
-   * the voter is connected and the membership check resolves.
+   * backend reports `false`. A `canVote: false` question is `ineligible` in
+   * {@link voteStatus} while the process runs. Empty until the voter is
+   * connected and the membership check resolves.
    */
   voterQuestions: ProcessQuestionStatus[]
   /** true when every question of the process is on chain. */
@@ -147,12 +146,11 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * relayed, then the whole batch is relayed in ONE call (`POST /votes`) that
    * the backend accepts or rejects as a unit. Questions already on chain are
    * skipped. Questions in {@link pendingVotes} re-send their stored tx — their
-   * entry in `encodedBallots` is ignored. Only questions whose status is
-   * `ONGOING` and that the voter is eligible for (`ineligible` otherwise) are
-   * signed or re-sent; the rest are skipped. When none of the voter's remaining
-   * questions is open the call throws {@link NoOpenQuestionError}, and when only
-   * ineligible ones remain {@link NoEligibleQuestionError}, both without signing.
-   * A question is confirmed only on on-chain evidence (the relay job, the
+   * entry in `encodedBallots` is ignored. Only `ONGOING` questions the voter is
+   * eligible for are signed or re-sent; the rest are skipped. When none is left,
+   * throws {@link NoOpenQuestionError}, or {@link NoEligibleQuestionError} if only
+   * ineligible ones remain, without signing. A question is confirmed only on
+   * on-chain evidence (the relay job, the
    * check's `hasVoted`, or `POST /votes/verify` for an anonymous census). If some
    * votes land and others fail, throws {@link PartialVoteError} naming both sets;
    * if nothing is left to sign or re-send, throws {@link UnconfirmedVoteError}.
