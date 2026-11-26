@@ -1,6 +1,6 @@
 {
   "name": "@vocdoni/ballot",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "license": "LGPL-3.0-or-later",
   "description": "Framework-agnostic Vocdoni ballot semantics: type inference, choice encoding, results decoding",
   "keywords": [
