@@ -33,6 +33,7 @@
     "vote_failed_unknown": "Your vote could not be cast. Please try again.",
     "vote_ineligible_question": "You are not eligible to vote on this question.",
     "vote_ineligible_questions": "You are not eligible to vote on the questions left.",
+    "vote_eligibility_changed": "Your eligibility changed since the ballot was shown. Review your answers and vote again.",
     "vote_no_open_question": "This question is not open for voting right now. Try again once it opens.",
     "vote_no_open_questions": "These questions are not open for voting right now. Try again once they open.",
     "vote_closed_question": "Voting is closed for this question.",

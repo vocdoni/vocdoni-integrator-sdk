@@ -442,4 +442,16 @@ describe('a question the voter is not eligible for (ineligible)', () => {
     submit(container, ['A', 'C'])
     expect(await screen.findByText(text)).toBeInTheDocument()
   })
+
+  it('words an EligibilityChangedError', async () => {
+    // The message differs from the translation: the mapping must be by name.
+    const error = new Error('boom')
+    error.name = 'EligibilityChangedError'
+    state.vote = vi.fn().mockRejectedValue(error)
+    const { container } = render(twoQuestions)
+    submit(container, ['A', 'C'])
+    expect(
+      await screen.findByText('Your eligibility changed since the ballot was shown. Review your answers and vote again.'),
+    ).toBeInTheDocument()
+  })
 })

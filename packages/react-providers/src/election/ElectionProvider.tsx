@@ -149,8 +149,9 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * entry in `encodedBallots` is ignored. Only `ONGOING` questions the voter is
    * eligible for are signed or re-sent; the rest are skipped. When none is left,
    * throws {@link NoOpenQuestionError}, or {@link NoEligibleQuestionError} if only
-   * ineligible ones remain, without signing. A question is confirmed only on
-   * on-chain evidence (the relay job, the check's `hasVoted`, or
+   * ineligible ones remain, without signing. An ineligible question passed `[]`
+   * that is eligible now throws {@link EligibilityChangedError}. A question is
+   * confirmed only on on-chain evidence (the relay job, the check's `hasVoted`, or
    * `POST /votes/verify` for an anonymous census). If some votes land and others
    * fail, throws {@link PartialVoteError} naming both sets; if nothing is left to
    * sign or re-send, throws {@link UnconfirmedVoteError}.
@@ -334,6 +335,24 @@ export class NoEligibleQuestionError extends Error {
   }
 }
 
+/**
+ * Thrown by `vote()` when a question shown `ineligible` is eligible now and was
+ * passed an empty ballot: nothing was signed. Retry with an answer, or vote
+ * again once the form shows its fields.
+ */
+export class EligibilityChangedError extends Error {
+  constructor(readonly questions: Array<{ questionId: string }>) {
+    super('Your eligibility changed since the ballot was shown. Review your answers and vote again.')
+    this.name = 'EligibilityChangedError'
+  }
+}
+
+/**
+ * The backend zeroes every `canVote` on its own clock, so a device clock behind
+ * it reads a process as still running for a few minutes after its end date.
+ */
+const END_DATE_SKEW_MS = 5 * 60_000
+
 const COULD_NOT_VERIFY = 'Could not verify your voting status; try again'
 /** Error message of a question whose outcome is unknown (the verification failed). */
 const COULD_NOT_CONFIRM = 'could not confirm the vote on chain yet'
@@ -401,7 +420,9 @@ async function resolveVoterState(
   // a `canVote: false` only means "not eligible" while it runs.
   const processStatus = computeProcessStatus(election.questions, { startDate: election.startDate })
   const endDate = resolveEndDate(election)
-  const running = !['ENDED', 'RESULTS', 'CANCELED'].includes(processStatus) && (!endDate || endDate > new Date())
+  const running =
+    !['ENDED', 'RESULTS', 'CANCELED'].includes(processStatus) &&
+    (!endDate || endDate.getTime() > Date.now() + END_DATE_SKEW_MS)
   const someEligible = checked.questions.some((q) => q.canVote === true)
 
   // An anonymous census reports no nullifier by design (the CSP blind signs
@@ -586,6 +607,9 @@ export function ElectionProvider({
   // The connect effect's identity. A re-run for a question opening or closing
   // keeps it, so an in-flight re-send still publishes what it confirmed.
   const connectKeyRef = useRef('')
+  // Questions shown `ineligible` to this voter. Kept when a later check stops
+  // reading them ineligible: the guard in castVotes needs what the form was shown.
+  const shownIneligibleRef = useRef<Set<string>>(new Set())
 
   /** Publishes a fresh voter state: membership, per-question state, recovered vote ids. */
   const applyVoterState = useCallback((vs: VoterState) => {
@@ -593,6 +617,7 @@ export function ElectionProvider({
     // What this session's relay confirmed stays confirmed, whatever the snapshot says.
     const states = { ...vs.states }
     for (const id of relayConfirmedRef.current.ids) states[id] = 'confirmed'
+    for (const [id, st] of Object.entries(states)) if (st === 'ineligible') shownIneligibleRef.current.add(id)
     setIsInCensus(checked.belongsToProcess)
     setVoterQuestions(
       checked.questions.map((q) => (states[q.questionId] === 'confirmed' && !q.hasVoted ? { ...q, hasVoted: true } : q)),
@@ -889,6 +914,7 @@ export function ElectionProvider({
       setVoteIds({})
       setVoteStatus({})
       setPendingVotes({})
+      shownIneligibleRef.current.clear()
       return
     }
 
@@ -942,8 +968,6 @@ export function ElectionProvider({
       // The session this cast belongs to: once it changes, the result is not written.
       const scope = `${session.connected}|${session.authToken}|${session.owner}|${election.id}`
       const staleCast = () => relayConfirmedRef.current.scope !== scope
-      // The statuses the form was shown, before this call's check rewrites them.
-      const shown = voteStatus
       if (!chainId) {
         throw new Error('Missing chainId — the process read did not provide one; cannot cast a vote')
       }
@@ -1039,10 +1063,17 @@ export function ElectionProvider({
       }
 
       // The form locks an ineligible question and sends it an empty ballot. If the
-      // fresh check now reads it eligible, signing that ballot would spend the CSP
-      // signature on a non-answer: refuse before anything is signed.
-      if (open.some(({ question, i }) => shown[question.id] === 'ineligible' && encodedBallots[i]?.length === 0)) {
-        throw new Error('Your eligibility changed since the ballot was shown. Review your answers and vote again.')
+      // fresh check now says the voter can vote it, signing that ballot would spend
+      // the CSP signature on a non-answer: refuse before anything is signed.
+      const turned = open.filter(
+        ({ question, i }) =>
+          shownIneligibleRef.current.has(question.id) &&
+          encodedBallots[i]?.length === 0 &&
+          vs.checked.questions.some((q) => q.questionId === question.id && q.canVote === true),
+      )
+      if (turned.length > 0) {
+        for (const { question } of turned) shownIneligibleRef.current.delete(question.id)
+        throw new EligibilityChangedError(turned.map(({ question }) => ({ questionId: question.id })))
       }
 
       // Only the questions this call handles: a skipped one (not open) would
@@ -1138,7 +1169,7 @@ export function ElectionProvider({
       return resultVoteId
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [election, session, chainId, client, status, relay, applyVoterState, applyRelayResult, voteStatus],
+    [election, session, chainId, client, status, relay, applyVoterState, applyRelayResult],
   )
 
   // Public vote(): the cast wrapped in the in-flight flag, so UIs can show a
@@ -1178,6 +1209,7 @@ export function ElectionProvider({
     setIsInCensus(false)
     setVoterQuestions([])
     setPendingVotes({})
+    shownIneligibleRef.current.clear()
     session.clear()
   }, [session])
 
