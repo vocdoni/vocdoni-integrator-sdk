@@ -1,5 +1,13 @@
 # @vocdoni/api-types
 
+## 2.6.1
+
+### Patch Changes
+
+- 648fa99: Refresh the package READMEs: add npm version badges and fix links that no longer worked.
+
+  The license changes from GPL-3.0-or-later to LGPL-3.0-or-later.
+
 ## 2.6.0
 
 ### Minor Changes

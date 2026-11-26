@@ -1,5 +1,16 @@
 # @vocdoni/ballot
 
+## 1.4.1
+
+### Patch Changes
+
+- 648fa99: Refresh the package READMEs: add npm version badges and fix links that no longer worked.
+
+  The license changes from GPL-3.0-or-later to LGPL-3.0-or-later.
+
+- Updated dependencies [648fa99]
+  - @vocdoni/api-types@2.6.1
+
 ## 1.4.0
 
 ### Minor Changes
