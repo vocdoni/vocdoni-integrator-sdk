@@ -836,7 +836,7 @@ describe('ElectionProvider — questions the voter is not eligible for', () => {
     expect(result.current.voteStatus).toEqual({ 'q-0': 'unconfirmed' })
   })
 
-  it('a confirmed question and an ineligible one: vote() throws NoEligibleQuestionError, not UnconfirmedVoteError', async () => {
+  it('a confirmed question and an ineligible one: the voter is done, and vote() throws the already-voted error', async () => {
     useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
     mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: true }), q('q-1', UPSTREAM_B, { canVote: false })])
     mockSignInfo(() => [])
@@ -844,11 +844,112 @@ describe('ElectionProvider — questions the voter is not eligible for', () => {
 
     const { result } = renderHook(useVoter, { wrapper })
     await connect(result)
+    expect(result.current.hasVoted).toBe(true)
     const err = await result.current.vote([[0], [1]]).catch((e) => e)
-    expect(err).toBeInstanceOf(NoEligibleQuestionError)
+    expect(err).not.toBeInstanceOf(NoEligibleQuestionError)
     expect(err).not.toBeInstanceOf(UnconfirmedVoteError)
-    expect(err.questions).toEqual([{ questionId: 'q-1' }])
+    expect(err.message).toBe('Every question of this process has already been voted')
     expect(signCalls.count).toBe(0)
+    expect(batches).toHaveLength(0)
+  })
+
+  it('an eligible question cast and the other ineligible: hasVoted is true, and a second vote() throws the already-voted error', async () => {
+    useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+    // The check reports q-0 on chain once its relay has landed.
+    let landed = false
+    mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: landed }), q('q-1', UPSTREAM_B, { canVote: false })])
+    mockSignInfo(() => [])
+    const { batches, signCalls } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(result.current.hasVoted).toBe(false)
+    await act(async () => {
+      await result.current.vote([[0], []])
+    })
+    landed = true
+    expect(result.current.hasVoted).toBe(true)
+    expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'ineligible' })
+
+    const signedBefore = signCalls.count
+    let err: unknown
+    await act(async () => {
+      err = await result.current.vote([[0], []]).catch((e) => e)
+    })
+    expect(err).not.toBeInstanceOf(NoEligibleQuestionError)
+    expect((err as Error).message).toBe('Every question of this process has already been voted')
+    expect(signCalls.count).toBe(signedBefore)
+    expect(batches).toHaveLength(1)
+  })
+
+  it('on connect, a question on chain and one ineligible: hasVoted is true', async () => {
+    useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+    mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: true }), q('q-1', UPSTREAM_B, { canVote: false })])
+    mockSignInfo(() => [])
+    mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(result.current.hasVoted).toBe(true)
+    expect(result.current.voteStatus).toEqual({ 'q-1': 'ineligible' })
+  })
+
+  it('on connect, every question ineligible: hasVoted is false and vote() throws NoEligibleQuestionError', async () => {
+    useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+    mockCheck(() => [q('q-0', UPSTREAM_A, { canVote: false }), q('q-1', UPSTREAM_B, { canVote: false })])
+    const { signCalls } = mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(result.current.hasVoted).toBe(false)
+    const err = await result.current.vote([[0], []]).catch((e) => e)
+    expect(err).toBeInstanceOf(NoEligibleQuestionError)
+    expect(signCalls.count).toBe(0)
+  })
+
+  it('two eligible questions, one on chain: hasVoted stays false', async () => {
+    useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+    mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: true }), q('q-1', UPSTREAM_B)])
+    mockSignInfo(() => [])
+    mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(result.current.hasVoted).toBe(false)
+  })
+
+  it('a secret question this call signs without keys throws, but the fresh state is applied first', async () => {
+    server.use(
+      http.get('http://localhost/processes/:id', ({ params }) =>
+        HttpResponse.json({
+          ...mockProcess,
+          id: params.id as string,
+          endDate: FUTURE_END,
+          questions: [
+            { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: 'READY', secretUntilTheEnd: true },
+            { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: 'READY' },
+          ],
+        }),
+      ),
+    )
+    let q1Eligible = true
+    mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B, { canVote: q1Eligible })])
+    const { requested, batches, signCalls } = mockSignAndRelay()
+
+    const { result } = renderHook(useVoter, { wrapper })
+    await connect(result)
+    expect(result.current.voteStatus).toEqual({})
+
+    // The voter is removed from q-1's subset after connect: the secret check runs on the fresh state.
+    q1Eligible = false
+    let err: unknown
+    await act(async () => {
+      err = await result.current.vote([[0], [1]]).catch((e) => e)
+    })
+    expect((err as Error).message).toContain('encryption keys are not published yet')
+    expect(result.current.voteStatus).toEqual({ 'q-1': 'ineligible' })
+    expect(signCalls.count).toBe(0)
+    expect(requested).toEqual([])
     expect(batches).toHaveLength(0)
   })
 
@@ -1261,6 +1362,258 @@ describe('ElectionProvider — questions the voter is not eligible for', () => {
       expect(batches).toHaveLength(0)
       expect(listPendingVotes(UPSTREAM_A)).toEqual([])
       expect(listPendingVotes(UPSTREAM_B)).toEqual([])
+    })
+  })
+
+  describe('an answered question that turned ineligible', () => {
+    for (const anonymous of [false, true]) {
+      const census = anonymous ? 'anonymous' : 'plain'
+
+      it(`refuses the answer before anything is signed, then a retry with [] signs only the eligible one (${census} census)`, async () => {
+        useTwoQuestions(anonymous, ['READY', 'READY'], FUTURE_END)
+        let q1Eligible = true
+        mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B, { canVote: q1Eligible })])
+        const { requested, batches, signCalls } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+        const { result } = renderHook(useVoter, { wrapper })
+        await connect(result)
+        expect(result.current.voteStatus).toEqual({})
+
+        // The voter leaves q-1's subset after the form showed it eligible.
+        q1Eligible = false
+        let err: unknown
+        await act(async () => {
+          err = await result.current.vote([[0], [1]]).catch((e) => e)
+        })
+        expect(err).toBeInstanceOf(EligibilityChangedError)
+        expect((err as EligibilityChangedError).questions).toEqual([{ questionId: 'q-1' }])
+        expect(signCalls.count).toBe(0)
+        expect(requested).toEqual([])
+        expect(batches).toHaveLength(0)
+        // The fresh state is applied: the form re-renders q-1 locked.
+        expect(result.current.voteStatus).toEqual({ 'q-1': 'ineligible' })
+
+        await act(async () => {
+          await result.current.vote([[0], []])
+        })
+        // Only question A reached the CSP, in either flow.
+        expect([...new Set(requested)]).toEqual([UPSTREAM_A])
+        expect(batches).toEqual([[expect.any(String)]])
+        expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'ineligible' })
+      })
+    }
+
+    it('a retry that sends the same answer again signs only the eligible question', async () => {
+      useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+      let q1Eligible = true
+      mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B, { canVote: q1Eligible })])
+      const { signed, batches } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+      const { result } = renderHook(useVoter, { wrapper })
+      await connect(result)
+      q1Eligible = false
+      let err: unknown
+      await act(async () => {
+        err = await result.current.vote([[0], [1]]).catch((e) => e)
+      })
+      expect(err).toBeInstanceOf(EligibilityChangedError)
+
+      await act(async () => {
+        await result.current.vote([[0], [1]])
+      })
+      expect(signed.map((b) => b.upstreamId)).toEqual([UPSTREAM_A])
+      expect(batches).toEqual([[expect.any(String)]])
+      expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'ineligible' })
+    })
+
+    it('the same flip with an empty ballot straight away: no error, only the eligible question is signed', async () => {
+      useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+      let q1Eligible = true
+      mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B, { canVote: q1Eligible })])
+      const { signed, batches } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+      const { result } = renderHook(useVoter, { wrapper })
+      await connect(result)
+      q1Eligible = false
+      await act(async () => {
+        await result.current.vote([[0], []])
+      })
+      expect(signed.map((b) => b.upstreamId)).toEqual([UPSTREAM_A])
+      expect(batches).toEqual([[expect.any(String)]])
+      expect(result.current.voteStatus).toEqual({ 'q-0': 'confirmed', 'q-1': 'ineligible' })
+    })
+
+    it('a question an empty ballot is sent for when it turns ineligible is not an error', async () => {
+      useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+      let q1Eligible = true
+      mockCheck(() => [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B, { canVote: q1Eligible })])
+      mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+      const { result } = renderHook(useVoter, { wrapper })
+      await connect(result)
+      q1Eligible = false
+      await act(async () => {
+        await result.current.vote([[0], []])
+      })
+      expect(result.current.hasVoted).toBe(true)
+    })
+
+    it('both directions in one call: one EligibilityChangedError lists both questions, nothing is signed', async () => {
+      useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+      let flipped = false
+      mockCheck(() => [q('q-0', UPSTREAM_A, { canVote: flipped }), q('q-1', UPSTREAM_B, { canVote: !flipped })])
+      const { requested, batches, signCalls } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+      const { result } = renderHook(useVoter, { wrapper })
+      await connect(result)
+      expect(result.current.voteStatus).toEqual({ 'q-0': 'ineligible' })
+
+      // q-0 becomes eligible (shown ineligible, sent []), q-1 becomes ineligible (shown eligible, sent an answer).
+      flipped = true
+      let err: unknown
+      await act(async () => {
+        err = await result.current.vote([[], [1]]).catch((e) => e)
+      })
+      expect(err).toBeInstanceOf(EligibilityChangedError)
+      expect((err as EligibilityChangedError).questions).toEqual([{ questionId: 'q-0' }, { questionId: 'q-1' }])
+      expect(signCalls.count).toBe(0)
+      expect(requested).toEqual([])
+      expect(batches).toHaveLength(0)
+    })
+
+    it('a placeholder for a question not yet checked is not refused while the first check is pending', async () => {
+      // The app passes a placeholder for q-1, which the first check reads ineligible. Nothing was applied yet: no refusal.
+      useTwoQuestions(false, ['READY', 'READY'], FUTURE_END)
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      let checks = 0
+      server.use(
+        http.post('http://localhost/processes/:processId/check', async () => {
+          // The connect check is held back; the vote()'s own check answers at once.
+          if (++checks === 1) await gate
+          return HttpResponse.json({
+            belongsToProcess: true,
+            weight: MOCK_WEIGHT_HEX,
+            questions: [q('q-0', UPSTREAM_A), q('q-1', UPSTREAM_B, { canVote: false })],
+          })
+        }),
+      )
+      const { signed, batches } = mockSignAndRelay((txs) => jobOf(txs.map(() => 'completed')))
+
+      const { result } = renderHook(useVoter, { wrapper })
+      await waitFor(() => expect(result.current.election).not.toBeNull())
+      await act(async () => {
+        await result.current.auth0({ memberNumber: '5' })
+      })
+      await act(async () => {
+        await result.current.auth1(['123456'])
+      })
+      let err: unknown = null
+      await act(async () => {
+        err = await result.current.vote([[0], [1]]).then(
+          () => null,
+          (e: unknown) => e,
+        )
+      })
+      release()
+      expect(err).toBeNull()
+      expect(signed.map((b) => b.upstreamId)).toEqual([UPSTREAM_A])
+      expect(batches).toEqual([[expect.any(String)]])
+    })
+  })
+
+  describe('hasVoted once the process has ended', () => {
+    // The process re-reads itself every few ms: a wire status change re-runs the connect effect.
+    function RefreshingWrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <TestProvider>
+          <ElectionProvider
+            id={mockProcess.id}
+            queryOptions={{ refetchInterval: 20 }}
+            voteOptions={{ jobTimeoutMs: 300, reconcile: { attempts: 3, intervalMs: 20 } }}
+          >
+            {children}
+          </ElectionProvider>
+        </TestProvider>
+      )
+    }
+
+    /** A running two-question process whose wire statuses and the check's canVote are read at call time. */
+    function liveProcess(statuses: () => [string, string]) {
+      server.use(
+        http.get('http://localhost/processes/:id', ({ params }) => {
+          const [s0, s1] = statuses()
+          return HttpResponse.json({
+            ...mockProcess,
+            id: params.id as string,
+            endDate: FUTURE_END,
+            questions: [
+              { ...mockProcess.questions[0], id: 'q-0', upstreamId: UPSTREAM_A, status: s0 },
+              { ...mockProcess.questions[0], id: 'q-1', upstreamId: UPSTREAM_B, status: s1 },
+            ],
+          })
+        }),
+      )
+    }
+
+    it('a question on chain and one shown ineligible: hasVoted stays true after the process ends', async () => {
+      let statuses: [string, string] = ['READY', 'READY']
+      liveProcess(() => statuses)
+      let ended = false
+      mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: true, canVote: !ended }), q('q-1', UPSTREAM_B, { canVote: false })])
+      mockSignInfo(() => [])
+      mockSignAndRelay()
+
+      const { result } = renderHook(useVoter, { wrapper: RefreshingWrapper })
+      await connect(result)
+      expect(result.current.hasVoted).toBe(true)
+      expect(result.current.voteStatus).toEqual({ 'q-1': 'ineligible' })
+
+      // The process ends: its questions read ENDED and the backend zeroes every canVote.
+      statuses = ['ENDED', 'ENDED']
+      ended = true
+      await waitFor(() => expect(result.current.status).toBe('ENDED'))
+      await act(() => sleep(50))
+      expect(result.current.voteStatus).toEqual({})
+      expect(result.current.hasVoted).toBe(true)
+    })
+
+    it('a voter eligible for the question left, who did not vote it: hasVoted stays false after the process ends', async () => {
+      let statuses: [string, string] = ['READY', 'READY']
+      liveProcess(() => statuses)
+      let ended = false
+      mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: true, canVote: !ended }), q('q-1', UPSTREAM_B, { canVote: !ended })])
+      mockSignInfo(() => [])
+      mockSignAndRelay()
+
+      const { result } = renderHook(useVoter, { wrapper: RefreshingWrapper })
+      await connect(result)
+      expect(result.current.hasVoted).toBe(false)
+
+      statuses = ['ENDED', 'ENDED']
+      ended = true
+      await waitFor(() => expect(result.current.status).toBe('ENDED'))
+      await act(() => sleep(50))
+      expect(result.current.hasVoted).toBe(false)
+    })
+
+    it('an ineligible question that later reads canVote true while running: hasVoted becomes false', async () => {
+      let statuses: [string, string] = ['ONGOING', 'ONGOING']
+      liveProcess(() => statuses)
+      let q1Eligible = false
+      mockCheck(() => [q('q-0', UPSTREAM_A, { hasVoted: true }), q('q-1', UPSTREAM_B, { canVote: q1Eligible })])
+      mockSignInfo(() => [])
+      mockSignAndRelay()
+
+      const { result } = renderHook(useVoter, { wrapper: RefreshingWrapper })
+      await connect(result)
+      expect(result.current.hasVoted).toBe(true)
+
+      // A status change re-runs the check: q-1 now reads canVote true while the process runs.
+      statuses = ['ONGOING', 'PAUSED']
+      q1Eligible = true
+      await waitFor(() => expect(result.current.voteStatus).toEqual({}))
+      expect(result.current.hasVoted).toBe(false)
     })
   })
 

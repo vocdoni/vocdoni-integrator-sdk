@@ -121,7 +121,11 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * connected and the membership check resolves.
    */
   voterQuestions: ProcessQuestionStatus[]
-  /** true when every question of the process is on chain. */
+  /**
+   * true once every question is on chain or ineligible, and at least one is on chain.
+   * After the process ends the check no longer tells an ineligible question from an
+   * unvoted one, so a session opened after the end reads false for such a voter.
+   */
   hasVoted: boolean
   /**
    * Questions whose signed tx is stored in this tab but not on chain yet,
@@ -148,9 +152,9 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * skipped. Questions in {@link pendingVotes} re-send their stored tx — their
    * entry in `encodedBallots` is ignored. Only `ONGOING` questions the voter is
    * eligible for are signed or re-sent; the rest are skipped. When none is left,
-   * throws {@link NoOpenQuestionError}, or {@link NoEligibleQuestionError} if only
-   * ineligible ones remain, without signing. An ineligible question passed `[]`
-   * that is eligible now throws {@link EligibilityChangedError}. A question is
+   * throws {@link NoOpenQuestionError}, or {@link NoEligibleQuestionError} when
+   * nothing is on chain and only ineligible ones remain, without signing. Eligibility that changed since the
+   * form was shown throws {@link EligibilityChangedError}, before signing. A question is
    * confirmed only on on-chain evidence (the relay job, the check's `hasVoted`, or
    * `POST /votes/verify` for an anonymous census). If some votes land and others
    * fail, throws {@link PartialVoteError} naming both sets; if nothing is left to
@@ -324,9 +328,9 @@ export class NoOpenQuestionError extends Error {
 }
 
 /**
- * Thrown by `vote()` when the rest of the voter's questions are not eligible
- * for the voter (`ineligible`): nothing was signed or relayed. Retrying does
- * not help; the voter is not in those questions' eligibility subset.
+ * Thrown by `vote()` when no question is on chain and every question left is
+ * `ineligible`: nothing was signed or relayed, and a retry does not help.
+ * With a question on chain, the voter is done and the already-voted error applies.
  */
 export class NoEligibleQuestionError extends Error {
   constructor(readonly questions: Array<{ questionId: string }>) {
@@ -336,9 +340,9 @@ export class NoEligibleQuestionError extends Error {
 }
 
 /**
- * Thrown by `vote()` when a question shown `ineligible` is eligible now and was
- * passed an empty ballot: nothing was signed. Retry with an answer, or vote
- * again once the form shows its fields.
+ * Thrown by `vote()` when a question's eligibility changed since the form was
+ * shown: one now eligible but passed `[]`, or one now ineligible but passed a
+ * ballot. Nothing was signed; vote again with the fresh state.
  */
 export class EligibilityChangedError extends Error {
   constructor(readonly questions: Array<{ questionId: string }>) {
@@ -372,6 +376,18 @@ type Question = VotingProcessResponse['questions'][number]
 
 /** A question's state from a fresh check (see {@link resolveVoterState}). */
 type QuestionState = 'confirmed' | 'pending' | 'unconfirmed' | 'signed' | 'ineligible' | 'open'
+
+/** The voter is done: some question is on chain, and every other one is on chain or ineligible. */
+const isVoterDone = (states: Array<QuestionState | undefined>) =>
+  states.includes('confirmed') && states.every((st) => st === 'confirmed' || st === 'ineligible')
+
+/**
+ * A question's state for {@link isVoterDone}. Once the process ends the check zeroes
+ * every `canVote`, so an ineligible question reads `open` again: one shown ineligible
+ * that still reads `canVote: false` stays ineligible, not unvoted.
+ */
+const doneState = (state: QuestionState | undefined, canVote: boolean | undefined, shown: boolean) =>
+  state === 'open' && shown && canVote === false ? 'ineligible' : state
 
 interface VoterState {
   checked: ProcessCheckResponse
@@ -610,6 +626,9 @@ export function ElectionProvider({
   // Questions shown `ineligible` to this voter. Kept when a later check stops
   // reading them ineligible: the guard in castVotes needs what the form was shown.
   const shownIneligibleRef = useRef<Set<string>>(new Set())
+  // The session scope whose voter state was applied last. Until one is, the
+  // form has shown nothing for it, so castVotes has no eligibility to compare.
+  const stateScopeRef = useRef('')
 
   /** Publishes a fresh voter state: membership, per-question state, recovered vote ids. */
   const applyVoterState = useCallback((vs: VoterState) => {
@@ -622,7 +641,13 @@ export function ElectionProvider({
     setVoterQuestions(
       checked.questions.map((q) => (states[q.questionId] === 'confirmed' && !q.hasVoted ? { ...q, hasVoted: true } : q)),
     )
-    setHasVoted(checked.questions.length > 0 && checked.questions.every((q) => states[q.questionId] === 'confirmed'))
+    setHasVoted(
+      isVoterDone(
+        checked.questions.map((q) =>
+          doneState(states[q.questionId], q.canVote, shownIneligibleRef.current.has(q.questionId)),
+        ),
+      ),
+    )
     setPendingVotes(
       Object.fromEntries(
         Object.entries(states)
@@ -863,7 +888,7 @@ export function ElectionProvider({
 
   /**
    * Publishes what a relay confirmed. `hasVoted` turns true only when every
-   * question is on chain. Returns whether it did.
+   * question is on chain or ineligible, and one is on chain. Returns whether it did.
    */
   const applyRelayResult = useCallback(
     (vs: VoterState, succeeded: Array<{ questionId: string; voteId: string }>): boolean => {
@@ -871,11 +896,16 @@ export function ElectionProvider({
       for (const id of landed) relayConfirmedRef.current.ids.add(id)
       if (succeeded.length > 0) setVoteIds((prev) => ({ ...prev, ...byQuestion(succeeded) }))
       setVoterQuestions((qs) => qs.map((q) => (landed.has(q.questionId) ? { ...q, hasVoted: true } : q)))
-      const all =
-        vs.checked.questions.length > 0 &&
-        vs.checked.questions.every((q) => vs.states[q.questionId] === 'confirmed' || landed.has(q.questionId))
-      if (all) setHasVoted(true)
-      return all
+      // Judged on the check this cast took before the relay, the one it signed against.
+      const done = isVoterDone(
+        vs.checked.questions.map((q) =>
+          landed.has(q.questionId)
+            ? 'confirmed'
+            : doneState(vs.states[q.questionId], q.canVote, shownIneligibleRef.current.has(q.questionId)),
+        ),
+      )
+      if (done) setHasVoted(true)
+      return done
     },
     [],
   )
@@ -915,6 +945,7 @@ export function ElectionProvider({
       setVoteStatus({})
       setPendingVotes({})
       shownIneligibleRef.current.clear()
+      stateScopeRef.current = ''
       return
     }
 
@@ -927,6 +958,7 @@ export function ElectionProvider({
         const vs = await resolveVoterState(client, election, checked, session.owner, session.authToken!)
         if (cancelled) return
         applyVoterState(vs)
+        stateScopeRef.current = scope
 
         const items = pendingItems(vs)
         if (items.length === 0 || status !== 'ONGOING') return
@@ -1010,6 +1042,14 @@ export function ElectionProvider({
         throw new Error(COULD_NOT_VERIFY, { cause: err })
       }
       if (vs.unverified) throw new Error(COULD_NOT_VERIFY)
+      // What the form was shown before this call applies the fresh state.
+      const shownBefore = new Set(shownIneligibleRef.current)
+      const seenBefore = stateScopeRef.current === scope
+      if (!staleCast()) {
+        applyVoterState(vs)
+        stateScopeRef.current = scope
+      }
+
       // Secret questions must never go out in cleartext, and only the ones this
       // call signs need their keys. Keys may legitimately be absent for a while
       // (the keykeepers publish them asynchronously): refuse, never cast unencrypted.
@@ -1025,10 +1065,16 @@ export function ElectionProvider({
           )
         }
       }
-      if (!staleCast()) applyVoterState(vs)
 
       const stateOf = (question: Question) => vs.states[question.id]
-      if (election.questions.every((q) => stateOf(q) === 'confirmed')) {
+      const doneStates = election.questions.map((q) =>
+        doneState(
+          stateOf(q),
+          vs.checked.questions.find((c) => c.questionId === q.id)?.canVote,
+          shownIneligibleRef.current.has(q.id),
+        ),
+      )
+      if (isVoterDone(doneStates)) {
         if (!staleCast()) setHasVoted(true)
         throw new Error('Every question of this process has already been voted')
       }
@@ -1071,9 +1117,17 @@ export function ElectionProvider({
           encodedBallots[i]?.length === 0 &&
           vs.checked.questions.some((q) => q.questionId === question.id && q.canVote === true),
       )
-      if (turned.length > 0) {
+      // The reverse: shown eligible, now ineligible, and answered. Its answer
+      // would be dropped after the form listed it, so refuse it too. Not before
+      // a state was applied: a placeholder for a question not yet checked is fine.
+      const lost = election.questions.filter(
+        (question, i) =>
+          seenBefore && stateOf(question) === 'ineligible' && !shownBefore.has(question.id) && !!encodedBallots[i]?.length,
+      )
+      if (turned.length + lost.length > 0) {
         for (const { question } of turned) shownIneligibleRef.current.delete(question.id)
-        throw new EligibilityChangedError(turned.map(({ question }) => ({ questionId: question.id })))
+        const changed = [...turned.map(({ question }) => question), ...lost]
+        throw new EligibilityChangedError(changed.map((question) => ({ questionId: question.id })))
       }
 
       // Only the questions this call handles: a skipped one (not open) would
@@ -1210,6 +1264,7 @@ export function ElectionProvider({
     setVoterQuestions([])
     setPendingVotes({})
     shownIneligibleRef.current.clear()
+    stateScopeRef.current = ''
     session.clear()
   }, [session])
 

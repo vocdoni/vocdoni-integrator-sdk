@@ -161,6 +161,7 @@
       "canceled": "Voting was canceled",
       "ended": "Voting has ended",
       "identify": "Identify first to vote",
+      "ineligible": "You are not eligible to vote on any question.",
       "not_in_census": "You are not eligible to vote in this process",
       "not_open": "Voting is not open",
       "paused": "Voting is paused",

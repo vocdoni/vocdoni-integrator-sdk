@@ -332,5 +332,82 @@ describe('VoteButton', () => {
       renderWithComponents(<VoteButton />, slots)
       expect(screen.getByTestId('vote')).toHaveAttribute('title', 'Voting is not open')
     })
+
+    it('tells a voter in the census that they are not eligible for any question', () => {
+      // Both questions are outside the voter's eligibility subsets: the provider marks them ineligible.
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2' }] })
+      const voterQuestions = election.questions.map((q) => ({ questionId: q.id, canVote: false, hasVoted: false }))
+      const voteStatus = Object.fromEntries(election.questions.map((q) => [q.id, 'ineligible']))
+      setVoter({ election, isAbleToVote: false, voteStatus, voterQuestions })
+      renderWithComponents(<VoteButton />, slots)
+      const btn = screen.getByTestId('vote')
+      expect(btn).toBeDisabled()
+      expect(btn).toHaveAttribute('title', 'You are not eligible to vote on any question.')
+    })
+
+    it('gives no ineligible reason once the process has ended, even with no question marked', () => {
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2' }] })
+      const voterQuestions = election.questions.map((q) => ({ questionId: q.id, canVote: false, hasVoted: false }))
+      setVoter({ election, status: 'ENDED', isAbleToVote: false, voteStatus: {}, voterQuestions })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'Voting has ended')
+    })
+
+    it.each([
+      ['submitting', 'a stored tx waiting to be re-sent'],
+      ['failed', 'a re-send that failed'],
+    ] as const)('does not call the voter ineligible for any question while q-0 is %s (%s)', (status, _why) => {
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2' }] })
+      setVoter({
+        election,
+        isAbleToVote: false,
+        voteStatus: { [election.questions[0].id]: status, [election.questions[1].id]: 'ineligible' },
+        voterQuestions: [
+          { questionId: election.questions[0].id, canVote: false, hasVoted: false },
+          { questionId: election.questions[1].id, canVote: false, hasVoted: false },
+        ],
+      })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).not.toHaveAttribute('title')
+    })
+
+    it('keeps the voted reason over the ineligible one', () => {
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2' }] })
+      const voterQuestions = [
+        { questionId: election.questions[0].id, canVote: true, hasVoted: true },
+        { questionId: election.questions[1].id, canVote: false, hasVoted: false },
+      ]
+      setVoter({ election, hasVoted: true, isAbleToVote: false, voteStatus: { [election.questions[1].id]: 'ineligible' }, voterQuestions })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'You have already voted')
+    })
+
+    it('keeps the not-in-census reason over the ineligible one', () => {
+      const election = makeProcess({ questions: [{ title: 'Q1' }] })
+      setVoter({
+        election,
+        isInCensus: false,
+        isAbleToVote: false,
+        voteStatus: { [election.questions[0].id]: 'ineligible' },
+        voterQuestions: [{ questionId: election.questions[0].id, canVote: false, hasVoted: false }],
+      })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute('title', 'You are not eligible to vote in this process')
+    })
+
+    it('keeps the unconfirmed reason over the ineligible one', () => {
+      const election = makeProcess({ questions: [{ title: 'Q1' }, { title: 'Q2' }] })
+      setVoter({
+        election,
+        isAbleToVote: false,
+        voteStatus: { [election.questions[0].id]: 'unconfirmed', [election.questions[1].id]: 'ineligible' },
+        voterQuestions: election.questions.map((q) => ({ questionId: q.id, canVote: false, hasVoted: false })),
+      })
+      renderWithComponents(<VoteButton />, slots)
+      expect(screen.getByTestId('vote')).toHaveAttribute(
+        'title',
+        'Your vote was authorized but did not reach the ledger, and this device cannot send it again. Please contact the organizer.',
+      )
+    })
   })
 })
