@@ -28,6 +28,7 @@ export {
 export {
   ElectionProvider,
   electionQueryKeys,
+  NoEligibleQuestionError,
   NoOpenQuestionError,
   PartialVoteError,
   UnconfirmedVoteError,

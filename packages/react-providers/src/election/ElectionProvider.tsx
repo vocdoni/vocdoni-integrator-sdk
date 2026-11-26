@@ -26,9 +26,11 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  computeProcessStatus,
   explorerUrl as explorerBaseUrl,
   JobFailedError,
   normalizeVotingProcess,
+  resolveEndDate,
   VocdoniApiError,
   type VocdoniApiClient,
 } from '@vocdoni/api-client'
@@ -67,6 +69,8 @@ export const electionQueryKeys = {
  * - `signed`: the CSP authorized the vote of an anonymous census, and this tab
  *   cannot confirm it on chain (no stored nullifier).
  * Neither can be voted again.
+ * - `ineligible`: not in the question's eligibility subset (`canVote` false);
+ *   never signed, so it is skipped by `vote()`. Set on connect.
  */
 export type QuestionVoteStatus =
   | 'signing'
@@ -76,6 +80,7 @@ export type QuestionVoteStatus =
   | 'failed'
   | 'unconfirmed'
   | 'signed'
+  | 'ineligible'
 
 /** Hard cap of `POST /votes` — the backend rejects larger batches. */
 const MAX_VOTE_BATCH = 100
@@ -112,8 +117,9 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * Per-question voter state (`canVote`/`hasVoted`/`hasSigned`) from the CSP
    * check. `hasVoted` means on chain: an anonymous-census question confirmed
    * through `POST /votes/verify` reads `hasVoted: true` here even though the
-   * backend reports `false`. Empty until the voter is connected and the
-   * membership check resolves.
+   * backend reports `false`. While the process runs, a question with `canVote:
+   * false` is `ineligible` in {@link voteStatus} and never signed. Empty until
+   * the voter is connected and the membership check resolves.
    */
   voterQuestions: ProcessQuestionStatus[]
   /** true when every question of the process is on chain. */
@@ -142,13 +148,14 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * the backend accepts or rejects as a unit. Questions already on chain are
    * skipped. Questions in {@link pendingVotes} re-send their stored tx — their
    * entry in `encodedBallots` is ignored. Only questions whose status is
-   * `ONGOING` are signed or re-sent; the rest are left for a later call, and
-   * when none of the voter's remaining questions is open the call throws
-   * {@link NoOpenQuestionError} without signing. A question is confirmed only on
-   * on-chain evidence (the relay job, the check's `hasVoted`, or
-   * `POST /votes/verify` for an anonymous census). If some votes land and
-   * others fail, throws {@link PartialVoteError} naming both sets; if nothing
-   * is left to sign or re-send, throws {@link UnconfirmedVoteError}.
+   * `ONGOING` and that the voter is eligible for (`ineligible` otherwise) are
+   * signed or re-sent; the rest are skipped. When none of the voter's remaining
+   * questions is open the call throws {@link NoOpenQuestionError}, and when only
+   * ineligible ones remain {@link NoEligibleQuestionError}, both without signing.
+   * A question is confirmed only on on-chain evidence (the relay job, the
+   * check's `hasVoted`, or `POST /votes/verify` for an anonymous census). If some
+   * votes land and others fail, throws {@link PartialVoteError} naming both sets;
+   * if nothing is left to sign or re-send, throws {@link UnconfirmedVoteError}.
    */
   vote(encodedBallots: number[][], memos?: (string | undefined)[]): Promise<string>
   /**
@@ -161,8 +168,8 @@ export interface ElectionContextValue extends Omit<ElectionAuthContextValue, 'cl
    * Per-question progress of the current (or last) `vote()` call, keyed by
    * question id: `signing` → `submitting` → `confirming` → `confirmed` or
    * `failed`. Questions the call skipped because they were already voted
-   * appear as `confirmed`; `unconfirmed`/`signed` questions appear as such
-   * from connect on. A `failed` question whose error is `could not confirm
+   * appear as `confirmed`; `unconfirmed`/`signed`/`ineligible` questions appear
+   * as such from connect on. A `failed` question whose error is `could not confirm
    * the vote on chain yet` is unknown, not rejected. Cleared by
    * {@link clearVoter} and on disconnect.
    */
@@ -317,6 +324,18 @@ export class NoOpenQuestionError extends Error {
   }
 }
 
+/**
+ * Thrown by `vote()` when the rest of the voter's questions are not eligible
+ * for the voter (`ineligible`): nothing was signed or relayed. Retrying does
+ * not help; the voter is not in those questions' eligibility subset.
+ */
+export class NoEligibleQuestionError extends Error {
+  constructor(readonly questions: Array<{ questionId: string }>) {
+    super(`No question eligible for this voter: ${questions.map((q) => q.questionId).join(', ')}`)
+    this.name = 'NoEligibleQuestionError'
+  }
+}
+
 const COULD_NOT_VERIFY = 'Could not verify your voting status; try again'
 /** Error message of a question whose outcome is unknown (the verification failed). */
 const COULD_NOT_CONFIRM = 'could not confirm the vote on chain yet'
@@ -335,7 +354,7 @@ const sameHex = (a?: string, b?: string) => !!a && !!b && strip0x(a).toLowerCase
 type Question = VotingProcessResponse['questions'][number]
 
 /** A question's state from a fresh check (see {@link resolveVoterState}). */
-type QuestionState = 'confirmed' | 'pending' | 'unconfirmed' | 'signed' | 'open'
+type QuestionState = 'confirmed' | 'pending' | 'unconfirmed' | 'signed' | 'ineligible' | 'open'
 
 interface VoterState {
   checked: ProcessCheckResponse
@@ -363,6 +382,7 @@ interface RelayItem {
  * - an own entry with its tx → pending (re-send it);
  * - signed, nothing of ours stored → `unconfirmed` (plain census: the backend
  *   checked the chain) or `signed` (anonymous: it cannot);
+ * - not signed, `canVote` false while the process runs → ineligible (never signed);
  * - not signed → open.
  * An entry is the voter's own only when its owner is this session's, the CSP
  * signed the question, and (plain census) its nullifier is the one sign-info
@@ -379,6 +399,12 @@ async function resolveVoterState(
   const anonymous = !!election.census?.anonymous
   const byId = new Map(checked.questions.map((q) => [q.questionId, q]))
   let unverified = false
+  // The backend zeroes `canVote` on every question once the process is over, so
+  // a `canVote: false` only means "not eligible" while it runs.
+  const processStatus = computeProcessStatus(election.questions, { startDate: election.startDate })
+  const endDate = resolveEndDate(election)
+  const running = !['ENDED', 'RESULTS', 'CANCELED'].includes(processStatus) && (!endDate || endDate > new Date())
+  const someEligible = checked.questions.some((q) => q.canVote === true)
 
   // An anonymous census reports no nullifier by design (the CSP blind signs
   // and never learns the address), so sign-info is only worth a request for a
@@ -430,6 +456,9 @@ async function resolveVoterState(
       states[question.id] = 'pending'
     } else if (q?.hasSigned) {
       states[question.id] = anonymous ? 'signed' : 'unconfirmed'
+    } else if (checked.belongsToProcess && q?.canVote === false && (someEligible || running)) {
+      // Not in the eligibility subset: the CSP would refuse the whole batch.
+      states[question.id] = 'ineligible'
     } else {
       states[question.id] = 'open'
     }
@@ -455,6 +484,7 @@ const initialStatus: Record<QuestionState, QuestionVoteStatus> = {
   pending: 'submitting',
   unconfirmed: 'unconfirmed',
   signed: 'signed',
+  ineligible: 'ineligible',
   open: 'signing',
 }
 
@@ -528,7 +558,7 @@ export function ElectionProvider({
 
   const status = useProcessStatus(election)
   // The CSP authorises a batch as a unit and refuses it whole if any question
-  // in it is not open, so only open questions are ever signed or relayed.
+  // in it is not open or not eligible, so only those are ever signed or relayed.
   // `status` folds in the start date: live questions before it read UPCOMING.
   const isOpen = (question: Question) => status === 'ONGOING' && question.status === 'ONGOING'
   // Re-runs the stored-tx re-send when a question opens or closes mid-process.
@@ -580,8 +610,8 @@ export function ElectionProvider({
     setVoteStatus((prev) => {
       const next = { ...prev }
       for (const [id, st] of Object.entries(states)) {
-        if (st === 'unconfirmed' || st === 'signed') next[id] = st
-        else if (next[id] === 'unconfirmed' || next[id] === 'signed') delete next[id]
+        if (st === 'unconfirmed' || st === 'signed' || st === 'ineligible') next[id] = st
+        else if (next[id] === 'unconfirmed' || next[id] === 'signed' || next[id] === 'ineligible') delete next[id]
       }
       return next
     })
@@ -949,11 +979,6 @@ export function ElectionProvider({
         if (!question.upstreamId) {
           throw new Error(`Question ${i} has no upstreamId; process may not be published yet`)
         }
-        if (isOpen(question) && question.secretUntilTheEnd && !question.encryptionKeys?.length) {
-          throw new Error(
-            `Question ${i} ("${question.id}") is secret but its encryption keys are not published yet; retry once the keykeepers publish them`,
-          )
-        }
       }
 
       // A fresh voter state decides every question. Never sign or relay on a
@@ -965,6 +990,20 @@ export function ElectionProvider({
         throw new Error(COULD_NOT_VERIFY, { cause: err })
       }
       if (vs.unverified) throw new Error(COULD_NOT_VERIFY)
+      // Secret questions must never go out in cleartext, and only the ones this
+      // call signs need their keys: an ineligible or closed one cannot block.
+      for (const [i, question] of election.questions.entries()) {
+        if (
+          vs.states[question.id] === 'open' &&
+          isOpen(question) &&
+          question.secretUntilTheEnd &&
+          !question.encryptionKeys?.length
+        ) {
+          throw new Error(
+            `Question ${i} ("${question.id}") is secret but its encryption keys are not published yet; retry once the keykeepers publish them`,
+          )
+        }
+      }
       if (!staleCast()) applyVoterState(vs)
 
       const stateOf = (question: Question) => vs.states[question.id]
@@ -984,12 +1023,15 @@ export function ElectionProvider({
             waiting.map((q) => ({ questionId: q.id, status: q.status === 'ONGOING' ? 'UPCOMING' : q.status })),
           )
         }
-        throw new UnconfirmedVoteError(
-          election.questions.flatMap((q) => {
-            const st = stateOf(q)
-            return st === 'unconfirmed' || st === 'signed' ? [{ questionId: q.id, status: st }] : []
-          }),
-        )
+        const unconfirmed = election.questions.flatMap((q) => {
+          const st = stateOf(q)
+          return st === 'unconfirmed' || st === 'signed' ? [{ questionId: q.id, status: st }] : []
+        })
+        const ineligible = election.questions.filter((q) => stateOf(q) === 'ineligible')
+        if (unconfirmed.length === 0 && ineligible.length > 0) {
+          throw new NoEligibleQuestionError(ineligible.map((q) => ({ questionId: q.id })))
+        }
+        throw new UnconfirmedVoteError(unconfirmed)
       }
       // Fail before consuming any CSP signature: the batch endpoint hard-caps
       // at 100 envelopes and would reject the whole relay.
