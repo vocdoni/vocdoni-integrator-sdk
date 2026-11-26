@@ -1,0 +1,8 @@
+---
+'@vocdoni/react-providers': minor
+'@vocdoni/react-components': minor
+---
+
+`vote()` now skips the questions the voter is not eligible for (`canVote: false` in the CSP check, when the census is split into per-question eligibility subsets). They are never encoded, signed or relayed, so the CSP no longer refuses the whole sign batch over one ballot, and apps can pass `[]` for them instead of a placeholder answer. `voteStatus` gets `'ineligible'` for them, set on connect and not once the process has ended. `QuestionVoteStatus` gains that member, so an exhaustive `switch` over it needs a new case. A question the voter already voted or signed keeps its status. `vote()` throws the new `NoEligibleQuestionError` (`questions`) before signing anything when no question is left that the voter can vote.
+
+`<ElectionQuestions />` shows the `vote.disabled.question_ineligible` notice on such a question, renders no fields for it, requires no answer and leaves it out of the confirmation. `describeVoteError` maps `NoEligibleQuestionError` to the new `errors.vote_ineligible_question` and `errors.vote_ineligible_questions` keys.

@@ -166,7 +166,8 @@ const {
   // voting
   isInCensus,    // boolean — true if voter belongs to this process's census
   voterQuestions,// ProcessQuestionStatus[] — per-question canVote/hasVoted/hasSigned (empty until connected);
-                 //   hasVoted = on chain (an anonymous question verified via /votes/verify reads true)
+                 //   hasVoted = on chain (an anonymous question verified via /votes/verify reads true);
+                 //   canVote false = not eligible for that question (its voteStatus reads 'ineligible')
   hasVoted,      // boolean — true once EVERY question is on chain
   pendingVotes,  // Record<questionId, true> — signed txs stored in this tab, not on chain yet;
                  //   re-sent on connect and by the next vote() while the question is open (process
@@ -177,13 +178,19 @@ const {
   vote,          // (encodedBallots: number[][]) => Promise<string> — per-question ballots
                  //   (a pending question's ballot is ignored: its stored tx is re-sent). Only open
                  //   (ONGOING) questions are signed and relayed; the ballots of paused/upcoming/ended
-                 //   ones are ignored and can be voted by a later call once they open. Throws
-                 //   NoOpenQuestionError (`questions: {questionId, status}[]`) when unvoted questions
-                 //   remain but none is open (e.g. between questions of a question-by-question vote)
+                 //   ones are ignored and can be voted by a later call once they open. Questions the
+                 //   voter is not eligible for (canVote false) are skipped too: never encoded, signed
+                 //   or relayed, so their ballot can be []. Throws NoOpenQuestionError
+                 //   (`questions: {questionId, status}[]`) when unvoted questions remain but none is
+                 //   open (e.g. between questions of a question-by-question vote), and
+                 //   NoEligibleQuestionError (`questions: {questionId}[]`) before signing anything when
+                 //   no question is left that the voter can vote (all ineligible, or the eligible ones
+                 //   all voted)
   voting,        // boolean — true while vote() or the re-send on connect is in flight
   voteStatus,    // Record<questionId, 'signing'|'submitting'|'confirming'|'confirmed'|'failed'
-                 //   |'unconfirmed'|'signed'> — per-question progress of the current/last vote()
-                 //   (already-voted → 'confirmed'); 'unconfirmed'/'signed' also set on connect
+                 //   |'unconfirmed'|'signed'|'ineligible'> — per-question progress of the current/last
+                 //   vote() (already-voted → 'confirmed'); 'unconfirmed'/'signed'/'ineligible' also set
+                 //   on connect ('ineligible' only while the process has not ended)
   voteIds,       // Record<questionId, string> — EVERY vote id (nullifier) the voter holds
   voteId,        // string | null — DEPRECATED: only ever one of them; read voteIds
   clearVoter,    // () => void — clears the auth session and vote state
@@ -274,11 +281,11 @@ await auth1('123456')
 Casting is **phased** so a failure can never half-vote silently:
 
 1. **Pre-flight** — every question is validated up front (`upstreamId` present; open (`ONGOING`) `secretUntilTheEnd` questions have published `encryptionKeys` — never casts cleartext; at most 100 questions, the batch relay cap). Any problem throws before anything is consumed.
-2. **Resume check** — a fresh `elections.check()` (plus `verifyVotes` for an anonymous census) decides each question: on chain → skipped; pending → its stored tx is reused (only while the question is open; otherwise it waits); `unconfirmed`/`signed` → left alone; otherwise signed below. If that check fails, `vote()` throws `Could not verify your voting status; try again` without signing or relaying anything.
-3. **Sign + build** — every open question gets an ephemeral signer, then all of them are signed in ONE call (`session.signBatch` → `POST /processes/{id}/sign-batch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure. Each built tx is stored (see above) before the relay.
+2. **Resume check** — a fresh `elections.check()` (plus `verifyVotes` for an anonymous census) decides each question: on chain → skipped; pending → its stored tx is reused (only while the question is open; otherwise it waits); `unconfirmed`/`signed` → left alone; `canVote: false` → `ineligible`, skipped; otherwise signed below. If no question is left that the voter can vote, `vote()` throws `NoEligibleQuestionError` here, before anything is signed. If that check fails, `vote()` throws `Could not verify your voting status; try again` without signing or relaying anything.
+3. **Sign + build** — every open question the voter is eligible for gets an ephemeral signer (an ineligible one is never signed: the CSP refuses the whole batch over a ballot it cannot authorize), then all of them are signed in ONE call (`session.signBatch` → `POST /processes/{id}/sign-batch`) and each tx is built locally. A CSP signature is **one-shot**, so a question the CSP refuses is collected into `failed` and the questions that *did* sign are still built and relayed — discarding them would strand those questions forever, since a retry uses a fresh address and gets `already_consumed`. If nothing signs at all, the call throws the first signing error and relays nothing (fully retryable). On an anonymous census that one call runs the blind CSP flow instead and the txs carry `ProofCA_Type.ECDSA_BLIND_PIDSALTED` — automatic, nothing to configure. Each built tx is stored (see above) before the relay.
 4. **Batch relay + await** — every tx is relayed in ONE `POST /votes` call (saas-backend#610) that the backend accepts or rejects **as a unit**: a rejection (bad payload, queue full…) relays nothing and throws a plain, fully-retryable error — never a partial vote. On accept, one job covers the batch; its per-envelope outcomes settle one by one and are mirrored into `voteStatus` while pending. A job-reported failure, a missing outcome, a lost relay response or a job wait that times out is verified on chain before it is reported (a lost response or a timeout is polled for up to `voteOptions.reconcile`, default 48 × 2.5 s); a verification that itself fails reports the question `failed` with the error `could not confirm the vote on chain yet` — unknown, not rejected. If some votes land and some fail, `vote()` throws `PartialVoteError` (exported from `@vocdoni/react-providers`) with `succeeded: {questionId, voteId}[]` and `failed: {questionId, error}[]`; `hasVoted` turns true only when every question is on chain. Catch it and offer a retry — the next `vote()` call re-sends the stored txs.
 
-Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx built, batch not yet sent) → `confirming` (enqueued, awaiting the chain) → `confirmed` | `failed`. `unconfirmed` and `signed` are terminal for this tab. A question `vote()` skips because it is not open gets no entry.
+Drive a per-question spinner off `voteStatus`: `signing` → `submitting` (tx built, batch not yet sent) → `confirming` (enqueued, awaiting the chain) → `confirmed` | `failed`. `unconfirmed` and `signed` are terminal for this tab. A question `vote()` skips because it is not open gets no entry. An ineligible question reads `ineligible` from connect, and a question the voter already voted or signed keeps `confirmed`, `unconfirmed` or `signed` whatever its `canVote` says.
 
 Use `@vocdoni/ballot` to encode ballots before calling `vote()`:
 
@@ -500,7 +507,7 @@ reads `errors.vote_unconfirmed`, and a `NoOpenQuestionError` reads by the questi
 lists (`questions: {questionId, status}[]`): `errors.vote_no_open_question` for one question
 not open yet, `errors.vote_no_open_questions` for several, and `errors.vote_closed_question` /
 `errors.vote_closed_questions` when every listed one has ended or been canceled, since those never
-open again. `<ElectionQuestions />` replaces the fields of a
+open again. A `NoEligibleQuestionError` reads `errors.vote_ineligible_question` for one question and `errors.vote_ineligible_questions` for several. `<ElectionQuestions />` replaces the fields of a
 question already voted (`voteStatus` `confirmed`, or `voterQuestions` `hasVoted` for a vote cast in an earlier session) with `vote.disabled.question_voted`,
 — while the process is `ONGOING`, or `PROCESS_UNKNOWN` between two questions (one `ENDED`, the next `PAUSED`) — of a question that is not open itself (question by
 question: paused, upcoming, ended; even one in `pendingVotes`, whose stored tx waits
@@ -515,7 +522,10 @@ confirm, and submitting re-sends straight away. Each `answersView` item carries 
 (its position in `election.questions`) and `questionId`, so a custom slot pairs it with its
 question even across a gap. `lockedQuestionNotice(id, pendingVotes, voteStatus,
 { questionStatus, processStatus, voted }?)` returns that key: a raw `READY` question status
-counts as `ONGOING`, and an absent one does not lock by status.
+counts as `ONGOING`, and an absent one does not lock by status. An ineligible question
+(`canVote` false) shows `vote.disabled.question_ineligible` in place of its fields, needs no
+answer, and is left out of the confirmation; `lockedQuestionNotice` checks voted, then
+ineligible, then not open.
 
 Consequently `useQuestionsForm().vote(values)` resolves `false` on a failed cast rather
 than rejecting — same as when the voter cancels the confirmation, and the same contract
