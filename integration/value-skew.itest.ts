@@ -25,6 +25,7 @@
  *   by position → [["1","1","1"]]       column 0 holds C1's vote
  */
 import { describe, expect, it } from 'vitest'
+import { JobFailedError } from '@vocdoni/api-client'
 import { EphemeralSigner, VotingClient } from '@vocdoni/api-voting'
 import { decodeQuestionResults, encodeQuestionBallot } from '@vocdoni/ballot'
 import { API_URL, apiKey, makeAdminClient, makeClient } from './helpers'
@@ -176,8 +177,8 @@ suite('issue #28: sparse single-choice values (live)', () => {
    * `ballotProtocol` whose `maxValue` is 2 — self-contradictory, since C3 then
    * exceeds the highest legal field value. `encodeQuestionBallot` already refuses
    * such a ballot (`assertEncodedBallot`), and the guard extends that to refusing
-   * the whole question up front. That is only the right call if the chain really
-   * does swallow the vote silently, so prove it rather than assume it.
+   * the whole question up front, so prove what the chain does with the vote
+   * rather than assume it.
    *
    * Both of our own guards have to be stepped around for the proof to mean
    * anything, and each is bypassed at a different layer:
@@ -190,17 +191,18 @@ suite('issue #28: sparse single-choice values (live)', () => {
    * - **the vote** is hand-rolled onto the wire, not built by `encodeQuestionBallot`,
    *   which `assertEncodedBallot` would already stop.
    *
-   * Expected: the envelope is accepted and `voteCount` counts it, but the
-   * scrutinizer drops the ballot at aggregation — so the tally is short while
-   * nothing anywhere reports an error. That gap is the whole reason to refuse
-   * before the voter ever casts.
+   * Expected, on this plaintext election: the chain rejects the out-of-range
+   * ballot at submission (`invalid vote: max value overflow`), so the relay job
+   * fails and only the in-range vote is counted. An encrypted ballot cannot be
+   * checked at submission and is still dropped silently at tally, which is why
+   * the guard refuses before the voter ever casts.
    *
    * If the API starts rejecting the body, this test FAILS rather than skipping.
    * That result would be good news — the backend closing the gap — but it changes
    * what the guard is for, so it has to be noticed, not swallowed.
    */
   it(
-    'silently drops a ballot whose value exceeds maxValue (voteCount still counts it)',
+    'rejects a plaintext ballot whose value exceeds maxValue at submission',
     async () => {
       const admin = makeAdminClient()
       const voterClient = makeClient()
@@ -282,7 +284,7 @@ suite('issue #28: sparse single-choice values (live)', () => {
       // Member 1 casts an in-range value (1) — must count.
       // Member 2 casts the unreachable value (3) — bypassing encodeQuestionBallot,
       // which is precisely what the guard exists to prevent.
-      const cast = async (memberNumber: string, wireValue: number) => {
+      const cast = async (memberNumber: string, wireValue: number): Promise<string> => {
         const auth = await voterClient.elections.authStep0(draftId, { memberNumber })
         const check = await voterClient.elections.check(draftId, { authToken: auth.authToken! })
         const status = check.questions[0]
@@ -300,19 +302,24 @@ suite('issue #28: sparse single-choice values (live)', () => {
           cspSignature: sign.signature!,
           cspWeight: sign.weight,
         })
-        const job = await voterClient.jobs.waitFor(jobId, { timeoutMs: 90000, intervalMs: 2000 })
-        step(`member ${memberNumber} → wire [${wireValue}] relay=${job.status}`)
-        return job.status
+        try {
+          const job = await voterClient.jobs.waitFor(jobId, { timeoutMs: 90000, intervalMs: 2000 })
+          step(`member ${memberNumber} → wire [${wireValue}] relay=${job.status}`)
+          return job.status
+        } catch (err) {
+          if (!(err instanceof JobFailedError)) throw err
+          step(`member ${memberNumber} → wire [${wireValue}] relay failed: ${err.message}`)
+          return err.message
+        }
       }
 
-      // The relay accepting the out-of-range ballot is itself part of the finding:
-      // nothing on the cast path objects.
       expect(await cast('1', 1)).toBe('completed')
-      expect(await cast('2', 3)).toBe('completed')
+      // The chain runs the full ballot rules on plaintext votes at submission.
+      expect(await cast('2', 3)).toMatch(/invalid vote: max value overflow/)
 
       let results = await voterClient.elections.getResults(draftId)
       const deadline = Date.now() + 120000
-      while ((results.questions[0]?.voteCount ?? 0) < 2 && Date.now() < deadline) {
+      while ((results.questions[0]?.voteCount ?? 0) < 1 && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 3000))
         results = await voterClient.elections.getResults(draftId)
       }
@@ -320,24 +327,15 @@ suite('issue #28: sparse single-choice values (live)', () => {
       step(`voteCount = ${q.voteCount}`)
       step(`raw matrix = ${JSON.stringify(q.results)}`)
 
-      // Both envelopes counted…
-      expect(q.voteCount, 'the chain did not accept both envelopes').toBe(2)
-
-      // …but only the in-range one is in the tally. This is the silent loss.
+      // Only the in-range envelope reached the chain, and it is the only one tallied.
+      expect(q.voteCount, 'the rejected envelope was counted').toBe(1)
       const decoded = decodeQuestionResults(question, q.results!)
       step(`decoded = ${decoded.map((c) => `${c.choice}=${c.votes}`).join('  ')}`)
-      const counted = decoded.reduce((sum, c) => sum + c.votes, 0)
-      step(`counted ${counted} of ${q.voteCount} envelopes`)
-
       expect(decoded.map((c) => [c.choice, c.votes])).toEqual([
-        [1, 1], // in range → counted
+        [1, 1],
         [2, 0],
-        [3, 0], // above maxValue → dropped at tally, with no error anywhere
+        [3, 0],
       ])
-      expect(
-        counted,
-        'the out-of-range ballot was counted after all — refusing it at encode time would be wrong',
-      ).toBeLessThan(q.voteCount!)
     },
     900000,
   )
