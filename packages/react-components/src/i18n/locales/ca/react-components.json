@@ -1,0 +1,59 @@
+{
+  "csp": {
+    "identify": "Identificar-se",
+    "logout": "Tancar sessió",
+    "modal_title": "Autenticació",
+    "close": "Tancar",
+    "authenticate": "Autenticar",
+    "receive_code": "Rebre codi",
+    "code_info": "Rebràs un codi únic al medi seleccionat per verificar la teva identitat i completar l'autenticació",
+    "code_sent": "Codi de verificació enviat",
+    "contact_match_help": "Ha de coincidir amb el registrat al sistema",
+    "auth_failed": "Autenticació fallida",
+    "password_unavailable": "La contrasenya no es pot comprovar ara mateix. Recarrega la pàgina i torna-ho a provar.",
+    "fields": {
+      "memberNumber": "Número de membre",
+      "name": "Nom",
+      "surname": "Cognom",
+      "nationalId": "DNI",
+      "birthDate": "Data de naixement",
+      "password": "Contrasenya",
+      "email": "Correu electrònic",
+      "phone": "Telèfon",
+      "email_or_phone": "Correu o telèfon",
+      "contact": "Contacte"
+    },
+    "errors": {
+      "participant_not_found": "El votant no és al cens o les credencials proporcionades són incorrectes.",
+      "credentials_or_password_incorrect": "No hem pogut verificar la teva identitat. Comprova les teves credencials i contrasenya i torna-ho a provar.",
+      "too_many_attempts": "Massa intents. Torna-ho a provar més tard.",
+      "too_many_attempts_minutes_one": "Massa intents. Torna-ho a provar en {{count}} minut.",
+      "too_many_attempts_minutes_other": "Massa intents. Torna-ho a provar en {{count}} minuts.",
+      "too_many_attempts_hours_one": "Massa intents. Torna-ho a provar en {{count}} hora.",
+      "too_many_attempts_hours_other": "Massa intents. Torna-ho a provar en {{count}} hores.",
+      "requests_on_cooldown": "Massa sol·licituds. Espera abans de tornar a intentar-ho.",
+      "zero_voting_weight": "No tens prou poder de vot per accedir a la votació.",
+      "resend_limit": "Límit de reenviaments assolit. El codi que has rebut encara és vàlid — introdueix-lo per continuar.",
+      "code_rejected": "Codi incorrecte o caducat. Torna-ho a provar o torna a començar per reenviar-lo.",
+      "resend_expired": "Aquest codi ha caducat. Torna a començar per sol·licitar-ne un de nou.",
+      "missing_data": "Omple tots els camps.",
+      "identify_unavailable": "No hem pogut verificar-te ara mateix. Torna-ho a provar."
+    },
+    "step1": {
+      "subtitle": "Introdueix el codi de verificació",
+      "helper": "Hem enviat un codi al teu número de telèfon o correu electrònic. Si l'has rebut per correu, comprova la carpeta de correu brossa.",
+      "resend": "Reenviar codi",
+      "resend_success": "Codi reenviat correctament",
+      "resend_failed": "Error en reenviar el codi",
+      "resend_failed_detail": "Error en reenviar el codi: {{- detail }}",
+      "resend_cooldown": "Pots tornar a sol·licitar-lo en {{count}}s",
+      "start_over": "Tornar a començar",
+      "footer": "Si tens algun problema, contacta amb la teva organització.",
+      "validation": {
+        "required": "El codi és obligatori",
+        "length": "El codi ha de tenir 6 xifres"
+      }
+    },
+    "terms_required": "Has d'acceptar els termes per continuar."
+  }
+}

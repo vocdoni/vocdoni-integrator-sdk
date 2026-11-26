@@ -1,6 +1,6 @@
 import { VocdoniApiError } from '@vocdoni/api-client'
 import { describe, expect, it } from 'vitest'
-import { translateCspAuthError, type CspAuthErrorStep, type CspAuthTranslate } from './errors'
+import { CspCooldownError, translateCspAuthError, type CspAuthErrorStep, type CspAuthTranslate } from './errors'
 
 // Echoes the key and its count, so each assertion names the message branch it reached.
 const t: CspAuthTranslate = (key, substitutions) =>
@@ -9,6 +9,7 @@ const t: CspAuthTranslate = (key, substitutions) =>
 const apiError = (code: number, body: unknown = { code }) => new VocdoniApiError(400, body, 'api failed', code)
 
 const retryBody = (retryAfter: number) => ({ code: 40017, data: { retryAfter } })
+const coolDownBody = (coolDownTime: number) => ({ code: 40103, data: { coolDownTime } })
 
 const options = (hasPassword = false, step: CspAuthErrorStep = 'identify') => ({ step, hasPassword })
 
@@ -21,8 +22,26 @@ describe('translateCspAuthError', () => {
     expect(translateCspAuthError(apiError(code), t, options(true)).message).toBe('csp.errors.credentials_or_password_incorrect')
   })
 
-  it('maps 40103 to the cooldown message', () => {
-    expect(translateCspAuthError(apiError(40103), t, options()).message).toBe('csp.errors.requests_on_cooldown')
+  it('maps 40103 to a CspCooldownError with the cooldown message', () => {
+    const result = translateCspAuthError(apiError(40103), t, options())
+    expect(result).toBeInstanceOf(CspCooldownError)
+    expect(result.message).toBe('csp.errors.requests_on_cooldown')
+  })
+
+  it('reads coolDownTime (ms) from the 40103 body into the CspCooldownError', () => {
+    const result = translateCspAuthError(apiError(40103, coolDownBody(45000)), t, options())
+    expect(result).toBeInstanceOf(CspCooldownError)
+    expect((result as CspCooldownError).coolDownMs).toBe(45000)
+  })
+
+  it('defaults coolDownMs to 0 when the 40103 body has no coolDownTime', () => {
+    const result = translateCspAuthError(apiError(40103), t, options())
+    expect((result as CspCooldownError).coolDownMs).toBe(0)
+  })
+
+  it('defaults coolDownMs to 0 when coolDownTime is not positive', () => {
+    const result = translateCspAuthError(apiError(40103, { code: 40103, data: { coolDownTime: 0 } }), t, options())
+    expect((result as CspCooldownError).coolDownMs).toBe(0)
   })
 
   it('maps 40801 to the zero voting weight message', () => {
@@ -77,9 +96,10 @@ describe('translateCspAuthError', () => {
     expect(translateCspAuthError(apiError(40001), t, options(false, 'resend')).message).toBe('csp.errors.resend_expired')
   })
 
-  it('keeps 40001 unmapped on the identify step', () => {
-    const error = apiError(40001)
-    expect(translateCspAuthError(error, t, options(false, 'identify'))).toBe(error)
+  it('maps 40001 on the identify step to the unavailable message', () => {
+    expect(translateCspAuthError(apiError(40001), t, options(false, 'identify')).message).toBe(
+      'csp.errors.identify_unavailable',
+    )
   })
 
   it('maps 40005 on the identify step to the missing-data message', () => {

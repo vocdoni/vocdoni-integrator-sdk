@@ -271,7 +271,7 @@ describe('useElectionAuth', () => {
       const { result, rerender } = renderHook(useHooks, { wrapper: processWrapper })
       await waitFor(() => expect(result.current.election.election).not.toBeNull())
 
-      let identify!: Promise<void>
+      let identify!: Promise<{ coolDownTime?: number }>
       act(() => {
         identify = result.current.auth.auth0({ email: 'voter@example.com' })
       })

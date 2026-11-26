@@ -1035,6 +1035,13 @@ export interface AuthResponse {
    * tab's pending votes to it.
    */
   voterRef?: string
+  /**
+   * Server-provided resend cooldown in milliseconds; present on step-0 and
+   * resend success responses when a code is pending. `0` means the voter may
+   * resend immediately; absent when no code is pending (auth-only census or
+   * the code has already been confirmed).
+   */
+  coolDownTime?: number
 }
 
 export interface AuthResendRequest {

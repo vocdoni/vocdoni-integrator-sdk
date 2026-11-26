@@ -3,7 +3,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { type Context, type ReactNode } from 'react'
 import { I18nextProvider } from 'react-i18next'
-import { describe, expect, it, vi, type Mock } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+// Fake only setInterval/clearInterval/Date so waitFor (uses setTimeout) keeps real timing.
+// Tests that need a server-driven countdown use a local beforeEach/afterEach instead.
 import { createTestI18n } from '../../../i18n/test-i18n'
 import { renderWithComponents } from '../../../test-utils'
 import { ComponentsProvider } from '../../context/ComponentsProvider'
@@ -95,6 +97,7 @@ const fieldNames = () =>
 const openIdentify = () => fireEvent.click(screen.getByRole('button', { name: 'Identify' }))
 
 describe('CspAuth', () => {
+
   it('renders nothing until the election loads', () => {
     const { container } = renderCsp(<CspAuth />, makeScope({ election: null }))
     expect(container).toBeEmptyDOMElement()
@@ -229,24 +232,53 @@ describe('CspAuth', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
 
     await waitFor(() => expect(scope.resend).toHaveBeenCalledWith({ email: 'jane@example.com' }))
-    expect(await screen.findByText('Code resent successfully')).toBeInTheDocument()
+    // After a successful resend the status shows the success notice.
+    expect(await screen.findByRole('status')).toHaveTextContent('Code resent successfully')
   })
 
-  it('reports a failed resend inline', async () => {
-    const scope = makeScope({ election: twoFa() })
-    scope.resend.mockRejectedValueOnce(new VocdoniApiError(429, { code: 40103 }, 'cooldown', 40103))
-    renderCsp(<CspAuth />, scope)
-    openIdentify()
-    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
-    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
-    await screen.findByLabelText('Enter the verification code')
+  describe('server-driven cooldown (fake timers)', () => {
+    beforeEach(() => vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] }))
+    afterEach(() => vi.useRealTimers())
 
-    fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
+    it('shows a countdown notice and disables the resend button on a 40103 cooldown', async () => {
+      const coolDownMs = 30000
+      const scope = makeScope({ election: twoFa() })
+      scope.resend.mockRejectedValueOnce(
+        new VocdoniApiError(429, { code: 40103, data: { coolDownTime: coolDownMs } }, 'cooldown', 40103),
+      )
+      renderCsp(<CspAuth />, scope)
+      openIdentify()
+      fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+      fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+      await screen.findByLabelText('Enter the verification code')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Failed to resend code: Too many requests. Please wait a moment before trying again.',
-    )
+      fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
+
+      // The countdown notice appears with the server-provided time (30 s), not an error alert.
+      expect(await screen.findByRole('status')).toHaveTextContent('You can request it again in 30s')
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Resend code' })).toBeDisabled()
+    })
+
+    it('starts the resend countdown proactively from the coolDownTime in the step-0 response', async () => {
+      const scope = makeScope({ election: twoFa() })
+      // Backend returns coolDownTime on step-0 success; resend button is disabled immediately.
+      scope.auth0.mockResolvedValueOnce({ coolDownTime: 45000 })
+      renderCsp(<CspAuth />, scope)
+      openIdentify()
+      fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+      fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+      await screen.findByLabelText('Enter the verification code')
+
+      // The resend button is disabled for the server's cooldown duration.
+      expect(screen.getByRole('button', { name: 'Resend code' })).toBeDisabled()
+
+      // After the cooldown expires the button re-enables.
+      act(() => vi.advanceTimersByTime(46000))
+      expect(screen.getByRole('button', { name: 'Resend code' })).not.toBeDisabled()
+    })
   })
 
   it('shows the translated resend detail with its apostrophes, under an escaping i18next', async () => {
@@ -288,13 +320,27 @@ describe('CspAuth', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
     const code = await screen.findByLabelText('Enter the verification code')
     fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
-    expect(await screen.findByText('Code resent successfully')).toBeInTheDocument()
+    // After a successful resend the notice shows "Code resent successfully".
+    expect(await screen.findByRole('status')).toHaveTextContent('Code resent successfully')
 
     scope.auth1.mockRejectedValueOnce(new VocdoniApiError(400, { code: 40001 }, 'bad code', 40001))
     fireEvent.change(code, { target: { value: '123456' } })
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('The code is not valid or has expired.')
-    expect(screen.queryByText('Code resent successfully')).not.toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Incorrect or expired code.')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('enables the resend button immediately after step 0', async () => {
+    const scope = makeScope({ election: twoFa() })
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+    await screen.findByLabelText('Enter the verification code')
+
+    // No local cooldown: the resend button is immediately available.
+    expect(screen.getByRole('button', { name: 'Resend code' })).not.toBeDisabled()
   })
 
   it('start over returns to the identify step', async () => {
@@ -322,6 +368,21 @@ describe('CspAuth', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'The voter is not listed in the census, or the provided credentials are incorrect.',
+    )
+  })
+
+  it('maps a 40001 on the identify step to a generic unavailable message', async () => {
+    // Backend sends 40001 on storage or notification failures at step 0.
+    const scope = makeScope({ election: twoFa() })
+    scope.auth0.mockRejectedValueOnce(new VocdoniApiError(500, { code: 40001 }, 'store failed', 40001))
+    renderCsp(<CspAuth />, scope)
+    openIdentify()
+    fireEvent.change(screen.getByLabelText('Member Number'), { target: { value: '42' } })
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '+34600000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Receive Code' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "We couldn't verify you right now. Please try again.",
     )
   })
 
@@ -819,7 +880,7 @@ describe('CspAuth', () => {
     await waitFor(() => expect(scope.auth1).toHaveBeenCalledWith('123456'))
   })
 
-  it('tells the voter to start over when a resend hits the per-token resend cap', async () => {
+  it('tells the voter the code is still valid when the resend cap is reached', async () => {
     const scope = makeScope({ election: twoFa() })
     scope.resend.mockRejectedValueOnce(new VocdoniApiError(429, { code: 40017 }, 'limited', 40017))
     renderCsp(<CspAuth />, scope)
@@ -832,7 +893,7 @@ describe('CspAuth', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Resend code' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "Failed to resend code: You can't request more codes for this attempt. Start over to get a new one.",
+      'Failed to resend code: Resend limit reached. The code you received is still valid — enter it to continue.',
     )
   })
 
@@ -849,7 +910,7 @@ describe('CspAuth', () => {
     fireEvent.change(code, { target: { value: '123456' } })
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'The code is not valid or has expired. Check it, or start over to get a new one.',
+      'Incorrect or expired code. Try again, or start over to resend it.',
     )
   })
 

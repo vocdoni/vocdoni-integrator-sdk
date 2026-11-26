@@ -71,12 +71,18 @@ export interface ElectionAuthContextValue {
    * single object, e.g. `{ memberNumber }` or `{ name, surname, birthDate }`. For
    * auth-only censuses this already marks the voter connected; otherwise a 2FA
    * challenge is sent and must be confirmed with {@link auth1}.
+   *
+   * Returns `coolDownTime` (ms) from the server when a resend cooldown is in effect;
+   * the caller should disable the resend button for that duration.
    */
-  auth0(participant: AuthRequest): Promise<void>
+  auth0(participant: AuthRequest): Promise<{ coolDownTime?: number }>
   /** Step 1 — confirm the 2FA challenge (OTP); marks the voter connected. */
   auth1(solution: string | string[]): Promise<void>
-  /** Resend the challenge for the pending token. */
-  resend(contact: { email?: string; phone?: string }): Promise<void>
+  /**
+   * Resend the challenge for the pending token. Returns `coolDownTime` (ms) from
+   * the server; the caller should disable the resend button for that duration.
+   */
+  resend(contact: { email?: string; phone?: string }): Promise<{ coolDownTime?: number }>
   /**
    * The voter's status for the process: census membership, weight and
    * per-question `canVote`/`hasVoted` state.
@@ -172,7 +178,7 @@ export function useVoterSession(
       const res = await client.elections.authStep0(id, participant)
       if (!res.authToken) throw new Error('Process auth step 0 did not return a token')
       const owner = res.voterRef ?? (await ownerHash(participant))
-      if (currentId.current !== id) return
+      if (currentId.current !== id) return {}
       // A new identification replaces the session: drop the previous voter's
       // token first, so no render (and no ElectionProvider check or re-send)
       // sees the new owner paired with the old voter's token. The session stays
@@ -186,6 +192,7 @@ export function useVoterSession(
       } else {
         setPendingToken(res.authToken)
       }
+      return { coolDownTime: res.coolDownTime }
     },
     [client, id, process, isAuthOnly],
   )
@@ -210,7 +217,8 @@ export function useVoterSession(
       if (!id) throw new Error('Election is not loaded yet — cannot authenticate')
       const token = pendingToken ?? authToken
       if (!token) throw new Error('No pending auth token to resend')
-      await client.elections.resend(id, { authToken: token, ...contact })
+      const res = await client.elections.resend(id, { authToken: token, ...contact })
+      return { coolDownTime: res.coolDownTime }
     },
     [client, id, pendingToken, authToken],
   )

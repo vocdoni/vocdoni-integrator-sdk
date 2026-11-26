@@ -161,6 +161,8 @@ export type CspAuthCodeFormSlotProps = BaseProps<HTMLFormElement> & {
   resendLabel: string
   onResend: () => void
   resending: boolean
+  /** Disables only the resend button during a cooldown period (independent of `actionsDisabled`). */
+  resendDisabled?: boolean
   startOverLabel: string
   onStartOver: () => void
   /** Disables resend and start over while any auth request is in flight. */

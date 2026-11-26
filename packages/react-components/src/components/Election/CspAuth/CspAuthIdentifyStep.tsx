@@ -18,8 +18,17 @@ const text = (value: IdentifyValues[string]) => (typeof value === 'string' ? val
 export const CspAuthIdentifyStep = ({ terms, requireTerms }: { terms?: ReactNode; requireTerms?: boolean }) => {
   const t = useReactComponentsLocalize()
   const { election } = useElection()
-  const { setCurrentStep, setContact, setPendingNotice, error, setError, getFlowGeneration, authFields, twoFaFields } =
-    useCspAuthSession()
+  const {
+    setCurrentStep,
+    setContact,
+    setPendingNotice,
+    error,
+    setError,
+    getFlowGeneration,
+    authFields,
+    twoFaFields,
+    setResendAvailableAt,
+  } = useCspAuthSession()
   const { CspAuthIdentifyForm: Slot } = useComponents()
   const {
     register,
@@ -71,11 +80,14 @@ export const CspAuthIdentifyStep = ({ terms, requireTerms }: { terms?: ReactNode
 
     try {
       const request = await buildRequest(values)
-      await auth.mutateAsync(request)
+      const result = await auth.mutateAsync(request)
       if (flow !== getFlowGeneration()) return
       setContact({ email: request.email, phone: request.phone })
       // Without 2FA the provider is already connected, so there is no next step.
       if (is2Factor) {
+        // Server returns coolDownTime (ms) when a resend cooldown is in effect; start the countdown now
+        // so the resend button is proactively disabled when the voter first sees the code step.
+        if (result.coolDownTime) setResendAvailableAt(Date.now() + result.coolDownTime)
         setPendingNotice('csp.code_sent')
         setCurrentStep(1)
       }
