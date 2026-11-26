@@ -2,8 +2,12 @@ import type { BallotProtocol, Choice, QuestionTypeSetup, VoteType } from '@vocdo
 import { BallotType } from './types'
 import { isPickSlotLayout, namesRanked, tryInferQuestionBallotType } from './infer'
 
-/** The part of a ballot protocol the satisfiability rule reads. */
-export type ProtocolBounds = Pick<BallotProtocol, 'maxCount' | 'maxValue' | 'uniqueValues'>
+/**
+ * The part of a ballot protocol a ballot is judged against: the satisfiability rule
+ * reads the required half, {@link assertBallotMinimums} the optional one.
+ */
+export type ProtocolBounds = Pick<BallotProtocol, 'maxCount' | 'maxValue' | 'uniqueValues'> &
+  Partial<Pick<BallotProtocol, 'minValue' | 'minTotalCost' | 'costExponent'>>
 
 /**
  * Explain why a ballot protocol admits no usable ballot, or `null` when it is fine.
@@ -97,9 +101,101 @@ export function isUnsatisfiableProtocol(bp: ProtocolBounds): boolean {
   return unsatisfiableProtocolReason(bp) !== null
 }
 
-/** Read the satisfiability bounds off an election-level {@link VoteType}. */
-export function voteTypeBounds(voteType: Pick<VoteType, 'maxCount' | 'maxValue' | 'uniqueChoices'>): ProtocolBounds {
-  return { maxCount: voteType.maxCount, maxValue: voteType.maxValue, uniqueValues: voteType.uniqueChoices }
+/** Read the protocol bounds off an election-level {@link VoteType}. */
+export function voteTypeBounds(
+  voteType: Pick<VoteType, 'maxCount' | 'maxValue' | 'uniqueChoices'> &
+    Partial<Pick<VoteType, 'minValue' | 'minTotalCost' | 'costExponent'>>
+): ProtocolBounds {
+  const bounds: ProtocolBounds = {
+    maxCount: voteType.maxCount,
+    maxValue: voteType.maxValue,
+    uniqueValues: voteType.uniqueChoices,
+  }
+  if (voteType.minValue !== undefined) bounds.minValue = voteType.minValue
+  if (voteType.minTotalCost !== undefined) bounds.minTotalCost = voteType.minTotalCost
+  if (voteType.costExponent !== undefined) bounds.costExponent = voteType.costExponent
+  return bounds
+}
+
+/**
+ * The largest `costExponent` the chain evaluates a `minTotalCost` with; above it the
+ * chain refuses every ballot instead of computing the power (and refuses to create
+ * such an election).
+ */
+const MAX_MIN_COST_EXPONENT = 8
+
+/** A ballot below the election's `minValue` or `minTotalCost`. */
+export class BallotMinimumError extends Error {
+  /** Which minimum the ballot breaks. */
+  readonly rule: 'minValue' | 'minTotalCost'
+  /** The election's minimum for that rule. */
+  readonly minimum: number
+  /** The offending field value (`minValue`) or the ballot's total cost (`minTotalCost`). */
+  readonly actual: number
+  /** The offending field, for `minValue`. */
+  readonly field?: number
+
+  constructor(rule: 'minValue' | 'minTotalCost', minimum: number, actual: number, message: string, field?: number) {
+    super(message)
+    this.name = 'BallotMinimumError'
+    this.rule = rule
+    this.minimum = minimum
+    this.actual = actual
+    this.field = field
+  }
+}
+
+/**
+ * Assert an encoded wire ballot meets the protocol's minimums, as the chain checks
+ * them: every field `>= minValue`, and `sum(value ** costExponent) >= minTotalCost`
+ * (`0 ** 0` is 1). Absent or 0 means no minimum. The chain rejects a plaintext ballot
+ * below a minimum at submission, but accepts an encrypted one and drops it at tally,
+ * so on a secret election this is the only place the voter can hear about it.
+ *
+ * @throws {@link BallotMinimumError} when the ballot is below a minimum, or an
+ *   `Error` when `minTotalCost` is set with a `costExponent` the chain never evaluates.
+ */
+export function assertBallotMinimums(
+  ballot: number[],
+  bounds: Pick<ProtocolBounds, 'minValue' | 'minTotalCost' | 'costExponent'>
+): void {
+  const minValue = bounds.minValue ?? 0
+  if (minValue > 0) {
+    ballot.forEach((value, field) => {
+      if (value < minValue) {
+        throw new BallotMinimumError(
+          'minValue',
+          minValue,
+          value,
+          `ballot field ${field} is ${value}, below this election's minimum value of ${minValue} — ` +
+            'the vote would not be counted',
+          field
+        )
+      }
+    })
+  }
+  const minTotalCost = bounds.minTotalCost ?? 0
+  // Every protocol carries costExponent; only bounds derived from a type name lack it,
+  // and those carry no minimum either.
+  if (minTotalCost <= 0 || bounds.costExponent === undefined) return
+  const exponent = bounds.costExponent
+  if (exponent > MAX_MIN_COST_EXPONENT) {
+    throw new Error(
+      `this election sets minTotalCost ${minTotalCost} with costExponent ${exponent}, above ` +
+        `${MAX_MIN_COST_EXPONENT}, so the chain refuses every ballot`
+    )
+  }
+  // BigInt: a quadratic ballot's cost can pass 2^53 well before the chain's limits do.
+  const cost = ballot.reduce((sum, value) => sum + BigInt(value) ** BigInt(exponent), 0n)
+  if (cost < BigInt(minTotalCost)) {
+    throw new BallotMinimumError(
+      'minTotalCost',
+      minTotalCost,
+      Number(cost),
+      `this ballot's total cost is ${cost} (each value raised to ${exponent}, summed), below this ` +
+        `election's minimum of ${minTotalCost} — the vote would not be counted`
+    )
+  }
 }
 
 /**

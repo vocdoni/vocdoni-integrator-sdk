@@ -2,7 +2,9 @@ import type { Election, Question, VoteType } from '@vocdoni/api-types'
 import { BallotType, type BallotSelections } from './types'
 import { electionNamesRanked, inferBallotType } from './infer'
 import { normalizeSelections } from './selections'
+import { encodeElectionBallot } from './encode'
 import {
+  assertBallotMinimums,
   duplicateRankedValuesReason,
   pickSlotCollisionReason,
   unrankableProtocolReason,
@@ -27,7 +29,8 @@ import {
  *
  * @param input - Election config with questions and voteType
  * @param selections - The selections to validate
- * @throws Error if selections are invalid, or if the election's ballot config is unsatisfiable
+ * @throws Error if selections are invalid, or if the election's ballot config is unsatisfiable;
+ *   {@link BallotMinimumError} if the encoded ballot is below `minValue` / `minTotalCost`
  */
 export function validateSelections(
   input: Pick<Election, 'questions' | 'voteType'> & { type?: string; meta?: Record<string, unknown> },
@@ -101,6 +104,11 @@ export function validateSelections(
     default:
       throw new Error(`Unknown ballot type: ${ballotType}`)
   }
+
+  // The minimums apply to the wire ballot, not to the selections: a dense multichoice
+  // pick costs 1, a padded abstain slot costs its sentinel. Judge what encodeBallot
+  // would send, so a submit button gated on this agrees with the encoder.
+  assertBallotMinimums(encodeElectionBallot(ballotType, questions, voteType, perQuestion), voteTypeBounds(voteType))
 }
 
 /**

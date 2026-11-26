@@ -21,7 +21,9 @@ export {
   isPickSlotLayout,
 } from './infer'
 export {
+  assertBallotMinimums,
   assertEncodedBallot,
+  BallotMinimumError,
   hasUncastableChoices,
   isUnsatisfiableProtocol,
   isUnsatisfiableQuestion,

@@ -4,6 +4,7 @@ import { declaresRanked, electionNamesRanked, inferBallotType, inferQuestionBall
 import { normalizeSelections } from './selections'
 import { requiredAbstainMaxValue } from './abstain'
 import {
+  assertBallotMinimums,
   assertEncodedBallot,
   duplicateRankedValuesReason,
   pickSlotCollisionReason,
@@ -43,6 +44,7 @@ import {
  *   `maxValue`, or a repeat under `uniqueChoices` — see {@link assertEncodedBallot}),
  *   which refuses only the voter who picked it. Either way the chain would accept the
  *   vote and drop it at tally, so refuse rather than cast a vote that never counts.
+ *   A ballot below `minValue` / `minTotalCost` throws a {@link BallotMinimumError}.
  */
 export function encodeBallot(
   input: Pick<Election, 'questions' | 'voteType'> & { type?: string; meta?: Record<string, unknown> },
@@ -94,31 +96,7 @@ export function encodeBallot(
     }
   }
   const perQuestion = normalizeSelections(input, selections)
-
-  const ballot = ((): number[] => {
-    switch (ballotType) {
-      case BallotType.SingleChoice:
-        return encodeSingleChoice(questions, perQuestion)
-
-      case BallotType.Approval:
-        // approval: dense 0/1 vector, confirmed correct vs vochain scrutinizer
-        // (NOT the legacy Form.tsx index list, which is buggy for >2 options)
-        return encodeApproval(questions[0], perQuestion[0] ?? [])
-
-      case BallotType.MultiChoice:
-        return encodeMultiChoice(voteType, questions[0], perQuestion[0] ?? [])
-
-      case BallotType.Ranked:
-        return encodeRanked(perQuestion[0] ?? [], questions[0]?.choices.length ?? 0)
-
-      case BallotType.Budget:
-      case BallotType.Quadratic:
-        return encodeBudgetOrQuadratic(perQuestion[0] ?? [])
-
-      default:
-        throw new Error(`Unknown ballot type: ${ballotType}`)
-    }
-  })()
+  const ballot = encodeElectionBallot(ballotType, questions, voteType, perQuestion)
 
   // The config being satisfiable does not make this ballot satisfying: a stray
   // selection value or a duplicated unique pick still yields a ballot the chain
@@ -145,7 +123,42 @@ export function encodeBallot(
     }
     throw err
   }
+  assertBallotMinimums(ballot, bounds)
   return ballot
+}
+
+/**
+ * Lay out normalized per-question selections as the election-level wire ballot for
+ * `ballotType`, without judging the result against the protocol bounds.
+ */
+export function encodeElectionBallot(
+  ballotType: BallotType,
+  questions: Question[],
+  voteType: VoteType,
+  perQuestion: number[][]
+): number[] {
+  switch (ballotType) {
+    case BallotType.SingleChoice:
+      return encodeSingleChoice(questions, perQuestion)
+
+    case BallotType.Approval:
+      // approval: dense 0/1 vector, confirmed correct vs vochain scrutinizer
+      // (NOT the legacy Form.tsx index list, which is buggy for >2 options)
+      return encodeApproval(questions[0], perQuestion[0] ?? [])
+
+    case BallotType.MultiChoice:
+      return encodeMultiChoice(voteType, questions[0], perQuestion[0] ?? [])
+
+    case BallotType.Ranked:
+      return encodeRanked(perQuestion[0] ?? [], questions[0]?.choices.length ?? 0)
+
+    case BallotType.Budget:
+    case BallotType.Quadratic:
+      return encodeBudgetOrQuadratic(perQuestion[0] ?? [])
+
+    default:
+      throw new Error(`Unknown ballot type: ${ballotType}`)
+  }
 }
 
 /**
@@ -348,6 +361,8 @@ function ballotProtocolToVoteType(bp: BallotProtocol): VoteType {
     costExponent: bp.costExponent,
     uniqueChoices: bp.uniqueValues,
     costFromWeight: bp.costFromWeight,
+    minValue: bp.minValue,
+    minTotalCost: bp.minTotalCost,
   }
 }
 
@@ -408,6 +423,7 @@ function questionProtocolBounds(question: {
  *   tally while still counting towards `voteCount`, so refuse instead of letting the
  *   voter cast a vote that never counts. The first refuses every voter, the last only
  *   the one whose selection is out of range — see the note in {@link encodeBallot}.
+ *   A ballot below `minValue` / `minTotalCost` throws a {@link BallotMinimumError}.
  */
 export function encodeQuestionBallot(
   question: { ballotProtocol?: BallotProtocol; type?: string; metadata?: Record<string, unknown>; typeSetup?: QuestionTypeSetup; choices: Choice[] },
@@ -505,8 +521,9 @@ export function encodeQuestionBallot(
   // a voter meets a question that published an option nobody can cast, and the bounds
   // error alone reads as if they mistyped something. Failure path only, so the common
   // case never pays for the extra inference.
+  const bounds = questionProtocolBounds(question) ?? { maxCount: ballot.length, maxValue: 0, uniqueValues: false }
   try {
-    assertEncodedBallot(ballot, questionProtocolBounds(question) ?? { maxCount: ballot.length, maxValue: 0, uniqueValues: false })
+    assertEncodedBallot(ballot, bounds)
   } catch (err) {
     const uncastable = uncastableChoicesReason(question)
     if (uncastable) {
@@ -514,5 +531,6 @@ export function encodeQuestionBallot(
     }
     throw err
   }
+  assertBallotMinimums(ballot, bounds)
   return ballot
 }

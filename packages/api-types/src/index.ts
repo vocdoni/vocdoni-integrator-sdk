@@ -314,6 +314,10 @@ export interface VoteType {
   costExponent: number
   uniqueChoices: boolean
   costFromWeight: boolean
+  /** Smallest value any ballot field may take; absent or 0 means no minimum. See {@link BallotProtocol.minValue}. */
+  minValue?: number
+  /** Smallest total cost a ballot may have; absent or 0 means no minimum. See {@link BallotProtocol.minTotalCost}. */
+  minTotalCost?: number
 }
 
 export interface ElectionType {
@@ -415,6 +419,20 @@ export interface BallotProtocol {
   maxTotalCost: number
   maxValue: number
   maxVoteOverwrites: number
+  /**
+   * Smallest value any ballot field may take; absent or 0 means no minimum.
+   * Optional because APIs that predate it omit it.
+   */
+  minValue?: number
+  /**
+   * Smallest total cost a ballot may have, the cost being the sum of
+   * `value ** costExponent` over its fields (`0 ** 0` is 1, so with
+   * `costExponent: 0` it is the number of fields); absent or 0 means no minimum.
+   * The chain rejects a plaintext ballot below it at submission but accepts an
+   * encrypted one and drops it at tally, so `@vocdoni/ballot` checks it before
+   * encoding. Optional because APIs that predate it omit it.
+   */
+  minTotalCost?: number
   /**
    * Every ballot field must carry a distinct value. Applied by the scrutinizer to
    * the **raw field values**, not to "the choices a voter picked" — so it is

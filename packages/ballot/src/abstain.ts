@@ -74,7 +74,10 @@ export function questionSelectionRange(question: {
     (ballotType === BallotType.MultiChoice && !isPickSlotLayout(question))
   ) {
     const max = bp?.maxTotalCost || question.typeSetup?.maxChoices || question.choices.length
-    const min = Math.min(max, Math.max(1, question.typeSetup?.minChoices ?? 1))
+    // Each pick is a 1 field, so with costExponent >= 1 the cost is the pick count and
+    // minTotalCost is a minimum number of picks.
+    const minPicks = bp && bp.costExponent >= 1 ? (bp.minTotalCost ?? 0) : 0
+    const min = Math.min(max, Math.max(1, minPicks, question.typeSetup?.minChoices ?? 1))
     return { min, max }
   }
   // Pick-slot layout (legacy index-list): maxCount is the pick bound. A partial selection is
