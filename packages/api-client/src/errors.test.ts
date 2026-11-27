@@ -21,6 +21,7 @@ describe('typed backend error codes and data', () => {
     expect(ApiErrorCode.VerificationMaxAttempts).toBe(40017)
     expect(ApiErrorCode.AttemptCooldown).toBe(40103)
     expect(ApiErrorCode.ZeroWeightVoter).toBe(40801)
+    expect(ApiErrorCode.NotSupported).toBe(40025)
     expect(ApiErrorCode.InvalidData).toBe(40037)
   })
 
