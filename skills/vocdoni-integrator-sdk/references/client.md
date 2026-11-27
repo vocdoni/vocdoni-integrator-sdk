@@ -139,6 +139,12 @@ Ids to keep straight: `processId` is the process's **Mongo id** (what
 `client.setLang(...)`) before step 0 to override the language; otherwise, the
 voter receives the notification in the organization's default language.
 
+To test SMS 2FA on dev or staging without a phone, give members a test number:
+a backend with `VOCDONI_SMSTESTPREFIXES` set (never production) sends no SMS to
+numbers starting with one of its prefixes, and the OTP is the number's last 6
+digits (`+442079460123` → `460123`), like Stripe's 4242 card. Cooldowns, attempt
+limits and code expiry apply as for real numbers.
+
 Note the full process read (`client.elections.get`) is **public** for
 published processes (saas-backend#599; drafts 404 to non-managers, and
 `eligibleMemberIds` is stripped) — the voter app reads `chainId` and the
@@ -230,6 +236,8 @@ try {
     // 40103 (401): wait before retrying. err.data.coolDownTime is in milliseconds.
   } else if (isApiError(err, ApiErrorCode.ZeroWeightVoter)) {
     // 40801 (401): the voter's census weight is zero.
+  } else if (isApiError(err, ApiErrorCode.NotSupported)) {
+    // 40025 (400): this backend has no SMS/email provider for the census's challenge.
   }
   throw err
 }

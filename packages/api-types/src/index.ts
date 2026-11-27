@@ -1497,6 +1497,7 @@ export const ApiErrorCode = {
   VerificationMaxAttempts: 40017, // 400, rate limited, carries RateLimitedData
   AttemptCooldown: 40103, // 401, cooldown between attempts, carries AttemptCooldownData
   ZeroWeightVoter: 40801, // 401, the voter's census weight is zero
+  NotSupported: 40025, // 400, feature off on this backend: no SMS/email provider for a CSP challenge, or no certificate gateway keys
 } as const
 
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode]
