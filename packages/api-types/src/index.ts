@@ -1497,6 +1497,7 @@ export const ApiErrorCode = {
   VerificationMaxAttempts: 40017, // 400, rate limited, carries RateLimitedData
   AttemptCooldown: 40103, // 401, cooldown between attempts, carries AttemptCooldownData
   ZeroWeightVoter: 40801, // 401, the voter's census weight is zero
+  Maintenance: 50304, // 503, writes refused during scheduled maintenance window
 } as const
 
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode]
@@ -1839,6 +1840,8 @@ export interface InfoResponse {
   chainId: string
   version: string
   goVersion: string
+  /** Scheduled downtime window, present until it ends (RFC 3339 strings). */
+  maintenance?: { from: string; until: string }
 }
 
 // ─── Client config ────────────────────────────────────────────────────────────

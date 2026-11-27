@@ -18,7 +18,13 @@ export {
 export { ApiErrorCode } from '@vocdoni/api-types'
 export { VocdoniApiClient } from './client'
 export { ElectionsClient, ProcessesCspClient } from './elections'
-export { VocdoniApiError, isApiError, isCensusGrowthQuote } from './errors'
+export {
+  VocdoniApiError,
+  isApiError,
+  isCensusGrowthQuote,
+  parseMaintenanceWindow,
+  type MaintenanceWindow,
+} from './errors'
 export {
   isOrganizationAddress,
   isProcessId,

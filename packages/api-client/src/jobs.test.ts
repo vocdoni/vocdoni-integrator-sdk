@@ -362,3 +362,70 @@ describe('jobs.waitFor backoff and transient failures', () => {
     expect(at[1] - at[0]).toBeGreaterThanOrEqual(98)
   })
 })
+
+describe('jobs.waitFor maintenance window', () => {
+  let client: VocdoniApiClient
+
+  beforeEach(() => {
+    client = new VocdoniApiClient({ apiUrl: BASE_URL })
+  })
+
+  const header = (from: number, until: number) => ({
+    'X-Maintenance-Window': `${new Date(from).toISOString()}/${new Date(until).toISOString()}`,
+  })
+
+  it('keeps waiting for a job held through a window longer than timeoutMs, past its end', async () => {
+    const start = Date.now()
+    const until = start + 150
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) =>
+        HttpResponse.json(
+          {
+            jobId: params.jobId as string,
+            type: 'relay_votes',
+            // the backend runs held jobs once the window ends, so this settles after it
+            status: Date.now() < until + 40 ? 'pending' : 'completed',
+          },
+          { headers: Date.now() < until ? header(start, until) : {} },
+        ),
+      ),
+    )
+
+    const job = await client.jobs.waitFor('job-1', { intervalMs: 10, maxIntervalMs: 10, timeoutMs: 50 })
+    expect(job.status).toBe('completed')
+    expect(Date.now()).toBeGreaterThanOrEqual(until + 40)
+  })
+
+  it('keeps retrying transient poll failures that announce the window past the original deadline', async () => {
+    const start = Date.now()
+    const until = start + 150
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) =>
+        Date.now() < until
+          ? HttpResponse.json({ error: 'unavailable' }, { status: 503, headers: header(start, until) })
+          : HttpResponse.json({ jobId: params.jobId as string, type: 'relay_votes', status: 'completed' }),
+      ),
+    )
+
+    const job = await client.jobs.waitFor('job-1', { intervalMs: 10, maxIntervalMs: 10, timeoutMs: 50 })
+    expect(job.status).toBe('completed')
+  })
+
+  it('does not extend the deadline for a window that starts after it', async () => {
+    const start = Date.now()
+    server.use(
+      http.get(`${BASE_URL}/jobs/:jobId`, ({ params }) =>
+        HttpResponse.json(
+          { jobId: params.jobId as string, type: 'relay_votes', status: 'pending' },
+          { headers: header(start + 1_000, start + 2_000) },
+        ),
+      ),
+    )
+
+    await expect(
+      client.jobs.waitFor('job-1', { intervalMs: 10, maxIntervalMs: 10, timeoutMs: 50 }),
+    ).rejects.toThrow('Timed out waiting for job job-1')
+    expect(Date.now() - start).toBeLessThan(500)
+  })
+})
+

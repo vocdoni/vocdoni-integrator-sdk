@@ -1,6 +1,7 @@
 import type { JobsResponse, JobStatusResponse } from '@vocdoni/api-types'
 import type { UpFetch } from 'up-fetch'
-import { handleError, VocdoniApiError } from './errors'
+import { handleError, MAINTENANCE_HEADER, parseMaintenanceWindow, VocdoniApiError } from './errors'
+import type { MaintenanceWindow } from './errors'
 import { path } from './path'
 
 /**
@@ -45,7 +46,9 @@ export interface WaitForJobOptions {
   maxIntervalMs?: number
   /**
    * Max time to wait before giving up, in ms. Default 300000 (5 min). Transient poll failures
-   * (network errors, 429, 502, 503, 504) are retried until then, or until `maxFailingMs`.
+   * (network errors, 429, 502, 503, 504) are retried until then, or until `maxFailingMs`. When a
+   * poll announces a maintenance window that starts before the deadline, the deadline moves to
+   * `timeoutMs` after the window ends, since the backend holds the job pending until then.
    */
   timeoutMs?: number
   /**
@@ -111,7 +114,21 @@ export class JobsClient {
   constructor(private readonly fetch: UpFetch) {}
 
   async get(jobId: string, signal?: AbortSignal): Promise<JobStatusResponse> {
-    return this.fetch<JobStatusResponse>(path`/jobs/${jobId}`, { signal }).catch(handleError)
+    return (await this.poll(jobId, signal)).job
+  }
+
+  /** Gets a job along with the maintenance window its response announced, if any. */
+  private async poll(
+    jobId: string,
+    signal?: AbortSignal,
+  ): Promise<{ job: JobStatusResponse; maintenance?: MaintenanceWindow }> {
+    return this.fetch(path`/jobs/${jobId}`, {
+      signal,
+      parseResponse: async (res) => ({
+        job: (await res.json()) as JobStatusResponse,
+        maintenance: parseMaintenanceWindow(res.headers.get(MAINTENANCE_HEADER)),
+      }),
+    }).catch(handleError)
   }
 
   /**
@@ -132,7 +149,7 @@ export class JobsClient {
   /**
    * Poll a job until it reaches a terminal state, backing off from `intervalMs` to
    * `maxIntervalMs` and retrying transient poll failures for up to `maxFailingMs` in a row,
-   * waiting at least their `Retry-After`.
+   * waiting at least their `Retry-After`, and extending the deadline over a maintenance window.
    * @returns The completed job (status `completed`).
    * @throws {JobFailedError} when the job ends as `failed`.
    */
@@ -146,7 +163,11 @@ export class JobsClient {
       onPoll,
     } = opts
     const maxIntervalMs = Math.max(opts.maxIntervalMs ?? DEFAULT_MAX_INTERVAL_MS, intervalMs)
-    const deadline = Date.now() + timeoutMs
+    let deadline = Date.now() + timeoutMs
+    // A window that starts before the deadline holds the job until it ends: wait timeoutMs from there.
+    const extendOver = (m?: MaintenanceWindow) => {
+      if (m && m.from.getTime() < deadline) deadline = Math.max(deadline, m.until.getTime() + timeoutMs)
+    }
     let answeredAt = Date.now()
     let interval = intervalMs
 
@@ -155,10 +176,13 @@ export class JobsClient {
       let job: JobStatusResponse | undefined
       let retryAfterMs = 0
       try {
-        job = await this.get(jobId, signal)
+        const res = await this.poll(jobId, signal)
+        job = res.job
+        extendOver(res.maintenance)
         answeredAt = Date.now()
       } catch (err) {
         signal?.throwIfAborted()
+        if (err instanceof VocdoniApiError) extendOver(err.maintenance)
         const now = Date.now()
         if (!isTransientPollError(err) || now >= deadline || now - answeredAt >= maxFailingMs) throw err
         retryAfterMs = (err instanceof VocdoniApiError && err.retryAfterMs) || 0
