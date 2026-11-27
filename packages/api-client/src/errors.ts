@@ -10,6 +10,8 @@ export class VocdoniApiError extends Error {
   data?: unknown
   /** The `Retry-After` header in ms, when the response carried a valid one (e.g. on 429/503). */
   retryAfterMs?: number
+  /** The scheduled maintenance window the response announced, if any (see {@link MaintenanceWindow}). */
+  maintenance?: MaintenanceWindow
 
   constructor(status: number, body: unknown, message: string, code?: number, data?: unknown) {
     super(message)
@@ -21,12 +23,32 @@ export class VocdoniApiError extends Error {
   }
 }
 
-/** up-fetch's rejection error, carrying the `Retry-After` header that its default one drops. */
-type RejectedResponseError = ResponseError & { retryAfter?: string | null }
+/**
+ * A scheduled downtime of the chain behind the API. The backend announces it in the
+ * `X-Maintenance-Window` header of every response until it ends; inside it, writes fail with
+ * `ApiErrorCode.Maintenance` and queued jobs stay pending until `until`.
+ */
+export interface MaintenanceWindow {
+  from: Date
+  until: Date
+}
+
+/** The response header that announces a {@link MaintenanceWindow}. */
+export const MAINTENANCE_HEADER = 'x-maintenance-window'
+
+/** Parses an `X-Maintenance-Window` value, `<from>/<until>` in RFC 3339. */
+export function parseMaintenanceWindow(value: string | null | undefined): MaintenanceWindow | undefined {
+  const [from, until] = (value ?? '').split('/').map((t) => new Date(t))
+  if (!from || !until || Number.isNaN(from.getTime()) || Number.isNaN(until.getTime())) return undefined
+  return { from, until }
+}
+
+/** up-fetch's rejection error, carrying the headers that its default one drops. */
+type RejectedResponseError = ResponseError & { retryAfter?: string | null; maintenance?: string | null }
 
 /**
  * Builds the error of a rejected response as up-fetch's default `parseRejected` does, keeping the
- * `Retry-After` header for {@link handleError}.
+ * `Retry-After` and `X-Maintenance-Window` headers for {@link handleError}.
  */
 export async function parseRejected(res: Response): Promise<RejectedResponseError> {
   const data: unknown = await res
@@ -40,6 +62,7 @@ export async function parseRejected(res: Response): Promise<RejectedResponseErro
     data,
   })
   err.retryAfter = res.headers.get('retry-after')
+  err.maintenance = res.headers.get(MAINTENANCE_HEADER)
   return err
 }
 
@@ -65,6 +88,7 @@ export function handleError(err: unknown): never {
     const errData = data && typeof data === 'object' ? data.data : undefined
     const apiErr = new VocdoniApiError(err.status, err.data, message, code, errData)
     apiErr.retryAfterMs = parseRetryAfter((err as RejectedResponseError).retryAfter)
+    apiErr.maintenance = parseMaintenanceWindow((err as RejectedResponseError).maintenance)
     throw apiErr
   }
   throw err

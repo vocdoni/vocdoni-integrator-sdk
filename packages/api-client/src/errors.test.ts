@@ -2,7 +2,7 @@ import { ApiErrorCode } from '@vocdoni/api-types'
 import { http, HttpResponse } from 'msw'
 import { server } from '../../../mocks/server'
 import { VocdoniApiClient } from './client'
-import { isApiError } from './errors'
+import { isApiError, parseMaintenanceWindow } from './errors'
 
 const BASE_URL = 'http://localhost'
 const ORG = '0xorg'
@@ -115,3 +115,39 @@ describe('typed backend error codes and data', () => {
     }
   })
 })
+
+describe('maintenance window', () => {
+  const window = '2026-12-01T08:00:00Z/2026-12-01T10:00:00Z'
+
+  it('turns a 50304 write refusal into a typed error with the window and Retry-After', async () => {
+    const client = new VocdoniApiClient({ apiUrl: BASE_URL })
+    server.use(
+      http.post(`${BASE_URL}/processes/${PROCESS_ID}/auth/0`, () =>
+        HttpResponse.json(
+          { error: 'maintenance', code: ApiErrorCode.Maintenance },
+          { status: 503, headers: { 'Retry-After': '7200', 'X-Maintenance-Window': window } },
+        ),
+      ),
+    )
+
+    const err = await client.elections.authStep0(PROCESS_ID, { memberNumber: '42' }).catch((e: unknown) => e)
+
+    expect(isApiError(err, ApiErrorCode.Maintenance)).toBe(true)
+    if (isApiError(err, ApiErrorCode.Maintenance)) {
+      expect(err.retryAfterMs).toBe(7_200_000)
+      expect(err.maintenance?.until.toISOString()).toBe('2026-12-01T10:00:00.000Z')
+    }
+  })
+
+  it('parses the header and ignores malformed values', () => {
+    expect(parseMaintenanceWindow(window)).toEqual({
+      from: new Date('2026-12-01T08:00:00Z'),
+      until: new Date('2026-12-01T10:00:00Z'),
+    })
+    expect(parseMaintenanceWindow(null)).toBeUndefined()
+    expect(parseMaintenanceWindow('')).toBeUndefined()
+    expect(parseMaintenanceWindow('2026-12-01T08:00:00Z')).toBeUndefined()
+    expect(parseMaintenanceWindow('nope/nope')).toBeUndefined()
+  })
+})
+
